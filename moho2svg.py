@@ -244,14 +244,26 @@ wrong, version of this rule) gets several real documents backwards:
                     anything else (typically 0) - clipped to the union of all
                        masking==2 siblings
 
-One exception found so far: a *document's top-level* layer can have
-group_mask=2 with masking==2 children and yet Moho clips nothing there in
-practice (confirmed on the Bandit rig, whose root BoneLayer fits this pattern).
-Exporter._mask_source_shapes excludes the top level for this reason.  It is not
-otherwise known what distinguishes "top-level, therefore inert" from a nested
-BoneLayer that does mask (confirmed on a second rig, "kafasi") - if a future
-document contradicts this exclusion, --mask-container is available to force
-masking on a specific layer by name regardless of what group_mask says.
+A masking==2 child does not always carry its own mesh: a GroupLayer can be
+masking==2 purely to act as a masking container (e.g. "BellyTexture" in the
+Bandit rig, a GroupLayer whose own `mesh` is None).  Its silhouette is then,
+recursively, whatever ITS OWN masking==2 child/children define - the same
+shapes that already act as *that* container's internal group_mask source
+(see Layer.group_mask), reused as the container's contribution to its
+*parent's* mask.  See Exporter._mask_source_shapes.
+
+An earlier version of this tool special-cased (and unconditionally disabled)
+masking whenever the masking *container* was the document's own top-level
+layer, based on a document (the Bandit rig) where masking appeared not to
+apply there.  That was the wrong fix for the bug above: the specific
+masking==2 sibling being tested (BellyTexture) is a mesh-less GroupLayer, so
+the un-recursed code silently contributed zero mask geometry regardless of
+nesting depth - nothing to do with being at the top level.  Confirmed against
+the Bandit rig's own Head_DarkBlue (masking==0) / BellyTexture (masking==2)
+pair - both direct children of the document's root BoneLayer - masking now
+applies there the same as at any other depth.  `--mask-container` remains
+available to force masking on a specific layer by name regardless of what
+group_mask says, for any future document that contradicts this.
 
 --------------------------------------------------------------------------------
 SMART BONES
@@ -1936,18 +1948,37 @@ class Exporter:
 
     # -- masking --------------------------------------------------------------
 
-    def _mask_source_shapes(self, layer: Layer, deform: list[DeformStep], frame: float) -> list[str]:
-        """Every shape of a *mask-source* layer (masking == 2) as a filled
-        silhouette path, in document pixel space."""
-        if layer.mesh is None:
-            return []
-        geometries = self._curve_geometries(layer.mesh, frame)
-        to_px = self._deformed_pixel_mapper(deform, frame, layer)
-        paths = []
-        for shape in layer.mesh.shapes:
-            d = build_path_d(geometries, shape.edges, to_px)
-            if d:
-                paths.append(d)
+    def _mask_source_shapes(self, layer: Layer, ancestors: Sequence[Layer],
+                             frame: float) -> list[str]:
+        """Every shape contributed by a *mask-source* layer (masking == 2) as
+        filled silhouette paths, in document pixel space.  `ancestors` is
+        `layer`'s own ancestor chain, root-first, NOT including `layer`
+        itself.
+
+        A mask-source layer does not always carry its own mesh: a GroupLayer
+        can be marked masking == 2 purely to act as a masking container (seen
+        in real files, e.g. "BellyTexture" in the Bandit rig, whose own
+        `mesh` is None).  In that case its silhouette is, recursively,
+        whatever ITS OWN masking == 2 child/children define - exactly the
+        same shapes that already act as that container's *internal*
+        group_mask source (see Layer.group_mask), simply reused here as the
+        container's contribution to its *parent's* mask.  Confirmed against
+        BellyTexture: its one masking==2 child ("Body") is precisely the
+        shape Moho's own export uses both as BellyTexture's internal
+        <clipPath> and (once this recursion is applied) as BellyTexture's
+        contribution to masking its sibling Head_DarkBlue."""
+        paths: list[str] = []
+        if layer.mesh is not None:
+            deform = build_deform_chain(ancestors, layer, frame, self)
+            geometries = self._curve_geometries(layer.mesh, frame)
+            to_px = self._deformed_pixel_mapper(deform, frame, layer)
+            for shape in layer.mesh.shapes:
+                d = build_path_d(geometries, shape.edges, to_px)
+                if d:
+                    paths.append(d)
+        for child in layer.children:
+            if child.masking == 2:
+                paths += self._mask_source_shapes(child, ancestors + (layer,), frame)
         return paths
 
     def _mask_sources(self, container: Optional[Layer],
@@ -1958,8 +1989,11 @@ class Exporter:
         ITSELF (exactly the ancestor chain shared by `container`'s children -
         both call sites, export_layer and export_document, already have such
         a chain on hand).  See the module docstring's MASKING section for the
-        group_mask/masking rules and the top-level exception, which
-        `len(chain_through_container) <= 1` detects.
+        group_mask/masking rules.  This applies uniformly regardless of
+        `container`'s depth, including the document's top-level layer - see
+        the module docstring for why an earlier version of this tool
+        special-cased (and disabled) top-level masking entirely, and why that
+        turned out to be the wrong fix for a different, unrelated bug.
 
         NOTE: this is always evaluated with an EMPTY Smart Bone context
         (self._active_actions), never whatever dials are active for the mesh
@@ -1974,16 +2008,12 @@ class Exporter:
         if container is None:
             return []
         forced = container.name in self.settings.forced_mask_containers
-        if not forced:
-            if not container.group_mask:
-                return []
-            if len(chain_through_container) <= 1:
-                return []
+        if not forced and not container.group_mask:
+            return []
         paths = []
         for child in container.children:
             if child.masking == 2:
-                deform = build_deform_chain(chain_through_container, child, frame, self)
-                paths += self._mask_source_shapes(child, deform, frame)
+                paths += self._mask_source_shapes(child, chain_through_container, frame)
         return paths
 
     def _mask_element(self, paths: Sequence[str], mask_id: str, indent: str) -> str:
