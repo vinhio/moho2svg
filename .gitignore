@@ -5,3 +5,9 @@ __pycache__/
 
 # Moho project files
 moho/
+
+# Symlink to the Moho app's installed brush textures (make styles.brushes)
+styles/Brushes
+
+# Scratch analysis notes
+tmp/

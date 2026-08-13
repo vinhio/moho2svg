@@ -208,6 +208,59 @@ counter-wound rings combined with fill-rule=evenodd (drawing it as one continuou
 outline would self-overlap at the seam).
 
 --------------------------------------------------------------------------------
+BRUSH STROKES (TEXTURED/DAB LINE STYLES)
+--------------------------------------------------------------------------------
+A named style's line can be a textured "brush" (e.g. "Wet Ink", "CK Ink DIFF
+SMASHER") instead of a plain, uniform-width line: Moho stamps a small greyscale
+texture image repeatedly along the path (jittered in rotation, spaced as a
+fraction of its own size) rather than stroking it - visible in Moho itself as a
+soft, grainy, hand-painted look (e.g. a cheek "blush" or an ink-smear shadow),
+which a plain SVG <path stroke> cannot reproduce (it is always a hard-edged,
+perfectly uniform band).
+
+This tool approximates it, but ONLY for a style whose `brush_name` names a file
+that actually exists in `--brush-dir` (default `styles/Brushes/` - not shipped
+in this repo; `make styles.brushes` symlinks it straight to Moho's own
+installed brush folder, e.g. `.../Moho.app/Contents/Resources/Support/Common/
+Brushes/`, so every brush Moho itself ships is available with no copying).
+Any brush without a matching file - which, with no `styles/Brushes/` at all,
+is every brush - falls back to the plain uniform stroke exactly as before
+this existed, so nothing regresses for documents/styles nobody has supplied a
+texture for.
+
+BrushStampOutliner samples the traced path at even arc-length intervals
+(`brush_spacing` * dab diameter, dab diameter taken as the ordinary computed
+stroke width) and emits one dab per sample: a `<g transform="translate(...)
+rotate(...)">` containing a colour-filled rect, MASKED by the brush texture -
+the texture's own RGB is irrelevant (BrushExporter._brush_mask_ref inverts it
+with a shared <feColorMatrix> filter so the texture's dark "ink" pixels become
+the *visible* part of an SVG luminance mask, and light/transparent background
+pixels stay invisible), so any texture works as a stamp regardless of whether
+it happens to be a dark blob on white (Brush502.png) or a dark splatter on
+transparent (CK Ink DIFF SMASHER.png).  The rect is filled with the *resolved*
+line_color/opacity, i.e. the tint Moho itself applies when a style's
+`brush_tint` is true (the only case implemented - a brush with brush_tint
+false, meaning "use the texture's own multi-colour pixels as-is", is not
+attempted here and simply falls back to a plain stroke too).
+
+Rotation per dab is `(tangent angle if brush_align else 0) + a uniform-random
+value in [-brush_jitter/2, +brush_jitter/2]`, seeded deterministically per
+shape (so re-running the exporter on the same document reproduces the same
+jitter instead of a different random result every time) rather than from
+Moho's own actual per-dab randomisation, which is not recoverable from the
+saved document.  `brush_angle_drift`, `brush_randomize` (per-dab size
+variance), `brush_merged_alpha` (whether overlapping dabs should cap combined
+opacity instead of compounding it) and `brush_rand_order` are read from the
+style but not implemented - overlapping semi-transparent dabs simply compound
+via ordinary SVG alpha blending in file order, which is the `brush_merged_alpha
+= false` behaviour by construction, but coincidental for the other three.
+There is no reference Moho SVG export of a brushed stroke to calibrate dab
+size/density against (Moho's own SVG exporter does not reproduce brush
+texture either, as far as this tool's development has observed - see KNOWN
+GAPS), so this is a best-effort approximation, not a confirmed-exact formula
+like the rest of this file aims for.
+
+--------------------------------------------------------------------------------
 BOOLEAN SHAPE COMBINATIONS (combo_mode)
 --------------------------------------------------------------------------------
 A shape's `combo_mode` says how it combines with the shape(s) drawn immediately
@@ -347,6 +400,12 @@ KNOWN GAPS
     skipped rather than guessed at.
   - Physics (wind/gravity/dynamics), IK, and layer_effects/layer_shadow are
     ignored; none of them affect a flat vector export of a single frame.
+  - Textured "brush" line styles (see BRUSH STROKES) are only approximated,
+    and only for a brush whose PNG the caller has supplied via --brush-dir -
+    dab size/density is not calibrated against any real Moho reference, a
+    brush_tint=false (native multi-colour texture, not tinted) style is not
+    attempted at all, and brush_angle_drift/brush_randomize/brush_rand_order
+    are read but not implemented.
 
 --------------------------------------------------------------------------------
 PORTING NOTES (E.G. TO GO)
@@ -402,10 +461,13 @@ reward either; a Go port should feel free to keep these as plain functions too.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import os
+import random
 import re
+import struct
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -741,6 +803,11 @@ class ResolvedStyle:
     line_width: Any
     line_caps: int
     fill_style: Optional[dict]      # gradient spec, or None for a flat fill
+    brush_name: Optional[str]       # texture brush stamp name, or None for a plain stroke
+    brush_jitter: float             # random rotation spread (radians) per dab
+    brush_spacing: float            # dab spacing, as a fraction of the dab's own diameter
+    brush_align: bool               # rotate each dab to the local path tangent
+    brush_tint: bool                # recolour the (greyscale) texture to line_color
 
     @staticmethod
     def resolve(shape_raw: dict, styles: "StyleTable") -> "ResolvedStyle":
@@ -773,12 +840,26 @@ class ResolvedStyle:
                 out["fill_style"] = named["fill_style"]
             if not own.get("define_line_width") and "line_caps" in named:
                 out["line_caps"] = named["line_caps"]
+            # Brush texture parameters live only on named styles, never
+            # inline on a shape (mirroring fill_style/gradients above) - see
+            # the module docstring's BRUSH STROKES section.  Piggybacks on
+            # the same define_line_width flag as line_width/line_caps, since
+            # a brush only ever styles the line.
+            if named.get("define_line_width") and not own.get("define_line_width") and named.get("brush_name"):
+                for brush_field in ("brush_name", "brush_jitter", "brush_spacing",
+                                    "brush_align", "brush_tint"):
+                    out[brush_field] = named.get(brush_field)
         return ResolvedStyle(
             fill_color=out.get("fill_color"),
             line_color=out.get("line_color"),
             line_width=out.get("line_width"),
             line_caps=out.get("line_caps", 1),
             fill_style=out.get("fill_style") if isinstance(out.get("fill_style"), dict) else None,
+            brush_name=out.get("brush_name") or None,
+            brush_jitter=out.get("brush_jitter") or 0.0,
+            brush_spacing=out.get("brush_spacing") or 0.0,
+            brush_align=bool(out.get("brush_align")),
+            brush_tint=bool(out.get("brush_tint", True)),
         )
 
     def line_cap_name(self) -> str:
@@ -1562,6 +1643,88 @@ class TaperedStrokeOutliner:
         return " ".join(d)
 
 
+@dataclass(frozen=True)
+class BrushDab:
+    """One stamp of a textured brush stroke: a dab of `diameter_px` centred at
+    `pos` (pixel space), rotated by `angle` radians.  See the module
+    docstring's BRUSH STROKES section and BrushStampOutliner.build."""
+    pos: Vec2
+    angle: float
+    diameter_px: float
+
+
+class BrushStampOutliner:
+    """Samples a traced path into a series of BrushDab, approximating Moho's
+    own textured/dab brush strokes - see the module docstring's BRUSH STROKES
+    section for the algorithm and its known simplifications.
+    """
+
+    def __init__(self, samples_per_segment: int = 12):
+        self.samples_per_segment = samples_per_segment
+
+    def build(self, geometries: list[CurveGeometry], edges: Sequence[Edge],
+              to_px: Callable[[Vec2], Vec2], diameter_px: float, spacing_frac: float,
+              align: bool, jitter: float, seed: Any) -> list[BrushDab]:
+        traced = PathTracer.trace(geometries, edges)
+
+        runs: list[list[tuple[Vec2, Vec2, Vec2, Vec2]]] = []
+        current: list[tuple[Vec2, Vec2, Vec2, Vec2]] = []
+        for seg in traced:
+            cg = geometries[seg.curve]
+            if not cg.segments[seg.segment].on:
+                if current:
+                    runs.append(current)
+                    current = []
+                continue
+            if current and current[-1][3].distance_to(seg.p0) > 1e-9:
+                runs.append(current)
+                current = []
+            current.append((seg.p0, seg.c1, seg.c2, seg.p1))
+        if current:
+            runs.append(current)
+
+        # random.Random(str) hashes deterministically (unlike builtin hash(),
+        # which is salted per-process) - re-running on the same document must
+        # reproduce the same jitter, not a new one every time.
+        rng = random.Random(str(seed))
+        # Clamp: a brush_spacing of 0 (or a tiny fraction) would otherwise mean
+        # "infinite dabs" - not a real Moho setting, just defensive.
+        spacing = max(diameter_px * spacing_frac, diameter_px * 0.05, 0.5)
+        half_jitter = jitter / 2.0
+        dabs: list[BrushDab] = []
+        for run in runs:
+            samples: list[Vec2] = []
+            for p0, c1, c2, p1 in run:
+                for i in range(self.samples_per_segment + 1):
+                    t = i / self.samples_per_segment
+                    point = cubic_bezier_point(p0, c1, c2, p1, t)
+                    if i == 0 and samples and samples[-1].distance_to(point) < 1e-12:
+                        continue
+                    samples.append(point)
+            pixels = [to_px(p) for p in samples]
+            n = len(pixels)
+            if n < 2:
+                if n == 1:
+                    dabs.append(BrushDab(pixels[0], rng.uniform(-half_jitter, half_jitter), diameter_px))
+                continue
+            carry = 0.0
+            for i in range(n - 1):
+                a, b = pixels[i], pixels[i + 1]
+                seg_len = a.distance_to(b)
+                if seg_len <= 1e-9:
+                    continue
+                tangent_angle = math.atan2(b.y - a.y, b.x - a.x) if align else 0.0
+                dist = carry
+                while dist < seg_len:
+                    t = dist / seg_len
+                    pos = a + (b - a).scaled(t)
+                    angle = tangent_angle + rng.uniform(-half_jitter, half_jitter)
+                    dabs.append(BrushDab(pos, angle, diameter_px))
+                    dist += spacing
+                carry = dist - seg_len
+        return dabs
+
+
 # ============================================================================
 # ==== BONE DEFORMATION ("SKINNING")  (-> skin.go)                       ====
 # ============================================================================
@@ -1731,6 +1894,16 @@ def parse_path_bbox(paths: Sequence[str], pad: float = 50.0) -> tuple[float, flo
     return (min(xs) - pad, min(ys) - pad, max(xs) - min(xs) + 2 * pad, max(ys) - min(ys) + 2 * pad)
 
 
+def png_dimensions(data: bytes) -> tuple[int, int]:
+    """(width, height) of a PNG file's pixels, read directly from its IHDR
+    chunk - avoids a Pillow/image-library dependency for the one thing
+    BrushStampOutliner needs to know about a brush texture (see BRUSH
+    STROKES).  The IHDR chunk is always the first chunk, immediately after
+    the fixed 8-byte PNG signature: 4-byte length + 4-byte "IHDR" + 4-byte
+    width + 4-byte height, both big-endian."""
+    return struct.unpack(">II", data[16:24])
+
+
 # ============================================================================
 # ==== RENDER SETTINGS  (-> render.go: fields of an Exporter/Options)    ====
 # ============================================================================
@@ -1749,6 +1922,8 @@ class RenderSettings:
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0
     viewbox_padding: float = 8.0
+    brush_dir: Optional[str] = None          # --brush-dir; BrushStampOutliner / Exporter._brush_mask_ref
+    brush_samples_per_segment: int = 12          # BrushStampOutliner
 
 
 # ============================================================================
@@ -1779,10 +1954,13 @@ class Exporter:
         self.settings = settings or RenderSettings()
         self.bezier = BezierReconstructor(self.settings.tangent_bias)
         self.tapered_outliner = TaperedStrokeOutliner(self.settings.bezier_samples_per_segment)
+        self.brush_outliner = BrushStampOutliner(self.settings.brush_samples_per_segment)
         self._skin_cache: dict[tuple[Layer, float, tuple[ActiveAction, ...]], Skinner] = {}
         self._next_id = 0
         self._active_actions: list[ActiveAction] = []
         self._layer_scale: float = 1.0
+        self._brush_defs: list[str] = []             # <filter>/<mask> defs, emitted once per export
+        self._brush_mask_ids: dict[str, Optional[tuple[str, int, int]]] = {}  # brush_name -> (mask_id, w, h)
 
     # -- channel evaluation --------------------------------------------------
 
@@ -1946,6 +2124,66 @@ class Exporter:
                   f'{"".join(stops)}</linearGradient>')
         return el, f"url(#{gradient_id})"
 
+    # -- brush textures -------------------------------------------------------
+
+    def _brush_mask_ref(self, brush_name: str) -> Optional[tuple[str, int, int]]:
+        """(mask_id, texture_width_px, texture_height_px) for `brush_name`, if
+        `--brush-dir` is set and a same-named file exists there - otherwise
+        None (the caller falls back to a plain stroke).  See the module
+        docstring's BRUSH STROKES section.
+
+        The <mask>/<filter> defs are built at most once per brush per export
+        (cached in self._brush_mask_ids) and collected in self._brush_defs,
+        which _wrap prepends to the document once rendering is done - shared
+        by every shape/style that uses the same brush, however many that is.
+        """
+        if brush_name in self._brush_mask_ids:
+            return self._brush_mask_ids[brush_name]
+        result: Optional[tuple[str, int, int]] = None
+        brush_dir = self.settings.brush_dir
+        if brush_dir:
+            path = os.path.join(brush_dir, brush_name)
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    raw = f.read()
+                width, height = png_dimensions(raw)
+                b64 = base64.b64encode(raw).decode("ascii")
+                if not self._brush_defs:
+                    # Inverts RGB so a texture's dark "ink" pixels become the
+                    # *visible* part of an SVG luminance mask (see BRUSH
+                    # STROKES) - shared by every brush, defined once.
+                    self._brush_defs.append(
+                        '  <filter id="brush_ink_invert" x="0" y="0" width="1" height="1">\n'
+                        '    <feColorMatrix type="matrix" values='
+                        '"-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0"/>\n'
+                        '  </filter>')
+                mask_id = f"brush_{self._next_def_id()}"
+                hw, hh = width / 2.0, height / 2.0
+                self._brush_defs.append(
+                    f'  <mask id="{mask_id}" maskUnits="userSpaceOnUse" '
+                    f'x="{-hw:.1f}" y="{-hh:.1f}" width="{width}" height="{height}">\n'
+                    f'    <image href="data:image/png;base64,{b64}" '
+                    f'x="{-hw:.1f}" y="{-hh:.1f}" width="{width}" height="{height}" '
+                    f'filter="url(#brush_ink_invert)"/>\n'
+                    f'  </mask>')
+                result = (mask_id, width, height)
+        self._brush_mask_ids[brush_name] = result
+        return result
+
+    def _brush_dab_svg(self, dab: "BrushDab", mask_id: str, tex_w: int, tex_h: int,
+                        hex_color: str, alpha: float, indent: str) -> str:
+        """One dab's markup: a coloured rect the texture's own aspect ratio,
+        scaled/rotated/positioned to `dab`, masked by the (already-registered)
+        brush texture mask `mask_id`."""
+        op = "" if alpha >= 1 else f' fill-opacity="{alpha:.3f}"'
+        scale = dab.diameter_px / max(tex_w, tex_h)
+        hw, hh = tex_w / 2.0, tex_h / 2.0
+        return (f'{indent}<g transform="translate({dab.pos.x:.2f} {dab.pos.y:.2f}) '
+                f'rotate({math.degrees(dab.angle):.2f}) scale({scale:.4f})" '
+                f'mask="url(#{mask_id})">'
+                f'<rect x="{-hw:.1f}" y="{-hh:.1f}" width="{tex_w}" height="{tex_h}" '
+                f'fill="{hex_color}"{op}/></g>')
+
     # -- masking --------------------------------------------------------------
 
     def _mask_source_shapes(self, layer: Layer, ancestors: Sequence[Layer],
@@ -2042,10 +2280,14 @@ class Exporter:
               title: str = "") -> str:
         x0, y0, vw, vh = viewbox
         title_el = f'  <title>{svg_escape(title)}</title>\n' if title else ""
+        # self._brush_defs (the shared invert <filter> plus one <mask> per
+        # brush texture actually used) is populated lazily while `inner` is
+        # being rendered, so it can only be prepended here, at the end.
+        body = self._brush_defs + list(inner)
         return (f'<svg xmlns="http://www.w3.org/2000/svg" '
                 f'viewBox="{x0:.3f} {y0:.3f} {vw:.3f} {vh:.3f}" '
                 f'width="{vw:.0f}" height="{vh:.0f}">\n{title_el}'
-                + "\n".join(inner) + "\n</svg>\n")
+                + "\n".join(body) + "\n</svg>\n")
 
     # -- top-level exports ----------------------------------------------------
 
@@ -2160,9 +2402,11 @@ class Exporter:
 @dataclass
 class _GroupMember:
     """One shape currently buffered in the boolean-combination group being
-    assembled by ShapeGroupRenderer._flush.  Exactly one of stroke_path /
-    taper_path is ever non-empty for a shape that has an outline at all -
-    which one depends on whether its outline needs TaperedStrokeOutliner."""
+    assembled by ShapeGroupRenderer._flush.  At most one of stroke_path /
+    taper_path / brush_dabs is ever non-empty for a shape that has an outline
+    at all - which one depends on whether its outline needs
+    TaperedStrokeOutliner or (see the module docstring's BRUSH STROKES
+    section) a textured brush style with a texture file on hand."""
     fill_path: str
     combo_mode: int
     name: str
@@ -2172,6 +2416,8 @@ class _GroupMember:
     line_cap: str
     stroke_path: str
     taper_path: str
+    brush_dabs: list = field(default_factory=list)
+    brush_mask_ref: Optional[tuple[str, int, int]] = None
 
 
 class ShapeGroupRenderer:
@@ -2266,16 +2512,28 @@ class ShapeGroupRenderer:
                              f'fill="{paint}"{op} fill-rule="evenodd" stroke="none"{clip}/>')
 
         stroke_path, taper_path = "", ""
+        brush_dabs: list = []
+        brush_mask_ref = None
+        if shape.has_outline and not tapered and style.brush_name and style.brush_tint:
+            brush_mask_ref = exp._brush_mask_ref(style.brush_name)
         if shape.has_outline:
             if tapered:
                 taper_path = exp.tapered_outliner.build(self.geometries, shape.edges,
                                                          self.to_px, stroke_width_px)
+            elif brush_mask_ref is not None:
+                diameter_px = stroke_width_px if stroke_width_px > 0 else 1.0
+                spacing_frac = style.brush_spacing if style.brush_spacing > 0 else 0.25
+                seed = (name, shape.id, len(self.mesh.points))
+                brush_dabs = exp.brush_outliner.build(
+                    self.geometries, shape.edges, self.to_px, diameter_px, spacing_frac,
+                    style.brush_align, style.brush_jitter, seed)
             else:
                 stroke_path = build_path_d(self.geometries, shape.edges, self.to_px,
                                            visible_only=True, close=False)
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
-                                        line_hex, line_alpha, cap, stroke_path, taper_path))
+                                        line_hex, line_alpha, cap, stroke_path, taper_path,
+                                        brush_dabs, brush_mask_ref))
         for edge in shape.edges:
             seg = self.geometries[edge.curve].segments[edge.segment]
             self.pixel_points += [self.to_px(seg.p0), self.to_px(seg.c1),
@@ -2298,28 +2556,40 @@ class ShapeGroupRenderer:
         base = self._group[0]
         solid = [m.fill_path for m in self._group if m.combo_mode in (0, 1)]
         for member in self._group:
-            if not member.stroke_path and not member.taper_path:
+            if not member.stroke_path and not member.taper_path and not member.brush_dabs:
                 continue
             style_source = base if member.combo_mode in (0, 1) else member
             clip = ""
             if member.combo_mode in (0, 1) and len(solid) > 1:
                 others = [d for d in solid if d != member.fill_path]
                 if others:
-                    # NOTE: `member.stroke_path` (not taper_path) is passed as
-                    # the "own" shape to size the mask around - this matches
-                    # every reference tested, but means a *tapered* member
-                    # combined into a union relies solely on the OTHER
-                    # members' bounds to size its own clip mask, since
-                    # stroke_path is "" for a tapered member.  Not currently
+                    # NOTE: `member.stroke_path` (not taper_path/brush_dabs) is
+                    # passed as the "own" shape to size the mask around - this
+                    # matches every reference tested, but means a *tapered* or
+                    # *brush-stamped* member combined into a union relies
+                    # solely on the OTHER members' bounds to size its own clip
+                    # mask, since stroke_path is "" for those.  Not currently
                     # known to cause a visible problem (no reference document
-                    # exercises a tapered outline as a non-base union member),
-                    # but flagged rather than silently patched - see the
-                    # module docstring's KNOWN GAPS.
+                    # exercises either as a non-base union member), but
+                    # flagged rather than silently patched - see the module
+                    # docstring's KNOWN GAPS.
                     clip = self._mask_subtraction(others, member.stroke_path,
                                                   f"out_{self.exporter._next_def_id()}",
                                                   style_source.stroke_width_px)
             elif member.combo_mode == 3:
                 clip = self._mask_union(solid, f"in_{self.exporter._next_def_id()}")
+
+            if member.brush_dabs:
+                mask_id, tex_w, tex_h = member.brush_mask_ref
+                dab_indent = self.indent + "  "
+                dabs_svg = [self.exporter._brush_dab_svg(dab, mask_id, tex_w, tex_h,
+                                                          style_source.line_hex,
+                                                          style_source.line_alpha, dab_indent)
+                            for dab in member.brush_dabs]
+                self.body.append(f'{self.indent}<g id="{member.name}_line"{clip}>')
+                self.body.extend(dabs_svg)
+                self.body.append(f'{self.indent}</g>')
+                continue
 
             if member.taper_path:
                 op = ("" if style_source.line_alpha >= 1
@@ -2416,10 +2686,17 @@ def main() -> None:
                              "MASKING section")
     parser.add_argument("--stroke-mul", type=float, default=2.0,
                         help="stroke px = line_width * point_width * docHeight * mul/2")
+    parser.add_argument("--brush-dir", default="styles/Brushes", metavar="DIR",
+                        help="directory of brush texture PNGs, named to match a style's "
+                             "brush_name (e.g. Brush502.png) - `make styles.brushes` symlinks "
+                             "the default to Moho's own installed brush folder; see the module "
+                             "docstring's BRUSH STROKES section; a style whose brush has no matching "
+                             "file here falls back to a plain stroke")
     args = parser.parse_args()
 
     settings = RenderSettings(stroke_width_scale=args.stroke_mul,
-                              forced_mask_containers=frozenset(args.mask_container))
+                              forced_mask_containers=frozenset(args.mask_container),
+                              brush_dir=args.brush_dir)
     document = load_document(args.project)
     exporter = Exporter(document, settings)
 
