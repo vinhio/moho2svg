@@ -22,9 +22,12 @@ system or package manifest, and no automated test suite — verification means
 running an export against a real project file and comparing against a
 reference SVG (see below).
 
-The script has no third-party dependencies — only the stdlib (`argparse`, `base64`,
-`json`, `math`, `os`, `random`, `re`, `struct`, `sys`, `zipfile`, `dataclasses`,
-`enum`, `typing`).
+The script has no *required* third-party dependencies — only the stdlib
+(`argparse`, `base64`, `io`, `json`, `math`, `os`, `random`, `re`, `struct`,
+`sys`, `zipfile`, `dataclasses`, `enum`, `typing`). **Pillow is an optional
+dependency** (`try: from PIL import Image...`, gracefully absent otherwise)
+that enables a much faster brush-texture render path — see the performance
+note below.
 
 Repository layout:
 
@@ -36,9 +39,46 @@ Repository layout:
   used for development/regression-checking.
 - `svg/` — the corresponding exported SVGs, tracked as reference output
   (`make gen` regenerates them from `moho/`).
+- `svg-fast/` — gitignored, brush-free previews of the same projects
+  (`make gen-fast`) — see the performance note below.
 - `styles/Brushes/` — gitignored symlink to Moho's own installed brush
   textures (`make styles.brushes` creates it), used to approximate textured
   brush line styles — see `docs/exporting-svg.md` § Brush textures.
+
+**A heavily brush-styled document can be very slow (or fail) to open in a
+browser/SVG viewer if Pillow is not installed** — not because of file size,
+but because each stamped brush dab then falls back to its own `mask`+
+`filter` element, and those two SVG primitives are the most expensive to
+render (each forces an offscreen-buffer render per element). Confirmed on
+`SketchBone.animeproj` at the same 600px preview width: mask/filter fallback
+15.97s vs Pillow's pre-tinted `<use>` path 2.46s (a `<use>` of an already-
+coloured `<image>`, baked once per (brush, frame, colour, alpha) combo at
+export time via `Exporter._bake_tinted_frame` - no per-dab mask/filter cost
+at all). Confirmed 3x-6.5x faster across every brush-heavy rig tested; see
+`docs/exporting-svg.md` § 7 for the full table, including the one caveat
+(the Pillow path can produce a LARGER file - not just a faster one - for a
+document with many distinct colours sourced from a large native texture,
+e.g. AddBone/WhatIsBone: more MB, still much faster to render).
+**`--brush-raster`** (also Pillow-only) fixes that caveat too by compositing
+each shape's whole stroke into ONE image instead of one `<use>` per dab -
+confirmed smallest/fastest of all three paths even at its default 2x
+supersample (SketchBone: 2.74 MB/0.18s, AddBone: 1.03 MB, WhatIsBone: 0.51
+MB) - but that stroke is then a fixed bitmap, not vector, and resampling
+many overlapping dabs into one canvas at 1:1 visibly softens very fine/
+sparse textures (confirmed on "golge"; `--brush-raster-supersample`,
+default 2.0, is the "@2x asset" trick that mitigates this - confirmed
+recovering most of the lost detail at 2x, near-parity with the per-dab
+<use> path at 3x, for a file size that grows roughly with N² while render
+time barely moves; 2.0 balances this against staying smaller/faster than
+`<use>` on every document tested; not noticeable at all on a softer texture
+like "yanak"). `make gen-raster` runs it for all 5 tracked projects into the
+gitignored `svg-raster/`.
+
+Independent of which render path is active, two flags manage dab *volume*
+itself: `--brush-spacing-mul N` (thin out dab density, e.g. `N=4` cut
+SketchBone to 4,502 dabs at ~900px width; `make gen-med` uses this at
+`BRUSH_SPACING_MUL=2` by default) and `--brush-dir ""` / `make gen-fast`
+(disable brush stamping entirely, ~0.1s, on any of the three render paths).
 
 **`.mohobrush` files are ZIP archives, not images or a custom binary format**,
 despite the extension — confirmed by extracting and parsing all 101 shipped

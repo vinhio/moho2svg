@@ -9,7 +9,11 @@ constant this tool uses, see the module docstring at the top of
 
 ## 1. Requirements
 
-- Python 3, no third-party packages (stdlib only).
+- Python 3, no *required* third-party packages (stdlib only).
+- **Pillow, optional but recommended** (`pip install Pillow`) — without it,
+  exporting a document with textured brush styles still works, but the
+  result can be very slow (or fail) to open in a browser/SVG viewer. See
+  [§ 7](#7-brush-textures).
 - A Moho project file: `.mohoproj` (Moho Pro) or `.animeproj` (Moho Debut).
   Both are plain JSON despite the extension.
 - Optionally, an SVG viewer for spot-checking output — a browser works fine;
@@ -52,7 +56,10 @@ Exactly one export mode is required: `--layer`, `--all`, `--combined`, or
 | `--include-hidden` | off | Also export/traverse layers with `visible: false` or `edit_only: true`. |
 | `--mask-container NAME` | (repeatable) | Force layer `NAME` to act as a masking container even if `group_mask` doesn't already mark it as one. See [Masking](#6-masking-quirks). |
 | `--stroke-mul N` | `2.0` | Stroke width multiplier: `stroke_px = line_width * point_width * canvas_height * N / 2`. Use this if a document's own line-width calibration looks off compared to Moho's own render. |
-| `--brush-dir DIR` | `styles/Brushes` | Directory of brush assets (texture PNGs and multi-frame brush folders) used to approximate textured "brush" line styles. See [Brush textures](#7-brush-textures). |
+| `--brush-dir DIR` | `styles/Brushes` | Directory of brush assets (texture PNGs and multi-frame brush folders) used to approximate textured "brush" line styles. Pass `""` to disable brush stamping entirely. See [Brush textures](#7-brush-textures). |
+| `--brush-spacing-mul N` | `1.0` | Multiply brush dab spacing by `N` — raise it (e.g. `3`-`4`) to thin out dab density on a heavily brush-styled document, trading texture fidelity for a much lighter/faster-to-view SVG. See [Brush textures](#7-brush-textures). |
+| `--brush-raster` | off | Composite each brush-styled shape's entire stroke into ONE raster `<image>` instead of one `<use>`/dab — smallest/fastest brush option, at the cost of that stroke no longer being vector. Requires Pillow. See [Brush textures § 7.2](#72-rasterizing-a-whole-stroke-into-one-image-per-shape). |
+| `--brush-raster-supersample N` | `2.0` | With `--brush-raster`, composite at `N`x the shape's own pixel size before declaring it at 1x size in the SVG — sharper fine texture at a roughly `N²` file-size cost. See [§ 7.2](#72-rasterizing-a-whole-stroke-into-one-image-per-shape). |
 
 ## 4. Typical workflows
 
@@ -99,10 +106,17 @@ tool itself, only of how this checkout is organized:
   tool).
 - `svg/` — the corresponding exported SVGs, tracked in git as reference
   output.
+- `svg-fast/`, `svg-med/`, `svg-raster/` — gitignored, alternative brush-
+  performance exports of the same projects (no brush texture at all, thinned-
+  out dab density, and one raster image per shape, respectively). See
+  [§ 7](#7-brush-textures).
 - `styles/Brushes/` — see [Brush textures](#7-brush-textures) below.
 
 `make gen` regenerates every tracked SVG in `svg/` from the corresponding
-project file in `moho/` (see the `Makefile`).
+project file in `moho/`; `make gen-fast`/`make gen-med`/`make gen-raster` do
+the same into `svg-fast/`/`svg-med/`/`svg-raster/` with, respectively, brush
+stamping disabled, thinned-out dab density (`BRUSH_SPACING_MUL`, default 2),
+and per-shape raster brush strokes (see the `Makefile`).
 
 ## 6. Masking quirks
 
@@ -149,15 +163,169 @@ Any brush whose asset cannot be resolved (including when `styles/Brushes`
 does not exist at all) falls back to a plain uniform stroke — nothing
 regresses for a checkout that hasn't run `make styles.brushes`.
 
-**A real cost of enabling this**: a document whose linework broadly uses a
-textured brush (rather than just one or two accent shapes) can end up with
-many thousands of individual stamped dabs once every matching style picks it
-up — each is its own masked SVG element, so both the exported file size and
-how long an SVG viewer takes to rasterize it grow accordingly. `moho2svg.py`
-itself still exports quickly (the cost is when something else has to *draw*
-the resulting SVG); if that turns out to matter for a particular document,
-prefer omitting `--brush-dir` (or pointing it at an empty/nonexistent
-directory) to fall back to plain strokes everywhere.
+### 7.1 Performance: install Pillow
+
+A document whose linework broadly uses a textured brush (rather than just
+one or two accent shapes) can end up with many thousands of individual
+stamped dabs once every matching style picks it up. How expensive that is
+*to view* (not to produce — `moho2svg.py` itself stays fast either way)
+depends entirely on whether **Pillow** (`pip install Pillow`) is installed
+where you run `moho2svg.py`:
+
+- **Pillow installed (preferred)**: each *(brush, frame, colour, alpha)*
+  combination actually used in the document is pre-rendered, once, into an
+  already-coloured PNG at export time (`Exporter._bake_tinted_frame`). Every
+  dab is then just a `<use>` of that image — a plain, cheap, hardware-
+  accelerated image blit for any viewer.
+- **Pillow absent (fallback, zero extra dependencies)**: every dab is a
+  `<g>` masked by a shared `<mask>`+`<feColorMatrix>` filter that recolours
+  the raw texture at render time (see [§ 7.3](#73-why-the-fallback-path-is-expensive-to-view)
+  for why this specifically, not dab count or file size on their own, is
+  what makes a viewer slow or unable to open the file at all).
+
+Confirmed at the same 600px preview width (`rsvg-convert`), fallback vs
+Pillow path:
+
+| Document | Fallback (mask+filter) | Pillow (pre-tinted `<use>`) |
+|---|---|---|
+| SketchBone | 3.89 MB / 15.97s | 2.86 MB / **2.46s** |
+| AddBone | 6.16 MB / 25.83s | 9.00 MB / **8.90s** |
+| WhatIsBone | 4.11 MB / 6.13s | 9.62 MB / **1.84s** |
+
+Installing Pillow is a 3x-6.5x render-time win across the board — but notice
+it is not always a *smaller file*: AddBone and WhatIsBone actually grow,
+because pre-tinting bakes each distinct colour at the source texture's own
+native resolution (up to 512x512 for some of Moho's shipped brushes), and
+this rig uses enough distinct (brush, colour) combinations that the baked
+PNGs outweigh the mask/filter defs they replace. If file size specifically
+matters more than render speed for such a document, the fallback path (no
+Pillow, or run in an environment without it) may still be preferable, or
+combine with `--brush-spacing-mul` below.
+
+Two further flags manage dab *volume* itself, independent of which render
+path is active:
+
+- **`--brush-spacing-mul N`** (e.g. `3` or `4`) thins out dab density
+  document-wide, multiplying the spacing between dabs while leaving
+  everything else (including `--brush-dir` itself) unchanged. This cuts
+  dab count roughly in proportion to `N` (confirmed on the fallback path at
+  900px width: `N=4` took SketchBone from 17,822 dabs/~31s to 4,502
+  dabs/~8s), at the cost of a visibly coarser, more "dotted" texture rather
+  than a continuous one. `N=2`-`2.5` is a reasonable middle ground for most
+  documents — still a large cut, with the texture still reading as
+  continuous at normal viewing sizes.
+- **`--brush-dir ""`** (or `make gen-fast`, which does exactly this for all
+  5 of this repo's tracked projects, writing to the gitignored `svg-fast/`
+  instead of `svg/`) disables brush stamping entirely for a quick,
+  lightweight preview — every brush-styled stroke falls back to a plain
+  stroke or (if tapered) TaperedStrokeOutliner's ribbon, both cheap for any
+  viewer regardless of Pillow. Confirmed on SketchBone: 3.9 MB → 319 KB, and
+  render time drops to under 0.1 seconds. Use this whenever you need a fast
+  interactive look at a document and don't need the brush texture itself;
+  switch back to a full `--brush-dir` export for the final/print output.
+
+### 7.2 Rasterizing a whole stroke into one image per shape
+
+`--brush-raster` goes further than the Pillow path above: instead of one
+`<use>` per dab, `Exporter._raster_brush_shape` composites an ENTIRE
+brush-styled shape's dabs into a single raster `<image>` at export time
+(also via Pillow — falls back to the normal per-dab path, with a warning,
+if Pillow is unavailable). This is this tool's most aggressive brush
+option, trading away that stroke's vector-ness entirely (it becomes a fixed
+bitmap — not rescalable or editable as a path afterwards) for the smallest,
+fastest-to-view result of any option here:
+
+| Document | Pillow, per-dab `<use>` | `--brush-raster` (1x) | `--brush-raster` (default, 2x) |
+|---|---|---|---|
+| SketchBone | 2.86 MB / 2.46s | 0.93 MB / 0.15s | **2.74 MB** / **0.18s** |
+| AddBone | 9.00 MB / 8.90s | 0.44 MB / 0.07s | **1.03 MB** / — |
+| WhatIsBone | 9.62 MB / 1.84s | 0.32 MB / 0.09s | **0.51 MB** / — |
+
+Even at 2x, `--brush-raster` still comes out smaller than the per-dab `<use>`
+path on every document tested (and far faster to render on all three) — this
+specifically fixes the file-size regression the per-dab path had on
+AddBone/WhatIsBone (§ 7.1), since one composited image per *shape* scales
+with shape count, not with the number of distinct (brush, colour)
+combinations sourced from a potentially large native texture.
+
+**The trade-off found in testing, beyond losing vector editability**: at
+1:1 (no supersampling), a stroke with very fine, sparse, high-contrast
+detail under heavy dab overlap (confirmed on the SketchBone rig's "golge"
+shadow — the same shape used throughout this document to illustrate brush
+issues, ~30-50x dab overlap) visibly loses the wispy/hair-like fine texture
+that the per-dab `<use>` path preserves, coming out softer/blurrier instead.
+
+**`--brush-raster-supersample N` (default 2.0)** substantially recovers this:
+the canvas is composited at N times the shape's own pixel size and then
+declared at the normal 1x size in the SVG - the standard "@2x asset" trick
+for high-DPI bitmaps, giving a downsampling viewer more source detail to
+work with. Confirmed on "golge" at 500px preview width: 1x reads as a
+near-flat soft blob, 2x recovers a visible (if slightly softened) grainy
+edge, 3x reads as close to the per-dab `<use>` version's wispy strands.
+Render time barely moves with N (it is still one image blit per shape
+either way - 0.13s/0.18s/0.24s for SketchBone at N=1/2/3), but file size
+scales roughly with N² (0.93/2.74/5.42 MB for the same document) - past
+N≈3 you are approaching or exceeding the per-dab `<use>` path's own size
+for a texture-heavy document, at which point that default path (which
+does not lose fine detail at all) is arguably the better choice instead.
+2.0 was picked as the default for a reason: it recovers most of the visible
+softening while staying smaller and much faster than the per-dab path on
+every document tested here; a softer, lower-contrast texture (the "yanak"
+cheek blush) looked effectively identical at every N, including 1.0, so this
+trade-off matters specifically for fine/wispy brushes like "golge", not
+brush textures in general.
+
+Reach for `--brush-raster` when file size/render speed matters more than
+guaranteed pixel-perfect texture fidelity (a quick preview, a web embed);
+prefer the default Pillow per-dab `<use>` path when the fine texture itself
+is the point and you are not size/speed-constrained. This also affects how
+the result holds up when zoomed in or printed at high DPI — see
+[§ 7.4](#74-zoom--scalability-trade-off-across-the-three-render-paths).
+
+`make gen-raster` runs this for all 5 of this repo's tracked projects,
+writing to the gitignored `svg-raster/`.
+
+### 7.3 Why the fallback path is expensive to *view*
+
+Without Pillow, each stamped dab is a `<g transform="..."><rect .../></g>`
+masked by a shared `<mask>` containing an `<image>` (the brush texture) plus
+a `<feColorMatrix>` filter (see [Moho project file format §
+8](moho-project-file-format.md#8-brush-styles) for why the filter is there).
+Every element that references a `mask` forces a spec-compliant renderer to
+render the mask's own content into an offscreen buffer, apply the filter to
+it, then use the result to composite that one element — three real steps,
+repeated once per dab, regardless of how small the file's *text* is. This is
+why render time on this path tracks dab count much more closely than it
+tracks file size or output pixel resolution. It is also why some viewers
+fail to open a heavily-brushed export at all on this path — many cap the
+number of simultaneous filter/mask operations they'll attempt, or run out of
+memory holding that many offscreen buffers at once. The Pillow path avoids
+all of this by doing the recolouring once, in Python, instead of once per
+dab in the viewer.
+
+### 7.4 Zoom / scalability trade-off across the three render paths
+
+Every render path keeps a shape's actual GEOMETRY (its path `d="..."`, i.e.
+position and outline) as real vector data, at every zoom level, regardless
+of brush settings. The trade-off discussed above (§ 7.1-7.3) is specifically
+about how the brush *texture painted along that outline* is represented,
+and that has real consequences for how the result holds up when zoomed in
+far beyond the size it was exported/viewed at (a viewer window at high zoom,
+a print at a much higher DPI than screen resolution, etc.):
+
+| Render path | Brush texture is... | Zoom behaviour |
+|---|---|---|
+| `--brush-dir ""` (no brush) | Not present — plain stroke or TaperedStrokeOutliner ribbon | Stays perfectly sharp at any zoom — it is 100% vector, no raster involved at all. |
+| Default (Pillow per-dab `<use>`) | A small raster image per *dab* (roughly the dab's own diameter, e.g. 10-80px), reused via `<use>` | Degrades much later / more gracefully: each dab is a small image already close to its displayed size, so ordinary zoom levels rarely exceed its native resolution. Zoom in enough on any ONE dab and it will eventually blur too — it is still a raster texture underneath — but the "unit" that blurs is small. |
+| `--brush-raster` | ONE raster image for the *entire shape's* stroke, captured at `brush_raster_supersample`x its own pixel size (default 2x) at export time | Degrades sooner and more visibly: the whole stroke shares one fixed-resolution bitmap, so zooming the viewer/print beyond that captured resolution blurs/pixelates the whole stroke at once, not just fine detail within it. This is the direct, expected cost of collapsing many dabs into one image (§ 7.2) - not a bug. |
+
+Raising `--brush-raster-supersample` raises the resolution ceiling before
+this kicks in (§ 7.2), but it is still a ceiling, not scale-independence -
+there is no value of it that makes `--brush-raster` behave like real vector
+output under unbounded zoom. If a document needs to be viewed/printed at
+significantly higher resolution than its own canvas size (not just viewed
+quickly at roughly 1:1), prefer the default per-dab `<use>` path, or drop
+brush texture entirely with `--brush-dir ""`, over `--brush-raster`.
 
 ## 8. Known limitations
 

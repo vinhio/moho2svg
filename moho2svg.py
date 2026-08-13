@@ -280,23 +280,44 @@ magnitude on purpose (a soft shadow drawn as one thick brushed line rather
 than a filled shape - confirmed on the SketchBone rig's "golge" shadow
 strokes, ~12x-19x), and spacing computed once from the unscaled base would
 leave huge dabs spaced as if they were tiny, overlapping dozens deep and
-rendering far denser than Moho's own output.  Each dab is emitted as a `<g transform="translate(...)
-rotate(...)">` containing a colour-filled rect, MASKED by the brush texture -
-the texture's own RGB is irrelevant (Exporter._brush_mask_refs inverts it
-with a shared <feColorMatrix> filter so the texture's dark "ink" pixels become
-the *visible* part of an SVG luminance mask, and light/transparent background
-pixels stay invisible), so any texture works as a stamp regardless of whether
-it happens to be a dark blob on white (Brush502.png) or a dark splatter on
-transparent (CK Ink DIFF SMASHER.png).  A multi-frame brush stamps one frame
-per dab: randomOrder=true (the majority of Moho's shipped brushes) draws a
-uniform-random frame each dab, from the same per-shape seeded RNG as the
-rotation jitter; randomOrder=false cycles through the folder's frames in
-sorted file-name order, advancing one frame every randomInterval dabs.  The
-rect is filled with the *resolved* line_color/opacity, i.e. the tint Moho
-itself applies when a style's `brush_tint` is true (the only case
-implemented - a brush with brush_tint false, meaning "use the texture's own
-multi-colour pixels as-is", is not attempted here and simply falls back to
-a plain stroke too).
+rendering far denser than Moho's own output.  A multi-frame brush stamps one
+frame per dab: randomOrder=true (the majority of Moho's shipped brushes)
+draws a uniform-random frame each dab, from the same per-shape seeded RNG as
+the rotation jitter; randomOrder=false cycles through the folder's frames in
+sorted file-name order, advancing one frame every randomInterval dabs.
+
+Each dab needs to end up as a *coloured* stamp of the (greyscale/alpha)
+brush texture - the resolved line_color/opacity, i.e. the tint Moho itself
+applies when a style's `brush_tint` is true (the only case implemented - a
+brush with brush_tint false, meaning "use the texture's own multi-colour
+pixels as-is", is not attempted here and simply falls back to a plain
+stroke too).  There are two ways to render that tint, and this tool picks
+whichever is available at import time (see the `try: from PIL import
+Image...` near the top of this file):
+
+  - PREFERRED, when Pillow is installed: Exporter._bake_tinted_frame
+    pre-renders each (brush, frame, colour, alpha) combination actually used
+    into a plain solid-colour PNG ONCE (ink density - the same dark-pixel-
+    is-opaque inversion described below, whichever render path computes it -
+    becomes that PNG's own alpha channel), registered once as an `<image>`
+    in `<defs>` (Exporter._brush_tinted_ref).  Every dab is then just a
+    `<use href="#tint_N" transform="...">` of that already-coloured image -
+    no per-dab compositing beyond an ordinary scaled/rotated image blit.
+  - FALLBACK, when Pillow is not installed (this tool has zero required
+    dependencies; Pillow is optional and only for this faster path): each
+    dab is a `<g transform="...">` containing a colour-filled rect, MASKED
+    by the brush texture - the texture's own RGB is irrelevant
+    (Exporter._brush_mask_refs inverts it with a shared <feColorMatrix>
+    filter so the texture's dark "ink" pixels become the *visible* part of
+    an SVG luminance mask, and light/transparent background pixels stay
+    invisible), so any texture works as a stamp regardless of whether it
+    happens to be a dark blob on white (Brush502.png) or a dark splatter on
+    transparent (CK Ink DIFF SMASHER.png).
+
+Both paths produce the same dab positions/rotations/sizes (BrushStampOutliner
+does not know or care which one will render its output) and are visually
+equivalent - see the performance paragraph below for why the Pillow path is
+strongly preferred whenever it is available.
 
 Rotation per dab is `(tangent angle if brush_align else 0) + a uniform-random
 value in [-brush_jitter/2, +brush_jitter/2]`, seeded deterministically per
@@ -314,6 +335,76 @@ size/density against (Moho's own SVG exporter does not reproduce brush
 texture either, as far as this tool's development has observed - see KNOWN
 GAPS), so this is a best-effort approximation, not a confirmed-exact formula
 like the rest of this file aims for.
+
+A document whose linework is broadly brush-styled can produce tens of
+thousands of dabs (confirmed: 17,822 on the SketchBone rig).  The FALLBACK
+path's `mask`+`feColorMatrix` pairing is expensive for a viewer to render (a
+spec-compliant renderer allocates and rasterises an offscreen buffer per
+masked element) - unlike file size, THIS is what actually made a heavily-
+brushed export slow or unopenable in some viewers even though `moho2svg.py`
+itself still exported it in under a second.  Switching to the PREFERRED
+(Pillow) path removes that cost - confirmed at the same 600px preview width
+with rsvg-convert, mask/filter vs pre-tinted `<use>`:
+
+    SketchBone   15.97s -> 2.46s  (3.89 -> 2.86 MB, both dab count and
+                                    file size happen to drop here)
+    AddBone      25.83s -> 8.90s  (6.16 -> 9.00 MB - MORE bytes despite
+                                    being much faster to render: many
+                                    distinct (brush, colour) combinations
+                                    baked at their source texture's native
+                                    resolution, which for this rig is
+                                    sometimes as large as 512x512, outweigh
+                                    the mask/filter defs they replace)
+    WhatIsBone    6.13s -> 1.84s  (4.11 -> 9.62 MB, same reason as AddBone)
+
+i.e. the Pillow path is not a strict improvement on file size, only on
+render time - which is what was actually reported as broken.  A THIRD path,
+`--brush-raster` (Exporter._raster_brush_shape, also Pillow-only), fixes
+that too: it composites an entire shape's dabs into ONE raster <image> at
+export time instead of one <use> per dab, so file size scales with shape
+count rather than with (brush, colour) combinations sourced from a
+potentially large native texture:
+
+    SketchBone   <use>: 2.86 MB / 2.46s   -> raster(1x): 0.93 MB / 0.15s
+    AddBone      <use>: 9.00 MB / 8.90s   -> raster(1x): 0.44 MB / 0.07s
+    WhatIsBone   <use>: 9.62 MB / 1.84s   -> raster(1x): 0.32 MB / 0.09s
+
+This is the most aggressive option: that stroke is no longer vector at all
+(not rescalable/editable as a path afterwards), and - confirmed on the
+SketchBone rig's "golge" shadow strokes specifically (very fine, sparse,
+high-contrast detail under ~30-50x dab overlap) - resampling each dab
+(resize + rotate) into one shared canvas at 1:1 (`brush_raster_supersample`
+= 1.0) visibly softens/blurs fine texture that the per-dab <use> path
+preserves; a softer texture like "yanak"'s cheek blush showed no visible
+difference either way.  RenderSettings.brush_raster_supersample (default
+2.0, i.e. `--brush-raster-supersample 2`) substantially recovers this - the
+"@2x asset" trick: composite at Nx the shape's own pixel size, declare it
+at 1x size in the emitted <image>, so a downsampling viewer has more source
+detail to work with.  Confirmed on "golge": 1x reads as a near-flat blob,
+2x recovers a visible (if still slightly softened) grainy edge, 3x reads as
+close to the per-dab <use> version's wispy strands - at a file-size cost
+that scales roughly with N^2 (SketchBone: 0.93/2.74/5.42 MB at N=1/2/3) while
+render time barely moves (0.13s/0.18s/0.24s) since it is still one image
+blit per shape regardless of N.  2.0 is the default because it recovers
+most of the visible softening while staying smaller AND much faster than
+the per-dab <use> path on every document tested here; past N~3 the file
+size approaches or exceeds that path's own, at which point <use> (no fine-
+detail loss at all) is arguably the better choice instead.  Downscaling a
+source texture before baking into either Pillow path (dabs are typically
+drawn far smaller than a 512x512 source) would recover the `<use>` path's
+file-size regression too but is not implemented.
+
+Two further settings manage dab volume itself, independent of which render
+path is active: `--brush-spacing-mul` (RenderSettings.brush_spacing_mul,
+plumbed into BrushStampOutliner.build as `spacing_scale`) uniformly
+multiplies dab spacing to thin out density (confirmed on the fallback path:
+mul=4 cut SketchBone to 4,502 dabs, ~8s render, vs 17,822 dabs/~31s at the
+default 1.0 at 900px width, with byte-identical output at 1.0 to before this
+knob existed); passing `--brush-dir ""` (or `make gen-fast`) disables brush
+stamping entirely, which is nearly free for any viewer on any of the three
+render paths since it falls back to the exact same plain-stroke/
+TaperedStrokeOutliner path used when no brush asset resolves at all.  See
+docs/exporting-svg.md § 7 for the full write-up.
 
 --------------------------------------------------------------------------------
 BOOLEAN SHAPE COMBINATIONS (combo_mode)
@@ -462,7 +553,12 @@ KNOWN GAPS
     style is not attempted at all, brush_angle_drift/brush_randomize/
     brush_rand_order/sizeVariationAmp are read but not implemented, and the
     first number of a suffixed brush name is not decoded (see BRUSH STROKES
-    for the part that is).
+    for the part that is).  The Pillow ("pre-tinted") render path bakes each
+    used texture at its native resolution, so it can produce a LARGER file
+    than the mask/filter fallback for a document with many distinct
+    (brush, colour) combinations sourced from a large texture, despite
+    rendering much faster - not implemented: downscaling a source texture
+    before baking, which would fix this too.
 
 --------------------------------------------------------------------------------
 PORTING NOTES (E.G. TO GO)
@@ -519,6 +615,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import math
 import os
@@ -530,6 +627,17 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence, Union
+
+try:
+    # Optional: only used to pre-tint brush textures once per (brush, colour)
+    # at export time instead of masking+filtering every dab at render time -
+    # see the module docstring's BRUSH STROKES section.  Absent, brush
+    # rendering falls back to the mask/filter path (the only path that ever
+    # existed before this), so this tool still runs with zero third-party
+    # dependencies if Pillow is not installed.
+    from PIL import Image, ImageChops, ImageOps
+except ImportError:
+    Image = ImageChops = ImageOps = None
 
 
 # ============================================================================
@@ -1757,13 +1865,26 @@ class BrushStampOutliner:
     def build(self, geometries: list[CurveGeometry], edges: Sequence[Edge],
               to_px: Callable[[Vec2], Vec2], diameter_px: float, spacing_frac: float,
               align: bool, jitter: float, seed: Any, frame_count: int = 1,
-              random_order: bool = True, random_interval: int = 1) -> list[BrushDab]:
+              random_order: bool = True, random_interval: int = 1,
+              spacing_scale: float = 1.0) -> list[BrushDab]:
         """Sample the traced path into dabs.  `frame_count` > 1 makes each dab
         carry the index of the frame to stamp (see BrushDab.frame): with
         `random_order` a uniform-random frame is picked per dab (from the same
         seeded RNG as the rotation jitter, so re-running the exporter
         reproduces the same output); without it, frames cycle in order,
         advancing every `random_interval` dabs across the whole shape.
+
+        `spacing_scale` (--brush-spacing-mul) multiplies the computed spacing
+        uniformly - a document-wide performance knob, not something read from
+        the project file: a real document's own `brush_spacing` is very
+        often already the dominant term (0.25-0.5 in every rig this tool has
+        been tested against, i.e. already well above the "no smaller than 5%
+        of diameter" safety floor below), so it is what actually needs
+        scaling to meaningfully cut dab count on a document with heavy brush
+        usage - raising just the internal floor would do nothing for those
+        (confirmed: every brush-styled shape in the SketchBone rig has
+        brush_spacing >= 0.25, nowhere near the floor). Default 1.0
+        reproduces the exact previous dab count/placement.
 
         Each dab's actual diameter is `diameter_px` scaled by the *locally
         interpolated* per-point width (CurveGeometry.point_widths) at that
@@ -1862,7 +1983,8 @@ class BrushStampOutliner:
                     pos = a + (b - a).scaled(t)
                     w = wa + (wb - wa) * t
                     local_diameter = diameter_px * w
-                    spacing = max(local_diameter * spacing_frac, local_diameter * 0.05, 0.5)
+                    spacing = max(local_diameter * spacing_frac,
+                                 local_diameter * 0.05, 0.5) * spacing_scale
                     angle = tangent_angle + rng.uniform(-half_jitter, half_jitter)
                     dabs.append(BrushDab(pos, angle, local_diameter, next_frame()))
                     dist += spacing
@@ -2069,6 +2191,10 @@ class RenderSettings:
     viewbox_padding: float = 8.0
     brush_dir: Optional[str] = None          # --brush-dir; BrushStampOutliner / Exporter._brush_mask_refs
     brush_samples_per_segment: int = 12          # BrushStampOutliner
+    brush_spacing_mul: float = 1.0          # --brush-spacing-mul; BrushStampOutliner.build's spacing_scale
+    brush_raster: bool = False          # --brush-raster; Exporter._raster_brush_shape (requires Pillow)
+    brush_raster_max_pixels: int = 16_000_000  # safety cap; falls back to per-dab <use> above this
+    brush_raster_supersample: float = 2.0    # --brush-raster-supersample; canvas oversampling factor
 
 
 # ============================================================================
@@ -2104,8 +2230,11 @@ class Exporter:
         self._next_id = 0
         self._active_actions: list[ActiveAction] = []
         self._layer_scale: float = 1.0
-        self._brush_defs: list[str] = []             # <filter>/<mask> defs, emitted once per export
+        self._brush_asset_cache: dict[str, Optional["Brush"]] = {}  # brush_name -> resolved asset (or None)
+        self._brush_defs: list[str] = []             # <filter>/<mask> defs, emitted once per export (mask path)
         self._brush_refs: dict[str, Optional[RegisteredBrush]] = {}  # brush_name -> registered brush (or None)
+        self._brush_tinted_defs: list[str] = []       # <image> defs, emitted once per export (tint path)
+        self._brush_tinted_ids: dict[tuple, Optional[tuple[str, int, int]]] = {}  # see _brush_tinted_ref
 
     # -- channel evaluation --------------------------------------------------
 
@@ -2271,12 +2400,22 @@ class Exporter:
 
     # -- brush textures -------------------------------------------------------
 
+    def _get_brush_asset(self, brush_name: str) -> Optional["Brush"]:
+        """`_resolve_brush_asset(brush_name)`, cached - shared by both render
+        paths (mask/filter and pre-tinted) so a brush's file(s) are only ever
+        read from disk once per export, however many styles/shapes use it."""
+        if brush_name not in self._brush_asset_cache:
+            self._brush_asset_cache[brush_name] = self._resolve_brush_asset(brush_name)
+        return self._brush_asset_cache[brush_name]
+
     def _brush_mask_refs(self, brush_name: str) -> Optional[RegisteredBrush]:
         """The registered brush for a style's `brush_name` - its resolved
         asset PLUS one <mask> def per frame - or None when no asset can be
         resolved (the caller then falls back to a plain stroke).  See the
         module docstring's BRUSH STROKES section.
 
+        This is the fallback render path, used only when Pillow is not
+        installed (see _brush_tinted_ref for the preferred path when it is).
         The <mask>/<filter> defs are built at most once per brush per export
         (cached in self._brush_refs) and collected in self._brush_defs,
         which _wrap prepends to the document once rendering is done - shared
@@ -2285,7 +2424,7 @@ class Exporter:
         if brush_name in self._brush_refs:
             return self._brush_refs[brush_name]
         result: Optional[RegisteredBrush] = None
-        brush = self._resolve_brush_asset(brush_name)
+        brush = self._get_brush_asset(brush_name)
         if brush is not None:
             refs: list[tuple[str, int, int]] = []
             for frame in brush.frames:
@@ -2409,7 +2548,8 @@ class Exporter:
                         hex_color: str, alpha: float, indent: str) -> str:
         """One dab's markup: a coloured rect the texture's own aspect ratio,
         scaled/rotated/positioned to `dab`, masked by the (already-registered)
-        brush texture mask `mask_id`."""
+        brush texture mask `mask_id`.  Fallback path - see _brush_use_svg for
+        the preferred one, used whenever Pillow is available."""
         op = "" if alpha >= 1 else f' fill-opacity="{alpha:.3f}"'
         scale = dab.diameter_px / max(tex_w, tex_h)
         hw, hh = tex_w / 2.0, tex_h / 2.0
@@ -2418,6 +2558,154 @@ class Exporter:
                 f'mask="url(#{mask_id})">'
                 f'<rect x="{-hw:.1f}" y="{-hh:.1f}" width="{tex_w}" height="{tex_h}" '
                 f'fill="{hex_color}"{op}/></g>')
+
+    def _brush_tinted_ref(self, brush_name: str, frame_index: int, hex_color: str,
+                          alpha: float) -> Optional[tuple[str, int, int]]:
+        """(image_id, width_px, height_px) for one frame of `brush_name`,
+        pre-tinted to `hex_color`/`alpha` as a plain PNG - or None if Pillow
+        is unavailable, the brush doesn't resolve, or `frame_index` is out of
+        range.  This is the preferred render path (see BRUSH STROKES): baking
+        colour into the pixels once per (brush, frame, colour, alpha)
+        combination, cached in self._brush_tinted_ids and collected in
+        self._brush_tinted_defs (which _wrap prepends to the document),
+        means a dab is just a <use> referencing a plain <image> - no
+        per-instance mask/filter compositing for a viewer to do."""
+        if Image is None:
+            return None
+        key = (brush_name, frame_index, hex_color, round(alpha, 3))
+        if key in self._brush_tinted_ids:
+            return self._brush_tinted_ids[key]
+        result: Optional[tuple[str, int, int]] = None
+        brush = self._get_brush_asset(brush_name)
+        if brush is not None and 0 <= frame_index < len(brush.frames):
+            frame = brush.frames[frame_index]
+            png_bytes = self._bake_tinted_frame(frame.data, hex_color, alpha)
+            b64 = base64.b64encode(png_bytes).decode("ascii")
+            image_id = f"tint_{self._next_def_id()}"
+            width, height = frame.width, frame.height
+            hw, hh = width / 2.0, height / 2.0
+            self._brush_tinted_defs.append(
+                f'  <image id="{image_id}" href="data:image/png;base64,{b64}" '
+                f'x="{-hw:.1f}" y="{-hh:.1f}" width="{width}" height="{height}"/>')
+            result = (image_id, width, height)
+        self._brush_tinted_ids[key] = result
+        return result
+
+    @staticmethod
+    def _bake_tinted_frame(raw_png: bytes, hex_color: str, alpha: float) -> bytes:
+        """One brush texture frame, pre-rendered as a solid-`hex_color` PNG
+        whose alpha channel is that frame's "ink density" (the same
+        dark-pixel-is-opaque inversion the mask/filter path computes at
+        render time via <feColorMatrix>, done once here instead) combined
+        with the source image's own alpha channel (respects textures like
+        "CK Ink DIFF SMASHER.png" that already carry transparency) and then
+        `alpha`.  The result needs no mask or filter to render - a plain
+        <image>/<use> already shows exactly the tinted, correctly-shaped
+        dab."""
+        im = Image.open(io.BytesIO(raw_png)).convert("RGBA")
+        ink = ImageOps.invert(im.convert("RGB").convert("L"))
+        combined_alpha = ImageChops.multiply(ink, im.getchannel("A"))
+        if alpha < 0.999:
+            combined_alpha = combined_alpha.point(lambda p: int(p * alpha))
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+        solid = Image.new("RGB", im.size, (r, g, b))
+        solid.putalpha(combined_alpha)
+        buf = io.BytesIO()
+        solid.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    def _brush_use_svg(self, dab: "BrushDab", image_id: str, tex_w: int, tex_h: int,
+                        indent: str) -> str:
+        """One dab's markup for the pre-tinted render path: a <use> of the
+        already-registered, already-coloured image `image_id`, scaled/rotated/
+        positioned to `dab` - no mask or filter needed (see
+        _brush_tinted_ref)."""
+        scale = dab.diameter_px / max(tex_w, tex_h)
+        return (f'{indent}<use href="#{image_id}" '
+                f'transform="translate({dab.pos.x:.2f} {dab.pos.y:.2f}) '
+                f'rotate({math.degrees(dab.angle):.2f}) scale({scale:.4f})"/>')
+
+    def _raster_brush_shape(self, dabs: Sequence["BrushDab"], brush_name: str,
+                            hex_color: str, alpha: float) -> Optional[str]:
+        """One shape's entire brush stroke, composited into a SINGLE raster
+        <image> at export time (--brush-raster) instead of one <use>/dab -
+        see the module docstring's BRUSH STROKES section.  Requires Pillow;
+        returns None (caller falls back to the per-dab tinted-<use> path) if
+        Pillow is unavailable, the brush doesn't resolve, or the composited
+        canvas would exceed `RenderSettings.brush_raster_max_pixels` (a
+        pathologically long/wide stroke could otherwise demand an enormous
+        bitmap - safety valve, not a real Moho limit).
+
+        The canvas is rendered at `RenderSettings.brush_raster_supersample`
+        times the shape's own logical pixel size (default 2x: e.g. a 100x40
+        stroke is composited at 200x80) but the emitted <image> still
+        declares its `width`/`height` at the logical 1x size - exactly the
+        "@2x asset" trick used for high-DPI bitmaps: the extra source pixels
+        let a downsampling viewer produce a visibly sharper result than
+        compositing 1:1 does, since each dab's own resize/rotate has more
+        source detail to draw from before everything gets scaled back down.
+        Confirmed to measurably reduce (not eliminate) the fine-texture
+        softening noted in the module docstring's BRUSH STROKES section for
+        a very fine, sparse, high-contrast stroke like "golge" - see
+        docs/exporting-svg.md § 7.2 for a visual comparison and the file-size
+        cost (roughly proportional to supersample^2).
+
+        This is the most aggressive of this tool's brush-performance options:
+        it collapses however many dabs a stroke has into exactly one image
+        per shape, at the cost of that stroke no longer being editable/
+        rescalable as vector geometry - see docs/exporting-svg.md § 7 for the
+        trade-off against --brush-spacing-mul and the default per-dab
+        <use> path.
+        """
+        if Image is None or not dabs:
+            return None
+        brush = self._get_brush_asset(brush_name)
+        if brush is None:
+            return None
+
+        # Each dab's square footprint, safely enlarged by its diagonal since
+        # it may be rotated to any angle - cheaper than tracking each dab's
+        # exact rotated corners for what is only a padding calculation.
+        half_diag = [d.diameter_px * 0.7071 for d in dabs]
+        pad = 2.0
+        min_x = min(d.pos.x - h for d, h in zip(dabs, half_diag)) - pad
+        min_y = min(d.pos.y - h for d, h in zip(dabs, half_diag)) - pad
+        max_x = max(d.pos.x + h for d, h in zip(dabs, half_diag)) + pad
+        max_y = max(d.pos.y + h for d, h in zip(dabs, half_diag)) + pad
+        width = max(1, math.ceil(max_x - min_x))
+        height = max(1, math.ceil(max_y - min_y))
+        scale = max(1.0, self.settings.brush_raster_supersample)
+        canvas_w = max(1, round(width * scale))
+        canvas_h = max(1, round(height * scale))
+        if canvas_w * canvas_h > self.settings.brush_raster_max_pixels:
+            return None
+
+        canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        tinted_frames: dict[int, Any] = {}
+        for dab in dabs:
+            frame_index = dab.frame if dab.frame < len(brush.frames) else 0
+            tinted = tinted_frames.get(frame_index)
+            if tinted is None:
+                png_bytes = self._bake_tinted_frame(brush.frames[frame_index].data, hex_color, alpha)
+                tinted = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+                tinted_frames[frame_index] = tinted
+            size = max(1, round(dab.diameter_px * scale))
+            resized = tinted.resize((size, size), Image.Resampling.LANCZOS)
+            # SVG's rotate(deg) is clockwise in its own (y-down) space; PIL's
+            # rotate(deg) is counter-clockwise as *displayed* - negate to
+            # match the same visual rotation the other two render paths use.
+            rotated = resized.rotate(-math.degrees(dab.angle), expand=True,
+                                     resample=Image.Resampling.BICUBIC)
+            rx, ry = rotated.size
+            px = round((dab.pos.x - min_x) * scale - rx / 2.0)
+            py = round((dab.pos.y - min_y) * scale - ry / 2.0)
+            canvas.alpha_composite(rotated, (px, py))
+
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return (f'<image href="data:image/png;base64,{b64}" '
+                f'x="{min_x:.2f}" y="{min_y:.2f}" width="{width}" height="{height}"/>')
 
     # -- masking --------------------------------------------------------------
 
@@ -2515,10 +2803,16 @@ class Exporter:
               title: str = "") -> str:
         x0, y0, vw, vh = viewbox
         title_el = f'  <title>{svg_escape(title)}</title>\n' if title else ""
-        # self._brush_defs (the shared invert <filter> plus one <mask> per
-        # brush texture actually used) is populated lazily while `inner` is
-        # being rendered, so it can only be prepended here, at the end.
-        body = self._brush_defs + list(inner)
+        # self._brush_defs (mask/filter path) and self._brush_tinted_defs
+        # (pre-tinted path - see BRUSH STROKES) are populated lazily while
+        # `inner` is being rendered, so they can only be prepended here.
+        # <mask>/<filter> never render directly, but a bare <image> does -
+        # unlike everything else this tool emits, defs MUST live inside a
+        # <defs> wrapper or it paints itself once at its own local (x, y) on
+        # top of the document, in addition to every <use> of it.
+        brush_defs = self._brush_defs + self._brush_tinted_defs
+        defs_el = ["  <defs>"] + brush_defs + ["  </defs>"] if brush_defs else []
+        body = defs_el + list(inner)
         return (f'<svg xmlns="http://www.w3.org/2000/svg" '
                 f'viewBox="{x0:.3f} {y0:.3f} {vw:.3f} {vh:.3f}" '
                 f'width="{vw:.0f}" height="{vh:.0f}">\n{title_el}'
@@ -2652,7 +2946,8 @@ class _GroupMember:
     stroke_path: str
     taper_path: str
     brush_dabs: list = field(default_factory=list)
-    brush_ref: Optional[RegisteredBrush] = None
+    brush_ref: Optional[RegisteredBrush] = None      # mask/filter path (Pillow unavailable)
+    brush_name: Optional[str] = None                  # pre-tinted path (Pillow available)
 
 
 class ShapeGroupRenderer:
@@ -2749,10 +3044,19 @@ class ShapeGroupRenderer:
         stroke_path, taper_path = "", ""
         brush_dabs: list = []
         brush_ref = None
+        brush_asset_name = None
+        brush_asset = None
         if shape.has_outline and style.brush_name and style.brush_tint:
-            brush_ref = exp._brush_mask_refs(style.brush_name)
+            brush_asset = exp._get_brush_asset(style.brush_name)
+            if brush_asset is not None:
+                brush_asset_name = style.brush_name
+                # Pillow available -> pre-tinted <use> path (no per-dab mask/
+                # filter cost - see BRUSH STROKES); otherwise the original
+                # mask/filter path, which needs its <mask> defs built now.
+                if Image is None:
+                    brush_ref = exp._brush_mask_refs(style.brush_name)
         if shape.has_outline:
-            if brush_ref is not None:
+            if brush_asset is not None:
                 # A tapered (varying-width) shape gets brush treatment too,
                 # not just a uniform one - BrushStampOutliner scales each
                 # dab's own diameter from the width-1.0 base by the point
@@ -2767,9 +3071,10 @@ class ShapeGroupRenderer:
                 brush_dabs = exp.brush_outliner.build(
                     self.geometries, shape.edges, self.to_px, diameter_px, spacing_frac,
                     style.brush_align, style.brush_jitter, seed,
-                    frame_count=len(brush_ref.mask_refs),
-                    random_order=brush_ref.random_order,
-                    random_interval=brush_ref.random_interval)
+                    frame_count=len(brush_asset.frames),
+                    random_order=brush_asset.random_order,
+                    random_interval=brush_asset.random_interval,
+                    spacing_scale=exp.settings.brush_spacing_mul)
             elif tapered:
                 taper_path = exp.tapered_outliner.build(self.geometries, shape.edges,
                                                          self.to_px, stroke_width_px)
@@ -2779,7 +3084,7 @@ class ShapeGroupRenderer:
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
                                         line_hex, line_alpha, cap, stroke_path, taper_path,
-                                        brush_dabs, brush_ref))
+                                        brush_dabs, brush_ref, brush_asset_name))
         for edge in shape.edges:
             seg = self.geometries[edge.curve].segments[edge.segment]
             self.pixel_points += [self.to_px(seg.p0), self.to_px(seg.c1),
@@ -2826,12 +3131,37 @@ class ShapeGroupRenderer:
                 clip = self._mask_union(solid, f"in_{self.exporter._next_def_id()}")
 
             if member.brush_dabs:
-                refs = member.brush_ref.mask_refs
                 dab_indent = self.indent + "  "
-                dabs_svg = [self.exporter._brush_dab_svg(dab, *refs[dab.frame],
-                                                          style_source.line_hex,
-                                                          style_source.line_alpha, dab_indent)
-                            for dab in member.brush_dabs]
+                dabs_svg = None
+                if self.exporter.settings.brush_raster and member.brush_ref is None:
+                    # --brush-raster: collapse the whole stroke into one
+                    # composited <image> instead of one element per dab -
+                    # see _raster_brush_shape.  None (Pillow missing, or the
+                    # canvas would be too large) falls through to the normal
+                    # per-dab paths below, same as if --brush-raster had not
+                    # been passed.
+                    raster_el = self.exporter._raster_brush_shape(
+                        member.brush_dabs, member.brush_name,
+                        style_source.line_hex, style_source.line_alpha)
+                    if raster_el is not None:
+                        dabs_svg = [f"{dab_indent}{raster_el}"]
+                if dabs_svg is None and member.brush_ref is not None:
+                    # Fallback path (Pillow unavailable): mask/filter per dab.
+                    refs = member.brush_ref.mask_refs
+                    dabs_svg = [self.exporter._brush_dab_svg(dab, *refs[dab.frame],
+                                                              style_source.line_hex,
+                                                              style_source.line_alpha, dab_indent)
+                                for dab in member.brush_dabs]
+                elif dabs_svg is None:
+                    # Preferred path: colour is baked into the image once per
+                    # (brush, frame, colour, alpha) - each dab is just a <use>.
+                    dabs_svg = []
+                    for dab in member.brush_dabs:
+                        ref = self.exporter._brush_tinted_ref(
+                            member.brush_name, dab.frame,
+                            style_source.line_hex, style_source.line_alpha)
+                        if ref is not None:
+                            dabs_svg.append(self.exporter._brush_use_svg(dab, *ref, dab_indent))
                 self.body.append(f'{self.indent}<g id="{member.name}_line"{clip}>')
                 self.body.extend(dabs_svg)
                 self.body.append(f'{self.indent}</g>')
@@ -2938,12 +3268,42 @@ def main() -> None:
                              "styles.brushes` symlinks the default to Moho's own installed "
                              "brush folder; see the module docstring's BRUSH STROKES section; "
                              "a style whose brush resolves to nothing here falls back to a "
-                             "plain stroke")
+                             "plain stroke. Pass \"\" to disable brush stamping entirely "
+                             "(fast/preview export - see docs/exporting-svg.md)")
+    parser.add_argument("--brush-spacing-mul", type=float, default=1.0, metavar="N",
+                        help="multiply brush dab spacing by N (default 1.0 = exact document "
+                             "value). A document whose linework is heavily brush-styled can "
+                             "produce tens of thousands of dab elements, which is slow for an "
+                             "SVG viewer to render (not this tool - export itself stays fast); "
+                             "raise this (e.g. 3-4) to thin out dab density and speed up "
+                             "viewing, at the cost of a coarser-looking texture - see "
+                             "docs/exporting-svg.md")
+    parser.add_argument("--brush-raster", action="store_true",
+                        help="composite each brush-styled shape's entire stroke into ONE "
+                             "raster <image> instead of one <use>/dab - the most aggressive "
+                             "size/speed option, at the cost of that stroke no longer being "
+                             "vector (not rescalable/editable as a path). Requires Pillow; "
+                             "falls back to the normal per-dab path (with a warning) if Pillow "
+                             "is unavailable, or per-shape (silently) if that shape's stroke "
+                             "would need an unreasonably large canvas - see docs/exporting-svg.md")
+    parser.add_argument("--brush-raster-supersample", type=float, default=2.0, metavar="N",
+                        help="with --brush-raster, composite at N times the shape's own pixel "
+                             "size (default 2.0) before declaring it at the normal 1x size in "
+                             "the SVG - the standard \"@2x asset\" trick, noticeably sharper "
+                             "for a fine/sparse brush texture at a roughly N^2 file-size cost "
+                             "for that image. Pass 1.0 to composite at exact 1:1 size instead")
     args = parser.parse_args()
+
+    if args.brush_raster and Image is None:
+        sys.stderr.write("warning: --brush-raster requires Pillow (not installed) - "
+                         "falling back to the normal per-dab brush render path\n")
 
     settings = RenderSettings(stroke_width_scale=args.stroke_mul,
                               forced_mask_containers=frozenset(args.mask_container),
-                              brush_dir=args.brush_dir)
+                              brush_dir=args.brush_dir,
+                              brush_spacing_mul=args.brush_spacing_mul,
+                              brush_raster=args.brush_raster,
+                              brush_raster_supersample=args.brush_raster_supersample)
     document = load_document(args.project)
     exporter = Exporter(document, settings)
 

@@ -10,5 +10,10 @@ moho/
 styles/Brushes
 svg/png/
 
+# Preview exports (make gen-med / gen-fast / gen-raster) - not tracked reference output
+svg-med/
+svg-fast/
+svg-raster/
+
 # Scratch analysis notes
 tmp/
