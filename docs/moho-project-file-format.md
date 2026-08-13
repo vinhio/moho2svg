@@ -509,12 +509,12 @@ present on all 112 shapes of the `1045` one — treat a missing `combo_mode` as
 | `3` | 14 | Intersect — clipped to the union of the group's solid members so far. |
 | `2` | **0** | Not present in any of these five documents. The module docstring reports having seen it in a real file; there is no sample here to decode it from, and `moho2svg.py` falls through to normal handling for it. |
 
-**Known incorrect: a `combo_mode == 3` (intersect) member's own outline can
-show a real gap that Moho does not draw.** `moho2svg.py` implements
-`combo_mode` by clipping a member's own stroke to the base member's fill via
-an SVG `<mask>` — an approximation of the boolean operation, not a true
-geometric path intersection (stated plainly in the module docstring). This
-breaks down for a `segments_on == false` curve segment that is genuinely
+**A `combo_mode == 3` (intersect) member's own outline no longer shows a real
+gap that Moho does not draw.** `moho2svg.py` implements `combo_mode` by
+clipping a member's own stroke to the base member's fill via an SVG
+`<mask>` — an approximation of the boolean operation, not a true geometric
+path intersection (stated plainly in the module docstring). This used to
+break down for a `segments_on == false` curve segment that is genuinely
 *unique* geometry (not, as in the `combo_mode == 1` case, a boundary shared
 with — and already drawn by — another group member). Confirmed on Bandit's
 `Eye_Upper`/`S3` (a `combo_mode == 3` upper-eyelid shape): one segment of its
@@ -523,16 +523,27 @@ coincide with any segment of the base shape `S1`'s boundary at all (checked
 directly — the two curves occupy entirely different coordinates). Real Moho
 most likely computes an actual new boundary edge at the point where `S3`'s
 curve crosses `S1`'s, and marks that original `S3` segment
-`segments_on == false` because a computed edge has *replaced* it — this tool
-has no way to reconstruct that edge, since it only clips the existing stroke
-rather than computing new anchor points at the crossing, so it just omits
-the segment, leaving two open subpaths with round end caps instead of one
-closed loop. Confirmed unrelated to the two masking fixes elsewhere in this
-document (re-rendering with the pre-fix mask code produces a byte-for-byte
-identical result). A correct fix needs real Bezier–Bezier intersection — a
-different class of algorithm from anything else in this tool, and
-unconfirmed without more `combo_mode == 3` reference examples than the one
-found so far. See the module docstring's BOOLEAN SHAPE COMBINATIONS section.
+`segments_on == false` because a computed edge has *replaced* it.
+
+Rather than reconstructing that edge (real Bezier–Bezier intersection — a
+different class of algorithm from anything else in this tool), the fix
+sidesteps needing it: for a `combo_mode == 3` member specifically,
+`_render_shape` now builds the stroke with `visible_only=False` — i.e. it
+draws the member's full original closed outline rather than dropping the
+hidden segment. The existing intersect-clip (`_mask_union`, unchanged) then
+cuts that full outline down to within the base shape's fill exactly as
+before — and because SVG's own clipping computes the true geometric
+crossing point when the mask is rasterised, the visible result comes out
+correct without this tool ever computing a Bezier intersection itself.
+Confirmed: `Eye_Upper`'s `S3_line` is now one continuous subpath (previously
+two, split by an `M`), and the gap is gone. This only touches shapes that are
+BOTH `combo_mode == 3` AND have a `segments_on == false` segment — checked
+across all five reference documents, `Eye_Upper`/`S3` is the **only** one, so
+nothing else could have regressed. Whether an intersect member can ever
+legitimately want its own artist-drawn gap (which this fix would now
+incorrectly restore) remains unconfirmed — no such example has been found,
+but only one `combo_mode == 3`-with-a-gap reference exists in total. See the
+module docstring's BOOLEAN SHAPE COMBINATIONS section.
 
 ### 7.9 Why `edges` and `shape_order` are not trustworthy
 
@@ -1074,12 +1085,13 @@ was also on this list until it was fixed (mask geometry now excludes each
 source shape's own plain stroke band — see [§ 10](#10-masking)); a tapered
 or brush-styled source outline is the one remaining gap there.
 
-A `combo_mode == 3` member's own outline can also show a real gap Moho
-doesn't — confirmed on `Bandit`'s `Eye_Upper`/`S3` — because this tool
+A `combo_mode == 3` member's own outline used to also show a real gap Moho
+doesn't draw — confirmed on `Bandit`'s `Eye_Upper`/`S3` — because this tool
 approximates the boolean operation with SVG masking rather than a true path
-intersection; see [§ 7.8](#78-boolean-shape-combination) for the full
-finding (not fixed: the correct fix needs Bezier–Bezier intersection, a
-different class of algorithm, and only one reference example exists so far).
+intersection. Now fixed by drawing such a member's full outline (instead of
+dropping its hidden segment) and letting the existing intersect-clip cut it
+correctly, sidestepping the need for real Bezier–Bezier intersection; see
+[§ 7.8](#78-boolean-shape-combination) for the full finding.
 
 Items 6–8 are *undecoded*, not *known-wrong*: the samples set them to a
 non-default value, but nothing proves the current output is incorrect for

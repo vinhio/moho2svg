@@ -703,25 +703,41 @@ passed to size the mask is `member.stroke_path`, which is `""` for a tapered or
 brush-stamped member. Such a member relies solely on the *other* members'
 bounds. No sample exercises it as a non-base union member.
 
-**A second, more visible limitation: `combo_mode == 3`'s `_mask_union` clip is
-an SVG-masking *approximation* of intersection, not a true geometric path
-intersection — and it can leave a real gap in the member's own outline that
-Moho does not show.** Confirmed on `Bandit`'s `Eye_Upper`/`S3` (a
+**A second limitation, now fixed: `combo_mode == 3`'s `_mask_union` clip is an
+SVG-masking *approximation* of intersection, not a true geometric path
+intersection — which used to leave a real gap in the member's own outline
+that Moho does not show.** Confirmed on `Bandit`'s `Eye_Upper`/`S3` (a
 `combo_mode == 3` shape): one of its curve segments has `segments_on ==
 false`, but that segment's own endpoints do not coincide with any segment of
 the base shape's boundary — unlike the `combo_mode == 1` case above, where a
 hidden segment is legitimately a shared edge the *other* member already
 draws, this one is unique geometry with nothing to replace it. `build_path_d`
-(§ 6.3) just omits it, leaving two open subpaths with round end caps instead
-of one closed loop — visible as a small notch. Real Moho most likely computes
-an actual new boundary edge where the two curves cross, and marks the
-original segment `segments_on == false` because a *computed* edge has
-replaced it; reconstructing that would need real Bezier–Bezier intersection
-(find the crossing point, build a new segment there), a different class of
-algorithm from `_mask_union`'s clip-the-existing-stroke approach. Not
-attempted — only one `combo_mode == 3` reference example has been found so
-far. See the module docstring's BOOLEAN SHAPE COMBINATIONS section and KNOWN
-GAPS.
+(§ 6.3) with `visible_only=True` simply omitted it, leaving two open
+subpaths with round end caps instead of one closed loop — visible as a small
+notch. Real Moho most likely computes an actual new boundary edge where the
+two curves cross, and marks the original segment `segments_on == false`
+because a *computed* edge has replaced it.
+
+Rather than reconstructing that edge (real Bezier–Bezier intersection —
+finding the crossing point and building a new segment there, a different
+class of algorithm from `_mask_union`'s clip-the-existing-stroke approach),
+`_render_shape`'s plain-stroke branch (§ 7.2) now passes
+`visible_only=(combo_mode != 3)` to `build_path_d` instead of always `True`.
+For a `combo_mode == 3` member this draws the **full** original closed
+outline — segments_on==false segment included — and lets the *existing*
+`_mask_union` clip (unchanged) cut it down to within the base shape's fill,
+exactly as it already did for the visible segments. Because SVG's own
+clipping computes the true geometric crossing point when the mask is
+rasterised, the result comes out correct without this tool ever computing a
+Bezier intersection itself. Confirmed: `Eye_Upper`'s `S3_line` changed from
+two subpaths (split by an `M`) to one continuous path, closing the visual
+gap, and — checked across all five reference documents — `Eye_Upper`/`S3` is
+the **only** shape that is both `combo_mode == 3` and has a
+`segments_on == false` segment, so nothing else could have regressed. See the
+module docstring's BOOLEAN SHAPE COMBINATIONS section and KNOWN GAPS for the
+one remaining open question (whether an intersect member could ever
+legitimately want its own artist-drawn gap, which this fix would now
+restore instead of hiding).
 
 ### 7.5 The three brush render paths
 

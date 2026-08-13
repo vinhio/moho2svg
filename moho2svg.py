@@ -430,8 +430,8 @@ combo_mode 2 has been observed in real files (Leg_F/S2 in the Bandit rig) but it
 effect has not been reverse-engineered; ShapeGroupRenderer draws it unclipped and
 prints a warning, rather than guessing.
 
-KNOWN INCORRECT: a combo_mode==3 (intersect) member's own outline can show a
-real gap that Moho itself does not.  Confirmed on Bandit's Eye_Upper/S3 (the
+FIXED: a combo_mode==3 (intersect) member's own outline no longer shows a
+gap that Moho itself does not draw.  Confirmed on Bandit's Eye_Upper/S3 (the
 upper eyelid shape, combo_mode==3 against S1's fill): one of its curve
 segments has segments_on==false, and that segment's endpoints do NOT
 coincide with any segment of S1's own boundary (checked directly - S1's
@@ -439,25 +439,41 @@ curve spans x=-0.18..-0.003, y=0.20..0.45; the hidden S3 segment spans
 x=-0.094..0.026, y=0.367..0.392 - clearly a different piece of geometry, not
 a duplicate of S1's edge).  So unlike the union case above (where a
 segments_on==false segment IS the shared boundary that legitimately
-disappears because the other group member already draws it), this one has
-nothing else to cover it: build_path_d(visible_only=True) simply omits it,
+disappears because the other group member already draws it), this one had
+nothing else to cover it: build_path_d(visible_only=True) simply omitted it,
 leaving the stroke as two open subpaths with round caps rather than one
 closed loop - visible as a small notch where the two ends of the shape's
-outline don't meet.  Confirmed this is unrelated to the PatchLayer or
+outline didn't meet.  Confirmed this was unrelated to the PatchLayer or
 MASKING fixes above (re-rendering Eye_Upper with the pre-fix mask code
-produces a byte-for-byte identical result).
+produced a byte-for-byte identical result before this fix).
 
-The most likely explanation: this tool approximates `combo_mode` with SVG
-masking (clip the member's own stroke to the base's fill), not a true
-geometric path intersection.  Real Moho most likely computes an actual new
-boundary edge where S3's curve crosses S1's, and marks the ORIGINAL S3
-segment segments_on==false because it has been *replaced* by that computed
-edge - which this tool has no way to reconstruct, since it only clips the
-existing stroke rather than computing new anchor points at the crossing.  A
-correct fix needs real Bezier-Bezier intersection (find the crossing
-point(s), build a new segment there) - a substantially different algorithm
-from anything else in this file, and unconfirmed without more combo_mode==3
-reference examples than the one found so far.  Not attempted.
+This tool approximates `combo_mode` with SVG masking (clip the member's own
+stroke to the base's fill), not a true geometric path intersection.  Real
+Moho most likely computes an actual new boundary edge where S3's curve
+crosses S1's, and marks the ORIGINAL S3 segment segments_on==false because
+it has been *replaced* by that computed edge.  Rather than reconstructing
+that edge (real Bezier-Bezier intersection - finding the crossing point(s)
+and building a new segment there - a substantially different algorithm from
+anything else in this file), the fix sidesteps the need for it: for a
+combo_mode==3 member specifically, `_render_shape` now builds the stroke
+path with `visible_only=False` - i.e. it does NOT drop the segments_on==false
+segment, drawing the member's full original closed outline instead of two
+open subpaths.  The existing `_mask_union` intersect-clip (unchanged) then
+cuts that full outline down to within the base shape's fill exactly as it
+already did for the visible segments - and since SVG's own clipping
+correctly computes the true geometric crossing point when it rasterises the
+mask, the visible result comes out right without this tool ever computing a
+Bezier intersection itself.  Confirmed: re-rendering Eye_Upper now produces
+one continuous `S3_line` subpath (previously two, split by an "M"), and the
+visual gap is gone with nothing else in the shape changed.  This only
+touches shapes that are BOTH combo_mode==3 AND have a segments_on==false
+segment - checked across all five reference documents, Eye_Upper/S3 is the
+ONLY one, so there is no other combo_mode==3 shape this could have
+regressed.  Whether an intersect member can ever legitimately want an
+artist-drawn gap of its own (which this fix would now incorrectly restore)
+remains unconfirmed - no such example has been found, but only one
+combo_mode==3-with-a-gap reference exists in total, so this is a small
+sample to generalise from.
 
 --------------------------------------------------------------------------------
 MASKING
@@ -679,11 +695,11 @@ orientation but has not been matched pixel-for-pixel against Moho's own
 KNOWN GAPS
 --------------------------------------------------------------------------------
   - combo_mode 2 (see BOOLEAN SHAPE COMBINATIONS).
-  - A combo_mode==3 (intersect) member's own outline can show a real gap that
-    Moho does not (see BOOLEAN SHAPE COMBINATIONS) - this tool clips via SVG
-    masking rather than computing a true path intersection, so a
-    segments_on==false segment that Moho replaced with a computed crossing
-    edge is instead just left out entirely.
+  - Whether a combo_mode==3 member can ever legitimately want its OWN
+    artist-drawn gap (segments_on==false unrelated to the intersect) is
+    unconfirmed - see BOOLEAN SHAPE COMBINATIONS for the fix that now always
+    draws such a member's full outline and relies on the intersect-clip to
+    cut it correctly; only one combo_mode==3-with-a-gap reference exists.
   - A masking==2 sibling's own TAPERED or BRUSH-styled outline still only
     contributes its bare fill silhouette to the mask, unlike a plain stroke
     (see MASKING) - the exclusion-band fix only handles a uniform stroke
@@ -3389,8 +3405,31 @@ class ShapeGroupRenderer:
                 taper_path = exp.tapered_outliner.build(self.geometries, shape.edges,
                                                          self.to_px, stroke_width_px)
             else:
+                # combo_mode == 3 (intersect): do NOT drop segments_on==False
+                # segments here.  For a plain shape, a hidden segment is a
+                # deliberate gap the artist drew (see the module docstring's
+                # FILL RULE... section).  For an intersect member, a hidden
+                # segment instead very often marks a piece of curve that
+                # crosses the base shape's own boundary - Moho's own boolean
+                # solver replaces it with a NEW edge computed at that
+                # crossing, which this tool cannot reconstruct (no
+                # Bezier-Bezier intersection here) - but drawing the ORIGINAL
+                # segment in full and letting `clip` (the mask_union below)
+                # cut it at the true crossing point gets the same visual
+                # result for free, via the SVG renderer's own clipping,
+                # instead of the segment just vanishing outright.  Confirmed
+                # against Bandit's Eye_Upper/S3: the hidden segment's
+                # midpoint lies OUTSIDE the base shape's fill but one
+                # endpoint lies INSIDE it - i.e. it genuinely crosses the
+                # boundary, not a segment that's simply redundant (that
+                # would be combo_mode == 1's case, where a hidden segment IS
+                # the shared edge another group member already draws - see
+                # BOOLEAN SHAPE COMBINATIONS).  Unconfirmed whether an
+                # intersect member ever legitimately wants an artist-drawn
+                # gap of its own; only one combo_mode == 3 reference example
+                # exists so far.
                 stroke_path = build_path_d(self.geometries, shape.edges, self.to_px,
-                                           visible_only=True, close=False)
+                                           visible_only=(combo_mode != 3), close=False)
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
                                         line_hex, line_alpha, cap, stroke_path, taper_path,
