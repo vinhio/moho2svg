@@ -97,6 +97,25 @@ replace the current name/suffix-guessing asset lookup with an authoritative
 one, if that heuristic ever proves insufficient - see
 `docs/moho-project-file-format.md` § 8.1).
 
+**`PatchLayer` is now rendered** (`Document._resolve_patch_layers`) - it
+carries no mesh of its own, only a `target_layer_uuid` naming another layer
+whose mesh it reuses, redrawn at the patch's own position in the draw order
+(patches a seam a later-drawn layer would otherwise leave, e.g. a hand's
+"ayasi-Patch" reusing the palm mesh "ayasi" between two finger layers).
+**Confirmed the patch's OWN transform/parent_bone/flexi_bone_subset/origin
+must NOT be used** - every PatchLayer found across this repo's reference
+documents carries a bizarre, unrelated-looking own transform (e.g. a 0.147x
+non-uniform Y squash + rotation on "ayasi-Patch"; ~0.49x uniform scale on
+AddBone's leg patches) while its target has the identity transform;
+rendering with the patch's own transform reproduced exactly that: a
+squashed sliver floating away from where the target actually renders
+(confirmed wrong by diffing rendered output against the target's own
+position). The target's transform is used instead, so a resolved patch
+renders as an exact duplicate of its target at a different point in the
+draw order - a heuristic, not confirmed pixel-for-pixel against a real Moho
+export of a `PatchLayer`-using document - see
+`docs/moho-project-file-format.md` § 11.
+
 ## Commands
 
 ```bash
@@ -142,10 +161,14 @@ reference evidence — some things that look like bugs (e.g. asymmetric bone
 scale in `Skeleton.world_matrices`) are intentionally preserved because they
 match real Moho output and are flagged rather than "corrected". See the
 docstring's KNOWN GAPS section for what is genuinely unresolved (combo_mode 2,
-gradient placement precision, bone-weight-falloff shape, PatchLayer, brush
-stroke approximations).
+gradient placement precision, bone-weight-falloff shape, brush stroke
+approximations, and the `PatchLayer` heuristic below).
 
 ### Pipeline, in order
+
+For the full data flow, the decision order inside the tree walk, the two
+separate transform traversals, and a field-to-stage cross-reference table, see
+`docs/export-pipeline.md`. The summary below is the short version.
 
 1. **`load_document`** reads the JSON file into `Document.from_raw`.
 2. **Document model** (`Document`, `Layer`, `Mesh`, `Shape`, `Curve`,

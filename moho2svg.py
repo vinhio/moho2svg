@@ -50,6 +50,11 @@ A project is one JSON object.  The parts this tool cares about:
                                                  this tool exposes as a normal
                                                  MeshLayer child (see
                                                  Layer._build).
+                                    PatchLayer   carries no mesh of its own -
+                                                 reuses another layer's mesh,
+                                                 redrawn at this layer's spot in
+                                                 the draw order - see PATCH
+                                                 LAYERS below.
 
   animated value ("channel")     Almost every numeric/colour/string property in
                                   Moho is stored the same way:
@@ -425,6 +430,35 @@ combo_mode 2 has been observed in real files (Leg_F/S2 in the Bandit rig) but it
 effect has not been reverse-engineered; ShapeGroupRenderer draws it unclipped and
 prints a warning, rather than guessing.
 
+KNOWN INCORRECT: a combo_mode==3 (intersect) member's own outline can show a
+real gap that Moho itself does not.  Confirmed on Bandit's Eye_Upper/S3 (the
+upper eyelid shape, combo_mode==3 against S1's fill): one of its curve
+segments has segments_on==false, and that segment's endpoints do NOT
+coincide with any segment of S1's own boundary (checked directly - S1's
+curve spans x=-0.18..-0.003, y=0.20..0.45; the hidden S3 segment spans
+x=-0.094..0.026, y=0.367..0.392 - clearly a different piece of geometry, not
+a duplicate of S1's edge).  So unlike the union case above (where a
+segments_on==false segment IS the shared boundary that legitimately
+disappears because the other group member already draws it), this one has
+nothing else to cover it: build_path_d(visible_only=True) simply omits it,
+leaving the stroke as two open subpaths with round caps rather than one
+closed loop - visible as a small notch where the two ends of the shape's
+outline don't meet.  Confirmed this is unrelated to the PatchLayer or
+MASKING fixes above (re-rendering Eye_Upper with the pre-fix mask code
+produces a byte-for-byte identical result).
+
+The most likely explanation: this tool approximates `combo_mode` with SVG
+masking (clip the member's own stroke to the base's fill), not a true
+geometric path intersection.  Real Moho most likely computes an actual new
+boundary edge where S3's curve crosses S1's, and marks the ORIGINAL S3
+segment segments_on==false because it has been *replaced* by that computed
+edge - which this tool has no way to reconstruct, since it only clips the
+existing stroke rather than computing new anchor points at the crossing.  A
+correct fix needs real Bezier-Bezier intersection (find the crossing
+point(s), build a new segment there) - a substantially different algorithm
+from anything else in this file, and unconfirmed without more combo_mode==3
+reference examples than the one found so far.  Not attempted.
+
 --------------------------------------------------------------------------------
 MASKING
 --------------------------------------------------------------------------------
@@ -463,6 +497,62 @@ pair - both direct children of the document's root BoneLayer - masking now
 applies there the same as at any other depth.  `--mask-container` remains
 available to force masking on a specific layer by name regardless of what
 group_mask says, for any future document that contradicts this.
+
+FIXED: a masking==2 sibling's own rendered stroke stays fully visible on top
+of whatever it masks - confirmed directly against the Moho app on the Bandit
+rig's Head_DarkBlue (masking==0) / BellyTexture (masking==2) pair
+(BellyTexture's stroke shows unbroken everywhere it overlaps Head_DarkBlue).
+Before this fix, Head_DarkBlue (drawn after BellyTexture in file order)
+painted over roughly the inner two-thirds of BellyTexture's own stroke
+wherever their un-masked geometry happened to overlap - confirmed by
+rasterising both independently and diffing pixel colour along BellyTexture's
+stroke centreline (~65% of sampled stroke pixels showed something else's
+colour instead of BellyTexture's own).
+
+A z-order fix (reordering `layers` so every masking==2 sibling paints after
+every masking==0 sibling within the same container) was tried FIRST and
+reverted: most of Bandit's own children (Arm_B, Tail, Ears, Muzzle, Nose,
+EyeBrow, Arm_F) are masking==1 ("exempt"), and BellyTexture originally
+precedes some of them (e.g. Muzzle) in file order - forcing masking==2 after
+masking==0 dragged BellyTexture's opaque fill on top of the character's
+eyes/muzzle/nose too (confirmed wrong: those stayed visibly unaffected by
+BellyTexture in the Moho app, exactly as this tool already rendered them
+before any fix).  There is no single reordering of one container's children
+that satisfies both "every masking==2 after every masking==0 sibling" and
+"never change relative order against any masking==1 sibling" for this
+document - the two constraints conflict for BellyTexture specifically (it
+must come both before Muzzle, to preserve the untouched exempt ordering, and
+after Head_DarkBlue, per the confirmed stroke behaviour).
+
+(A stronger version of this same idea - reversing the WHOLE `layers` array,
+prompted by the observation that Moho's own Layer Pool panel displays a
+container's children in the reverse of this array's order - was also tested
+directly against Bandit's root container and produces the same Muzzle
+regression, for the same reason.  The panel's display order is a UI
+convention, not evidence about paint order: `layers` order already IS
+back-to-front paint order, confirmed by the many already-correct
+non-masking relationships across every reference document - see
+`moho-project-file-format.md` § 2.)
+
+The actual fix does not touch paint order at all: `_mask_source_shapes`
+additionally returns each source shape's own (plain, non-tapered,
+non-brushed) stroke width, and `_mask_element` paints that shape's path a
+second time - AFTER its white fill, so it wins - as a BLACK stroke that
+width wide.  This carves the source's own stroke band back OUT of the mask,
+so whatever the mask clips can never paint over it, regardless of z-order.
+Masking==1 siblings are untouched by this (they were never part of the mask
+computation), so nothing about them can regress.  Confirmed: re-measuring the
+same stroke-centreline pixels afterward, 62% show BellyTexture's own colour
+(up from 35%), a further 22% are legitimately covered by OTHER, unrelated
+masking==1 siblings (Muzzle/Mouth Stroke/Nose/EyeBrow, whose own normal
+z-order relationship to BellyTexture this fix correctly leaves alone), and
+the small remainder matches almost exactly (1063 vs 1126 px) what remains
+even with Head_DarkBlue/Eye_Back/Head_DarkBlue 2/Eye_Upper removed from the
+render entirely - i.e. not attributable to this fix's target layers at all,
+most likely residual anti-aliasing at the mask boundary.  Tapered and
+brush-styled source outlines are NOT covered by this fix (see
+`_mask_source_shapes`) - unconfirmed geometry for those, so they still fall
+back to the old fill-only mask contribution.
 
 --------------------------------------------------------------------------------
 SMART BONES
@@ -522,6 +612,58 @@ deep inside a bone layer is deformed in *that bone layer's* coordinate space,
 not in its immediate parent's.
 
 --------------------------------------------------------------------------------
+PATCH LAYERS
+--------------------------------------------------------------------------------
+A PatchLayer has no "mesh" field of its own in the raw JSON - it carries a
+`target_layer_uuid` naming another layer elsewhere in the document (in every
+reference example found, a sibling within the same group) whose *mesh* it
+reuses, redrawn at the PATCH layer's own position in the draw order.  This is
+how a rig patches a seam that would otherwise show between two overlapping
+body parts: e.g. "ayasi-Patch" (a hand's palm patch) reuses the palm mesh
+"ayasi", but sits between two of the finger layers in the stack rather than
+below all of them, so it covers the gap that appears there as the fingers
+move.  Document._resolve_patch_layers finds the target (by uuid, across the
+whole document, after the whole tree is built) and copies its `mesh` onto the
+PatchLayer.
+
+The PatchLayer's OWN transform/parent_bone/flexi_bone_subset/origin are
+deliberately NOT used, even though they exist in the raw JSON and look like
+they ought to matter - confirmed wrong empirically: every PatchLayer found
+across this tool's reference documents carries some bizarre, unrelated-looking
+own transform (a 0.147x non-uniform Y squash plus an 8.9 degree rotation on
+"ayasi-Patch"; a uniform ~0.49x scale on "Leg_L-Patch"/"Leg_R-Patch" in the
+AddBone rig), while its *target* consistently has the identity transform
+(scale 1, translation 0).  Rendering with the patch's own transform (this
+tool's first attempt) reproduced exactly that: a squashed sliver floating
+away from where the target actually renders, visibly wrong compared to the
+target's own rendered position.  Copying the target's transform/parent_bone/
+flexi_bone_subset/origin onto the patch instead - so it renders as a
+duplicate of the target, just at a different point in the draw order - fixed
+that.  This is a HEURISTIC, not a confirmed-exact reverse-engineering: there
+is no independent Moho SVG export of a document using PatchLayer available to
+verify pixel-for-pixel (Moho's own SVG exporter's behaviour for PatchLayer is
+itself unconfirmed here) - see KNOWN GAPS.  A patch whose target never
+resolves (missing/dangling uuid, or the target itself never gets a mesh) is
+left exactly as before this feature existed: `mesh = None`, drawing nothing.
+
+A resolved patch duplicates its target's FILL only, never its OUTLINE -
+confirmed directly against the Moho app itself (not just this tool's own
+output) on two independent points that vary the one field that could have
+been a confound: "ayasi-Patch" (masking==2, a mask source) and "Left
+Bicep-Patch" (masking==0, not a mask source) - both PatchLayers, both with a
+target whose shape has has_outline=True and a defined stroke, and BOTH show
+no stroke in Moho's own canvas while their respective targets do.  Since
+`masking` differs between the two but the result does not, the suppression is
+keyed on being a PatchLayer, not on masking (which is independently confirmed
+elsewhere to still draw its mask-source layers normally - see MASKING).  This
+is handled by ShapeGroupRenderer.suppress_outline, set from
+`layer.kind is LayerKind.PATCH` at both export_layer and export_document's
+call sites, rather than by mutating Shape.has_outline itself - the patch and
+its target share the exact same Shape/Mesh objects (see above), so flipping
+the shared has_outline would incorrectly silence the target's own outline
+wherever it is rendered independently elsewhere in the tree.
+
+--------------------------------------------------------------------------------
 GRADIENTS
 --------------------------------------------------------------------------------
 A gradient lives on a *named style* (StyleTable), never inline on a shape; a
@@ -537,13 +679,27 @@ orientation but has not been matched pixel-for-pixel against Moho's own
 KNOWN GAPS
 --------------------------------------------------------------------------------
   - combo_mode 2 (see BOOLEAN SHAPE COMBINATIONS).
+  - A combo_mode==3 (intersect) member's own outline can show a real gap that
+    Moho does not (see BOOLEAN SHAPE COMBINATIONS) - this tool clips via SVG
+    masking rather than computing a true path intersection, so a
+    segments_on==false segment that Moho replaced with a computed crossing
+    edge is instead just left out entirely.
+  - A masking==2 sibling's own TAPERED or BRUSH-styled outline still only
+    contributes its bare fill silhouette to the mask, unlike a plain stroke
+    (see MASKING) - the exclusion-band fix only handles a uniform stroke
+    width; no reference confirms the right geometry for the other two.
   - Gradient centre/radius placement is approximate (see GRADIENTS).
   - The flexible-binding weight falloff is unvalidated for overlapping-influence
     cases (see BONE DEFORMATION).
-  - PatchLayer (seen in real files, e.g. "Left Bicep-Patch") is not modelled at
-    all; it has not been observed to produce any visible geometry in Moho's own
-    SVG exports in the documents this was tested against, so it is silently
-    skipped rather than guessed at.
+  - PatchLayer (see PATCH LAYERS) reuses its target's mesh AND transform - the
+    heuristic part is specifically ignoring the patch's own transform/
+    parent_bone/flexi_bone_subset/origin, which is confirmed necessary (using
+    them renders a wrongly-positioned sliver) but not confirmed as the
+    complete picture - there is no independent Moho SVG export of a
+    PatchLayer-using document to verify pixel-for-pixel against.  (Fill-only,
+    no-outline duplication IS confirmed directly against the Moho app - see
+    PATCH LAYERS - so this remaining gap is narrower than it used to be:
+    transform/position only, not appearance.)
   - Physics (wind/gravity/dynamics), IK, and layer_effects/layer_shadow are
     ignored; none of them affect a flat vector export of a single frame.
   - Textured "brush" line styles (see BRUSH STROKES) are only approximated,
@@ -1078,9 +1234,10 @@ class LayerKind(str, Enum):
     GROUP = "GroupLayer"
     SWITCH = "SwitchLayer"
     TEXT = "TextLayer"
-    OTHER = "__other__"       # anything else Moho might define (e.g. PatchLayer,
-                               # observed in real files but not modelled - see
-                               # the module docstring's KNOWN GAPS section).
+    PATCH = "PatchLayer"      # carries no mesh of its own - see the module
+                               # docstring's PATCH LAYERS section and
+                               # Document._resolve_patch_layers.
+    OTHER = "__other__"       # anything else Moho might define.
 
 
 _LAYER_KIND_BY_TYPE_NAME = {k.value: k for k in LayerKind if k is not LayerKind.OTHER}
@@ -1329,21 +1486,36 @@ class Layer:
         self.kind = kind
         self.type_name = type_name      # the raw JSON string, for display/`--list`
         self.children = children
+        # A PatchLayer's `mesh` starts out None here (it carries none of its
+        # own in the raw JSON) and is filled in afterward, once the whole
+        # tree exists, by Document._resolve_patch_layers - see the module
+        # docstring's PATCH LAYERS section.  `mesh` is a plain attribute
+        # (not read-only) specifically so that late assignment works.
         self.mesh = mesh
         self.skeleton = skeleton
         # Whether the raw JSON has a "layers" key AT ALL (even as an empty
-        # list) is distinct from `children` being empty: a PatchLayer (seen
-        # in real files, e.g. "Left Bicep-Patch" - see the module docstring's
-        # KNOWN GAPS) has no "layers" key and is neither a mesh nor a
-        # container, so it draws nothing and recurses into nothing.  Moho's
-        # own export confirms this: no <g> at all appears for such a layer -
-        # not even an empty one - which is what `is_container` distinguishes.
+        # list) is distinct from `children` being empty: a PatchLayer has no
+        # "layers" key and (before Document._resolve_patch_layers runs) no
+        # mesh either, so it would draw nothing and recurse into nothing -
+        # which is what `is_container` distinguishes, and remains correct
+        # for a PatchLayer whose target never resolves to real geometry.
         self.is_container = is_container
         self.transform = Transform(raw["transforms"])
 
     @property
     def name(self) -> str:
         return self._raw.get("name", "")
+
+    @property
+    def uuid(self) -> str:
+        return self._raw.get("uuid", "")
+
+    @property
+    def target_layer_uuid(self) -> str:
+        """Only meaningful when kind is PATCH: the uuid of the layer whose
+        mesh this patch reuses - see Document._resolve_patch_layers and the
+        module docstring's PATCH LAYERS section."""
+        return self._raw.get("target_layer_uuid", "")
 
     @property
     def visible(self) -> bool:
@@ -1481,7 +1653,64 @@ class Document:
         styles = StyleTable.build(raw.get("styles") or [])
         layers = [Layer._build(item, styles) for item in raw["layers"]]
         pd = raw["project_data"]
-        return cls(pd["width"], pd["height"], layers, styles, raw.get("version"))
+        doc = cls(pd["width"], pd["height"], layers, styles, raw.get("version"))
+        doc._resolve_patch_layers()
+        return doc
+
+    def _resolve_patch_layers(self) -> None:
+        """A PatchLayer carries no mesh of its own in the raw JSON - it
+        reuses another layer's mesh (named by that other layer's `uuid`, in
+        the patch's own `target_layer_uuid`), redrawn at the patch's OWN
+        position in the layer stack (and its own masking/visibility) - a way
+        to patch a visible seam a later-drawn layer would otherwise leave
+        (e.g. "ayasi-Patch" reusing the palm mesh "ayasi", positioned in
+        front of some finger layers and behind others - see the module
+        docstring's PATCH LAYERS section).
+
+        A PatchLayer's OWN transform/parent_bone/flexi_bone_subset/origin are
+        NOT used for this, deliberately - every PatchLayer found across this
+        tool's reference documents carries a bizarre, seemingly-unrelated own
+        transform (e.g. a 0.147x non-uniform Y squash plus rotation on
+        "ayasi-Patch"; a uniform ~0.49x scale on "Leg_L-Patch"/"Leg_R-Patch"),
+        while its target consistently has the IDENTITY transform (scale 1,
+        translation 0). Rendering with the patch's own transform (this
+        tool's first attempt) reproduces exactly that: a squashed, wrongly-
+        positioned sliver floating away from where the target actually is -
+        confirmed wrong by comparing against the target's own rendered
+        position. Copying the target's transform/parent_bone/
+        flexi_bone_subset/origin onto the patch instead - i.e. the patch
+        renders as a duplicate of the target, in the same place, just at a
+        different point in the draw order - is a heuristic fix for that,
+        not a confirmed-exact reverse-engineering: there is no independent
+        Moho SVG export of a document using PatchLayer to verify the result
+        pixel-for-pixel against (see the module docstring's KNOWN GAPS).
+
+        Resolved here, after the whole tree is built (a target can be
+        anywhere in the document, including a layer not yet constructed at
+        the point its PatchLayer sibling was built) - a target that is a
+        PatchLayer itself, though not observed in any reference document, is
+        handled by iterating until nothing new resolves rather than assuming
+        a single pass suffices. A patch whose target never resolves (missing
+        uuid, or the target itself never gets a mesh) is left with
+        `mesh = None`, which existing code already treats as "draws nothing"
+        - the pre-this-feature behaviour for every PatchLayer, preserved
+        exactly as a fallback.
+        """
+        by_uuid = {layer.uuid: layer for _, layer in self.walk() if layer.uuid}
+        patches = [layer for _, layer in self.walk() if layer.kind is LayerKind.PATCH]
+        resolved_any = True
+        while resolved_any:
+            resolved_any = False
+            for layer in patches:
+                if layer.mesh is None:
+                    target = by_uuid.get(layer.target_layer_uuid)
+                    if target is not None and target.mesh is not None:
+                        layer.mesh = target.mesh
+                        layer.transform = target.transform
+                        layer._raw["parent_bone"] = target._raw.get("parent_bone", -1)
+                        layer._raw["flexi_bone_subset"] = target._raw.get("flexi_bone_subset", "")
+                        layer._raw["origin"] = target._raw.get("origin")
+                        resolved_any = True
 
     def walk(self) -> Iterator[tuple[tuple[Layer, ...], Layer]]:
         """Depth-first, file order (back to front - Moho's own draw order).
@@ -2710,11 +2939,25 @@ class Exporter:
     # -- masking --------------------------------------------------------------
 
     def _mask_source_shapes(self, layer: Layer, ancestors: Sequence[Layer],
-                             frame: float) -> list[str]:
+                             frame: float) -> list[tuple[str, float]]:
         """Every shape contributed by a *mask-source* layer (masking == 2) as
-        filled silhouette paths, in document pixel space.  `ancestors` is
-        `layer`'s own ancestor chain, root-first, NOT including `layer`
-        itself.
+        (filled silhouette path, own-stroke-width-to-exclude-in-px) pairs, in
+        document pixel space.  `ancestors` is `layer`'s own ancestor chain,
+        root-first, NOT including `layer` itself.
+
+        The second element of each pair is what `_mask_element` carves OUT of
+        the mask along that path - see the module docstring's MASKING
+        section: a mask source's own stroke must stay visible on top of
+        anything it masks, confirmed directly against the Moho app.  This is
+        achieved by excluding the source's own stroke band from the mask,
+        NOT by reordering paint order (which was tried and reverted - it
+        conflicts with masking==1 siblings on the very document that
+        confirmed the stroke behaviour; see MASKING).  `0.0` means "exclude
+        nothing for this shape" - either it has no outline, or its outline is
+        brush-styled or tapered (varying point width), where a uniform
+        stroke-width band would not match the real (differently-shaped)
+        outline - unconfirmed geometry, so this tool falls back to the old
+        fill-only contribution for those rather than guessing.
 
         A mask-source layer does not always carry its own mesh: a GroupLayer
         can be marked masking == 2 purely to act as a masking container (seen
@@ -2728,22 +2971,35 @@ class Exporter:
         shape Moho's own export uses both as BellyTexture's internal
         <clipPath> and (once this recursion is applied) as BellyTexture's
         contribution to masking its sibling Head_DarkBlue."""
-        paths: list[str] = []
+        paths: list[tuple[str, float]] = []
         if layer.mesh is not None:
             deform = build_deform_chain(ancestors, layer, frame, self)
             geometries = self._curve_geometries(layer.mesh, frame)
             to_px = self._deformed_pixel_mapper(deform, frame, layer)
             for shape in layer.mesh.shapes:
                 d = build_path_d(geometries, shape.edges, to_px)
-                if d:
-                    paths.append(d)
+                if not d:
+                    continue
+                exclude_width = 0.0
+                if shape.has_outline and not shape.style.brush_name:
+                    point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
+                                     for e in shape.edges}
+                    widths = [self.eval(layer.mesh.points[i].width, frame)
+                             for i in point_indices]
+                    tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                    if not tapered:
+                        point_width = widths[0] if widths else 1.0
+                        line_width = self.eval(shape.style.line_width, frame)
+                        exclude_width = self._stroke_width_px(line_width, point_width)
+                paths.append((d, exclude_width))
         for child in layer.children:
             if child.masking == 2:
                 paths += self._mask_source_shapes(child, ancestors + (layer,), frame)
         return paths
 
     def _mask_sources(self, container: Optional[Layer],
-                       chain_through_container: Sequence[Layer], frame: float) -> list[str]:
+                       chain_through_container: Sequence[Layer],
+                       frame: float) -> list[tuple[str, float]]:
         """Mask geometry contributed by `container`'s masking==2 children, if
         `container` masks its children at all.  `chain_through_container` is
         `container`'s own ancestor chain, root-first, ending in `container`
@@ -2777,18 +3033,32 @@ class Exporter:
                 paths += self._mask_source_shapes(child, chain_through_container, frame)
         return paths
 
-    def _mask_element(self, paths: Sequence[str], mask_id: str, indent: str) -> str:
-        children = "".join(f'<path d="{d}" fill="white" fill-rule="nonzero"/>' for d in paths)
-        x0, y0, w, h = parse_path_bbox(paths, self.settings.mask_padding)
+    def _mask_element(self, paths: Sequence[tuple[str, float]], mask_id: str,
+                       indent: str) -> str:
+        """Build a <mask> from `_mask_source_shapes`' (path, exclude_width)
+        pairs: each source shape's fill is painted white (included), then -
+        painted AFTER, so it wins wherever it overlaps - each shape that
+        carries a nonzero exclude_width gets its own stroke, that width wide,
+        painted BLACK on top.  That carves the source's own stroke band back
+        OUT of the mask, so whatever this mask clips can never paint over it -
+        the source's own stroke stays visible, without changing paint order
+        at all.  See the module docstring's MASKING section."""
+        fills = "".join(f'<path d="{d}" fill="white" fill-rule="nonzero"/>' for d, _ in paths)
+        exclusions = "".join(
+            f'<path d="{d}" fill="none" stroke="black" stroke-width="{w:.3f}"/>'
+            for d, w in paths if w > 0)
+        bbox_paths = [d for d, _ in paths]
+        x0, y0, w, h = parse_path_bbox(bbox_paths, self.settings.mask_padding)
         return (f'{indent}<mask id="{mask_id}" maskUnits="userSpaceOnUse" x="{x0:.1f}" '
-                f'y="{y0:.1f}" width="{w:.1f}" height="{h:.1f}">{children}</mask>')
+                f'y="{y0:.1f}" width="{w:.1f}" height="{h:.1f}">{fills}{exclusions}</mask>')
 
     # -- shape rendering / SVG assembly --------------------------------------
 
     def _render_mesh(self, mesh: Mesh, to_px: Callable[[Vec2], Vec2], frame: float,
-                      indent: str) -> tuple[list[str], list[Vec2]]:
+                      indent: str, suppress_outline: bool = False) -> tuple[list[str], list[Vec2]]:
         geometries = self._curve_geometries(mesh, frame)
-        return ShapeGroupRenderer(self, mesh, geometries, to_px, frame, indent).render()
+        return ShapeGroupRenderer(self, mesh, geometries, to_px, frame, indent,
+                                   suppress_outline).render()
 
     def _viewbox(self, pixel_points: Sequence[Vec2], crop: bool) -> tuple[float, float, float, float]:
         if crop and pixel_points:
@@ -2838,7 +3108,8 @@ class Exporter:
             chain = build_deform_chain(ancestors, layer, frame, self)
             to_px = self._deformed_pixel_mapper(chain, frame, layer)
 
-        body, pixel_points = self._render_mesh(layer.mesh, to_px, frame, indent="    ")
+        body, pixel_points = self._render_mesh(layer.mesh, to_px, frame, indent="    ",
+                                               suppress_outline=layer.kind is LayerKind.PATCH)
         self._active_actions = []          # see the note in _mask_sources for why this
                                              # ordering (clear, THEN compute the mask) matters
 
@@ -2877,6 +3148,26 @@ class Exporter:
             if container is not None and container.kind is LayerKind.SWITCH:
                 active_child = container.switch_active_child(frame, self)
 
+            # NOTE (investigation in progress, see the module docstring's
+            # MASKING section): confirmed against the Moho app that a
+            # masking==2 sibling's own stroke stays fully visible on top of
+            # whatever it masks (Bandit's Head_DarkBlue/BellyTexture pair) -
+            # this tool still draws it at its plain list position, which is
+            # KNOWN WRONG for that specific pair.  A naive "move masking==2
+            # to render after every masking==0 sibling" fix was tried and
+            # reverted: on this same container most siblings (Arm_B, Tail,
+            # Ears, Muzzle, Nose, EyeBrow, Arm_F, ...) are masking==1
+            # ("exempt"), and BellyTexture originally precedes some of them
+            # (e.g. Muzzle) - forcing "masking==2 after masking==0" broke
+            # that untouched relationship too, dragging BellyTexture's
+            # opaque fill on top of the character's eyes/muzzle/nose, which
+            # is visibly worse than the bug it was meant to fix.  There is no
+            # single global reorder of `layers` that satisfies both "every
+            # masking==2 after every masking==0" and "never change relative
+            # order against any masking==1 sibling" for this document - the
+            # two constraints conflict for BellyTexture specifically.  Not
+            # fixed pending more evidence on how masking==1 siblings should
+            # interact with this - see KNOWN GAPS.
             for layer in layers:
                 if not layer.visible and not include_hidden:
                     continue
@@ -2894,7 +3185,8 @@ class Exporter:
                     self._layer_scale = world_here.uniform_scale() or 1.0
                     chain = build_deform_chain(ancestors, layer, frame, self)
                     to_px = self._deformed_pixel_mapper(chain, frame, layer)
-                    body, pts = self._render_mesh(layer.mesh, to_px, frame, pad + "  ")
+                    body, pts = self._render_mesh(layer.mesh, to_px, frame, pad + "  ",
+                                                  suppress_outline=layer.kind is LayerKind.PATCH)
                     self._active_actions = []
                     pixel_points.extend(pts)
                     if body:
@@ -2917,8 +3209,9 @@ class Exporter:
                         inner.append(f"{pad}</g>")
                     else:
                         emit(layer.children, world_here, depth, layer, ancestors + (layer,))
-                # else: neither a mesh nor a container (e.g. PatchLayer) -
-                # Moho draws nothing at all for it, not even an empty <g>.
+                # else: neither a mesh nor a container - e.g. an unresolved
+                # PatchLayer (see PATCH LAYERS) whose target never got a
+                # mesh - draws nothing at all, not even an empty <g>.
 
         emit(self.document.layers, IDENTITY_MATRIX, 0, None, ())
         return self._wrap(self._viewbox(pixel_points, crop), inner)
@@ -2965,13 +3258,25 @@ class ShapeGroupRenderer:
     """
 
     def __init__(self, exporter: Exporter, mesh: Mesh, geometries: list[CurveGeometry],
-                 to_px: Callable[[Vec2], Vec2], frame: float, indent: str):
+                 to_px: Callable[[Vec2], Vec2], frame: float, indent: str,
+                 suppress_outline: bool = False):
         self.exporter = exporter
         self.mesh = mesh
         self.geometries = geometries
         self.to_px = to_px
         self.frame = frame
         self.indent = indent
+        # A resolved PatchLayer shares its target's Mesh/Shape objects
+        # verbatim (Document._resolve_patch_layers), so `shape.has_outline`
+        # itself cannot be overridden without also affecting the target's own
+        # separate render pass elsewhere in the tree.  Confirmed against real
+        # Moho ("ayasi-Patch"/masking==2 and "Left Bicep-Patch"/masking==0,
+        # both patches, neither shows a stroke in Moho's own canvas while
+        # their respective targets do) that a PatchLayer redraws only its
+        # target's FILL, never its outline - independent of masking, so this
+        # is keyed on layer kind, not on any JSON field.  See the module
+        # docstring's PATCH LAYERS section.
+        self.suppress_outline = suppress_outline
         self.defs: list[str] = []
         self.body: list[str] = []
         self.pixel_points: list[Vec2] = []
@@ -3046,7 +3351,12 @@ class ShapeGroupRenderer:
         brush_ref = None
         brush_asset_name = None
         brush_asset = None
-        if shape.has_outline and style.brush_name and style.brush_tint:
+        # A resolved PatchLayer's shapes are the shared target Shape objects
+        # (has_outline is whatever the TARGET declares) - see
+        # ShapeGroupRenderer.suppress_outline for why the target's own
+        # outline must not be redrawn here.
+        outline_enabled = shape.has_outline and not self.suppress_outline
+        if outline_enabled and style.brush_name and style.brush_tint:
             brush_asset = exp._get_brush_asset(style.brush_name)
             if brush_asset is not None:
                 brush_asset_name = style.brush_name
@@ -3055,7 +3365,7 @@ class ShapeGroupRenderer:
                 # mask/filter path, which needs its <mask> defs built now.
                 if Image is None:
                     brush_ref = exp._brush_mask_refs(style.brush_name)
-        if shape.has_outline:
+        if outline_enabled:
             if brush_asset is not None:
                 # A tapered (varying-width) shape gets brush treatment too,
                 # not just a uniform one - BrushStampOutliner scales each
