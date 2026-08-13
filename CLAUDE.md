@@ -16,15 +16,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file Python 3 CLI (`moho2svg.py`, ~2450 lines) that exports Moho vector
+A single-file Python 3 CLI (`moho2svg.py`, ~2900 lines) that exports Moho vector
 artwork (`.mohoproj` / `.animeproj`, which are JSON) to SVG. There is no build
-system, package manifest, test suite, or git repository (yet) — just the script
-plus a handful of reference SVGs (`AddBone.svg`, `Bandit.svg`, `ReparentBone.svg`,
-`SketchBone.svg`, `WhatIsBone.svg`) that were exported by Moho itself and used as
-ground truth during development.
+system or package manifest, and no automated test suite — verification means
+running an export against a real project file and comparing against a
+reference SVG (see below).
 
-The script has no third-party dependencies — only the stdlib (`argparse`, `json`,
-`math`, `os`, `re`, `sys`, `dataclasses`, `enum`, `typing`).
+The script has no third-party dependencies — only the stdlib (`argparse`, `base64`,
+`json`, `math`, `os`, `random`, `re`, `struct`, `sys`, `zipfile`, `dataclasses`,
+`enum`, `typing`).
+
+Repository layout:
+
+- `moho2svg.py` — the tool itself.
+- `docs/` — usage guide (`exporting-svg.md`) and file-format reference
+  (`moho-project-file-format.md`) for humans; read these before the module
+  docstring if you want a shorter orientation first.
+- `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
+  used for development/regression-checking.
+- `svg/` — the corresponding exported SVGs, tracked as reference output
+  (`make gen` regenerates them from `moho/`).
+- `styles/Brushes/` — gitignored symlink to Moho's own installed brush
+  textures (`make styles.brushes` creates it), used to approximate textured
+  brush line styles — see `docs/exporting-svg.md` § Brush textures.
+
+**`.mohobrush` files are ZIP archives, not images or a custom binary format**,
+despite the extension — confirmed by extracting and parsing all 101 shipped
+with this Moho install (`Contents/Resources/Support/*/Brushes/`), zero
+exceptions. Each contains exactly one member, `brush.json`, a plain JSON
+object with keys `version`, `align`, `jitter`, `spacing`, `angleDrift`,
+`randomize`, `randomOrder`, `mergedAlpha`, `sizeVariationAmp`,
+`sizeVariationScale`, `randomInterval`, `brushFiles` (a list of
+`{"brushFileRef": {"relativeTo": "Project", "path": "<asset name>"}}`), and
+sometimes `hueDrift`/`satDrift`/`valDrift`. `Exporter._brush_library_defaults`
+in `moho2svg.py` already reads `randomOrder`/`randomInterval` from this via
+stdlib `zipfile` (no new dependency needed to read more of it) — `sizeVariationAmp`/
+`sizeVariationScale`/`brushFiles` are confirmed present but not yet used by
+anything in this repo (`brushFiles[].brushFileRef.path` in particular could
+replace the current name/suffix-guessing asset lookup with an authoritative
+one, if that heuristic ever proves insufficient - see
+`docs/moho-project-file-format.md` § 8.1).
 
 ## Commands
 
@@ -40,7 +71,9 @@ canvas), `--local` (ignore ancestor transforms/bone deformation — raw mesh
 coords at canvas scale), `--flat` (with `--combined`, skip nested `<g>` per
 layer), `--include-hidden`, `--mask-container NAME` (force a named layer to act
 as a mask container when `group_mask` doesn't already cover it), `--stroke-mul`
-(default 2.0; see STROKE WIDTH below).
+(default 2.0; see STROKE WIDTH below), `--brush-dir` (default `styles/Brushes`;
+see BRUSH STROKES below and `docs/exporting-svg.md`). Full flag reference:
+`docs/exporting-svg.md`.
 
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and
@@ -65,12 +98,12 @@ varies), boolean shape combination (`combo_mode`), the two-field masking
 mechanism (`group_mask` + per-child `masking`), Smart Bones (dial bones that
 select a pose via inverting a "pose curve"), and bone skinning (rigid vs.
 flexible/region binding). Do not re-derive or "fix" any of this without new
-reference evidence — several things that look like bugs (e.g. asymmetric bone
-scale in `Skeleton.world_matrices`, the top-level mask exception in
-`Exporter._mask_source_shapes`) are intentionally preserved because they match
-real Moho output and are flagged rather than "corrected". See the docstring's
-KNOWN GAPS section for what is genuinely unresolved (combo_mode 2, gradient
-placement precision, bone-weight-falloff shape, PatchLayer).
+reference evidence — some things that look like bugs (e.g. asymmetric bone
+scale in `Skeleton.world_matrices`) are intentionally preserved because they
+match real Moho output and are flagged rather than "corrected". See the
+docstring's KNOWN GAPS section for what is genuinely unresolved (combo_mode 2,
+gradient placement precision, bone-weight-falloff shape, PatchLayer, brush
+stroke approximations).
 
 ### Pipeline, in order
 

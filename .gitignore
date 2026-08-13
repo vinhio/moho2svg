@@ -8,6 +8,7 @@ moho/
 
 # Symlink to the Moho app's installed brush textures (make styles.brushes)
 styles/Brushes
+svg/png/
 
 # Scratch analysis notes
 tmp/
