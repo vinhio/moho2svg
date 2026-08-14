@@ -10,6 +10,46 @@
 
 **Spec:** [`moho-to-lottie-design.md`](moho-to-lottie-design.md) — read it before Task 1. This plan implements that design and does not restate its reasoning.
 
+---
+
+## Progress
+
+This table is the single place to read overall status. Each task's own steps
+carry `- [ ]` checkboxes further down.
+
+**How to update it.** A task becomes `DONE` only when its **final commit has
+landed** and its stated check passed — not when the code is written. Tick the
+task's step checkboxes as you go, then flip the row and record the commit.
+Anything that is started but unfinished is `IN PROGRESS`, and its row says
+which step it stopped at, so a reader knows where to resume.
+
+| # | Work item | Status | Commit |
+|---|---|---|---|
+| P1 | Feasibility probes — path vertex stability, motion split, feature counts | **DONE** | *(throwaway scripts, not committed)* |
+| P2 | Fix: load `1021`-format curve points that omit weight and offset | **DONE** | `be27b10` |
+| P3 | Fix: reset the `Channel` cache when a document is parsed | **DONE** | `5c4b8c3` |
+| P4 | Design document | **DONE** | `87abe40` |
+| P5 | This plan | **DONE** | `496f35c` |
+| 1 | A Bezier path builder beside the SVG one | TODO | — |
+| 2 | One shared tree walk | TODO | — |
+| 3 | A Lottie file with one static frame | TODO | — |
+| 4 | Path keyframes across the frame range | TODO | — |
+| 5 | Gradients | TODO | — |
+| 6 | Masking | TODO | — |
+| 7 | Switch layers | TODO | — |
+| 8 | Warnings, make targets and optional schema validation | TODO | — |
+
+Two items cannot be closed by any task above, because both need a real Lottie
+player. They are described at the end of this document and stay open until
+someone loads the output in lottie-web:
+
+| # | Open question | Status |
+|---|---|---|
+| Q1 | Is Lottie's `op` exclusive? Task 3 assumes `end_frame + 1` | OPEN |
+| Q2 | Does lottie-web apply a style to the shapes the writer intends? | OPEN |
+
+---
+
 ## Global Constraints
 
 - **English only** in every file, comment, docstring, commit message and printed string. See `.claude/ai/AGENTS.md`.
@@ -37,6 +77,8 @@
 ---
 
 ## Task 1: A Bezier path builder beside the SVG one
+
+**Status:** TODO
 
 **Files:**
 - Modify: `moho2svg.py` — add `build_path_bezier()` directly after `build_path_d()`
@@ -71,7 +113,14 @@ from moho2svg import (Channel, Exporter, PathTracer, build_deform_chain,
 
 MOHO_DIR = "moho"
 FRAMES = [0.0, 7.0, 23.0]
-TOLERANCE = 1e-6
+
+# build_path_bezier() rounds to 3 decimals, matching build_path_d()'s
+# f"{x:.3f}", and its tangents are DIFFERENCES of two rounded values, so a
+# rebuilt control point can be off by up to two half-ulps of 0.001.  The
+# tolerance has to sit above that, or a correct implementation fails this
+# check.  It is still tight enough to catch any real geometry mistake, which
+# would be off by pixels, not by a thousandth of one.
+TOLERANCE = 3e-3
 
 
 def absolute_segments(bezier):
@@ -271,6 +320,8 @@ git commit -m "Add a Lottie bezier path builder beside the SVG one"
 
 ## Task 2: One shared tree walk
 
+**Status:** TODO
+
 **Files:**
 - Modify: `moho2svg.py` — `Exporter.export_document` (the `emit` closure) and a new module-level `RenderItem` dataclass plus `walk_render_tree()`
 
@@ -352,6 +403,8 @@ git commit -m "Extract the layer tree walk so a second exporter can reuse it"
 ---
 
 ## Task 3: A Lottie file with one static frame
+
+**Status:** TODO
 
 **Files:**
 - Modify: `moho2svg.py` — add `fps`, `start_frame`, `end_frame` to `Document`
@@ -586,6 +639,8 @@ git commit -m "Write a static Lottie frame from a Moho document"
 
 ## Task 4: Path keyframes across the frame range
 
+**Status:** TODO
+
 **Files:**
 - Modify: `moho2lottie.py` — `_build_shapes` and `_build_layers`
 - Create: `tools/check_lottie_geometry.py`
@@ -619,7 +674,10 @@ For each checked frame it must:
    does;
 2. walk the emitted file's `layers[*].shapes[*].it[*]` picking `ty == "sh"`
    elements, taking the static `k` or the keyframe whose `t` equals the frame;
-3. compare `v`, `i`, `o` and `c` element by element with a `1e-6` tolerance;
+3. compare `v`, `i`, `o` and `c` element by element with a `3e-3` tolerance —
+   both sides come from `build_path_bezier`, so they are rounded the same way,
+   but keep the same tolerance as `check_bezier_roundtrip.py` so the two
+   scripts cannot disagree about what "equal" means;
 4. print the layer name, shape index and frame of every disagreement.
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -683,6 +741,8 @@ git commit -m "Bake Moho deformation into Lottie path keyframes"
 ---
 
 ## Task 5: Gradients
+
+**Status:** TODO
 
 **Files:**
 - Modify: `moho2lottie.py` — `_build_shapes`
@@ -772,6 +832,8 @@ git commit -m "Write Moho gradients as Lottie gradient fills"
 ---
 
 ## Task 6: Masking
+
+**Status:** TODO
 
 **Files:**
 - Modify: `moho2lottie.py` — `_build_layers`, plus a new `_mask_properties`
@@ -867,6 +929,8 @@ git commit -m "Carry Moho masking into Lottie as per-layer masks"
 
 ## Task 7: Switch layers
 
+**Status:** TODO
+
 **Files:**
 - Modify: `moho2lottie.py` — `_build_layers`
 
@@ -935,6 +999,8 @@ git commit -m "Emit switch layer children as Lottie visibility windows"
 ---
 
 ## Task 8: Warnings, make targets and optional schema validation
+
+**Status:** TODO
 
 **Files:**
 - Modify: `moho2lottie.py`, `Makefile`, `.gitignore`
