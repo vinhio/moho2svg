@@ -108,6 +108,34 @@ class LottieExporter:
         everything anyway (every layer gets an identity transform), so it
         keeps only "mesh" events.
 
+        Walks the tree ONCE PER FRAME and, for each "mesh" item,
+        IMMEDIATELY extracts that frame's geometry/style into per-shape
+        accumulators (_accumulate_frame) - it does NOT collect RenderItems
+        first and process them afterwards.  That distinction is load-
+        bearing, not stylistic: Exporter.to_px's underlying skin cache reads
+        exporter._active_actions (and stroke width reads
+        exporter._layer_scale) LAZILY, at CALL time, not at closure-creation
+        time - both are "sticky" scratch state that walk_render_tree only
+        guarantees correct WHILE an item is the current one being yielded
+        (see walk_render_tree's own docstring). An earlier version of this
+        method collected every frame's RenderItem into a dict keyed by
+        layer identity and only called `.to_px()` on them afterwards, once
+        all frames had already been walked - by then `_active_actions` held
+        whatever the LAST-walked layer's context was, so every geometry
+        call silently used the WRONG Smart Bone context. Caught by
+        tools/check_lottie_geometry.py, which showed coordinates off by
+        hundreds of pixels, not a rounding-sized discrepancy.
+
+        A mesh layer's SET of shapes and their has_fill/has_outline/
+        combo_mode never varies by frame (only their geometry does), so
+        which layers/shapes exist at all is decided from frame[0]'s walk
+        alone; a layer present there but missing from a later frame's walk
+        would mean its visibility itself is animated - not something any
+        document in this repository's sample corpus does, and not yet
+        handled here (a SwitchLayer's active child changing across the
+        range is Task 7's job specifically). Raises rather than guessing if
+        that assumption ever breaks.
+
         Moho draws its layer list back to front, which is the order
         walk_render_tree yields "mesh" events in.  Lottie draws the FIRST
         layer in its own list on top, so the finished list is reversed -
@@ -115,13 +143,24 @@ class LottieExporter:
         noticing: the artwork would still look right, just with the wrong
         parts in front.
         """
+        order: list = []                      # Layer objects, frame[0]'s draw order
+        accumulators: dict = {}               # id(layer) -> list of per-shape accumulators
+        for frame in frames:
+            for item in walk_render_tree(self.exporter, frame, include_hidden):
+                if item.event != "mesh":
+                    continue
+                lid = id(item.layer)
+                first_time = lid not in accumulators
+                if first_time:
+                    order.append(item.layer)
+                    accumulators[lid] = []
+                self._accumulate_frame(item, frame, accumulators[lid], first_time)
+
         collected = []
-        for item in walk_render_tree(self.exporter, frames[0], include_hidden):
-            if item.event != "mesh":
-                continue
-            shapes = self._build_shapes(item, frames)
+        for layer in order:
+            shapes = self._finalize_shapes(layer, accumulators[id(layer)], frames)
             if shapes:
-                collected.append(self._shape_layer(item.layer.name, shapes))
+                collected.append(self._shape_layer(layer.name, shapes))
         collected.reverse()                  # Moho back-to-front -> Lottie front-to-back
         for index, layer in enumerate(collected, start=1):
             layer["ind"] = index
@@ -151,8 +190,206 @@ class LottieExporter:
                           for e in edges}
         return [self.exporter.eval(mesh.points[i].width, frame) for i in point_indices]
 
-    def _build_shapes(self, item, frames) -> list:
-        """Every Moho shape of one layer, as Lottie shape-group elements.
+    def _path_property(self, per_frame: list, frames) -> dict:
+        """A Lottie path property: static when the geometry never moves,
+        keyframed otherwise.
+
+        Writing an unmoving shape once instead of once per frame is what
+        keeps the file in single-digit megabytes rather than hundreds -
+        measured at roughly 293 MB versus about 10 MB across this
+        repository's sample documents.
+        """
+        if all(b == per_frame[0] for b in per_frame[1:]):
+            return {"a": 0, "k": per_frame[0]}
+        return {"a": 1,
+                "k": [{"t": float(f), "s": [b]} for f, b in zip(frames, per_frame)]}
+
+    def _scalar_property(self, per_frame: list, frames) -> dict:
+        """A Lottie scalar property (e.g. stroke width): static when the
+        value never changes across frames, keyframed otherwise.
+
+        Stroke width depends on exporter._layer_scale, which is a per-frame
+        value in principle (an animated bone scale would change it) - this
+        exists so that case degrades to a correct keyframed "w" instead of a
+        wrong static one, if it ever occurs.
+
+        It does NOT currently occur anywhere in this repository's sample
+        corpus: a first attempt to measure it grouped scale samples by
+        layer.name, which conflated distinct layers that happen to share a
+        name (WhatIsBone.animeproj has three separately-modelled layers all
+        named "goz-sol", each with its own CONSTANT scale of 1.0, 0.79 and
+        1.0) into what looked like one layer whose scale varies by 21% over
+        time. Re-measured keyed by layer IDENTITY instead: 0 of 103 layers
+        in WhatIsBone.animeproj, 0 of 21 in Bandit.mohoproj, 0 of 86 in
+        SketchBone.animeproj actually vary across their own full frame
+        range. So this method's keyframed branch is exercised by no
+        document tested so far - kept anyway, since a genuinely
+        scale-animated bone is a real Moho capability, not a fabricated
+        edge case, and the static branch already covers everything actually
+        observed.
+        """
+        if all(abs(v - per_frame[0]) < 1e-9 for v in per_frame[1:]):
+            return {"a": 0, "k": per_frame[0]}
+        return {"a": 1,
+                "k": [{"t": float(f), "s": [v]} for f, v in zip(frames, per_frame)]}
+
+    def _sh_elements(self, per_frame_subpaths: list, frames) -> list:
+        """One Lottie "sh" element per subpath, each a (possibly keyframed)
+        _path_property built across `frames`.
+
+        `per_frame_subpaths` is one list-of-bezier-dicts PER FRAME (i.e.
+        build_path_bezier()'s own return value, accumulated once per
+        frame); this transposes it into one list-of-per-frame-values PER
+        SUBPATH, which is what _path_property expects.  Every frame is
+        asserted (by the caller, before this runs) to agree on subpath
+        count - see _assert_stable.
+        """
+        return [{"ty": "sh", "ks": self._path_property(list(per_subpath), frames)}
+                for per_subpath in zip(*per_frame_subpaths)]
+
+    def _assert_stable(self, layer, shape_name, kind: str, per_frame: list) -> None:
+        """Raise if a shape's traced outline changes structure - subpath
+        count, vertex count per subpath, or open/closed - across `frames`,
+        which would make Lottie's own keyframe interpolation undefined
+        (mismatched vertex counts between two path keyframes).
+
+        Measured never to happen for real Moho documents: 0 unstable of
+        2,659 shapes, sampled at 12 frames each across 18 documents (see
+        docs/moho-to-lottie-design.md section 5.3). A failure here means a
+        document exercises something genuinely new, not that this check is
+        noise, so it is not silently tolerated.
+        """
+        base = [(len(b["v"]), b["c"]) for b in per_frame[0]]
+        for frame_index, subpaths in enumerate(per_frame[1:], start=1):
+            got = [(len(b["v"]), b["c"]) for b in subpaths]
+            if got != base:
+                raise ValueError(
+                    f"{layer.name!r} shape {shape_name!r} ({kind}): outline "
+                    f"structure changed between frame index 0 and "
+                    f"{frame_index} ({base} -> {got}) - Lottie cannot "
+                    f"keyframe this; see moho-to-lottie-design.md section 5.3")
+
+    def _accumulate_frame(self, item, frame: float, accs: list, first_time: bool) -> None:
+        """Extract ONE frame's worth of data for every shape of `item`'s
+        layer, appending to `accs` (one accumulator dict per shape, created
+        on `first_time` and reused - by matching POSITION, not identity -
+        on every later frame, since a Mesh's own shape list/order never
+        changes across frames).
+
+        Everything that reads exporter.eval()/to_px()/_layer_scale happens
+        HERE, synchronously, while `item` is the current RenderItem - see
+        _build_layers's own docstring for why that is load-bearing.  Style
+        (colour, line width, brush/taper classification) is captured only
+        ONCE, inside _new_accumulator, on `first_time`.
+        """
+        exp = self.exporter
+        mesh = item.layer.mesh
+        shape_index = 0
+        for shape in mesh.shapes:
+            if not shape.edges:
+                continue
+            if first_time:
+                accs.append(self._new_accumulator(item.layer, shape, frame))
+            acc = accs[shape_index]
+            shape_index += 1
+
+            acc["fill_per_frame"].append(
+                build_path_bezier(item.geometries, shape.edges, item.to_px))
+
+            if acc["outline_kind"] == "taper":
+                width_px = exp._stroke_width_px(acc["line_width"], 1.0)
+                acc["outline_per_frame"].append(exp.tapered_outliner.build_bezier(
+                    item.geometries, shape.edges, item.to_px, width_px))
+            elif acc["outline_kind"] == "stroke":
+                widths = self._point_widths(mesh, shape.edges, frame)
+                # Compare against the STORED tapered flag (from frame0), not
+                # against outline_kind == "stroke" - a brush-styled shape's
+                # outline_kind is ALWAYS "stroke" (the brush fallback, see
+                # _new_accumulator) even when it is genuinely tapered, so
+                # checking outline_kind here would flag every brush+tapered
+                # shape as "changed" on its very first frame.  This bug was
+                # caught immediately: 12 of 19 sample documents raised on
+                # their second frame the first time this check was written.
+                other_tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                if other_tapered != acc["tapered"]:
+                    raise ValueError(
+                        f"{item.layer.name!r} shape {acc['name']!r}: tapered-ness "
+                        f"of the outline changes at frame {frame} - point width "
+                        f"appears to be animated, which this exporter does not "
+                        f"yet handle")
+                point_width = widths[0] if (widths and not other_tapered) else 1.0
+                width_px = exp._stroke_width_px(acc["line_width"], point_width)
+                acc["outline_width_per_frame"].append(width_px)
+                # visible_only=True + close=False, NEVER close=True, matching
+                # build_path_d()'s own stroke_path call in _render_shape -
+                # see build_path_bezier()'s docstring for why an open path
+                # renders a genuinely different stroke join at the seam than
+                # a closed one.
+                acc["outline_per_frame"].append(build_path_bezier(
+                    item.geometries, shape.edges, item.to_px,
+                    visible_only=True, close=False))
+
+    def _new_accumulator(self, layer, shape, frame0: float) -> dict:
+        """Build shape's per-frame accumulator, capturing everything that is
+        NOT frame-dependent in this corpus (style, brush/taper
+        classification - see _accumulate_frame's own docstring) exactly
+        once, synchronously, while frame0's RenderItem is current.
+        """
+        exp = self.exporter
+        if shape.combo_mode != 0:
+            self.warnings["combo_mode"] += 1
+        style = shape.style
+
+        outline_kind = None
+        line_width = None
+        outline_color = None
+        outline_cap = None
+        tapered = False
+        if shape.has_outline:
+            line_width = exp.eval(style.line_width, frame0)
+            outline_color = Color.from_raw(exp.eval(style.line_color, frame0))
+            widths0 = self._point_widths(layer.mesh, shape.edges, frame0)
+            tapered = (max(widths0) - min(widths0) > 1e-6) if widths0 else False
+            if style.brush_name:
+                self.warnings["brush"] += 1
+            # A brush-styled shape's outline_kind is ALWAYS "stroke" (the
+            # brush fallback), even when it is genuinely tapered - `tapered`
+            # itself is stored separately below and is what
+            # _accumulate_frame actually checks for cross-frame stability,
+            # since outline_kind alone conflates two different questions.
+            outline_kind = "taper" if (tapered and not style.brush_name) else "stroke"
+            outline_cap = LINE_CAPS.get(style.line_cap_name(), 2)
+
+        fill_color = None
+        if shape.has_fill:
+            # A gradient fill (style.fill_style["type"] == "SS_Gradient2") is
+            # drawn as this flat fill_color for now - Task 5 adds a real
+            # Lottie "gf" gradient fill.  Counted, not silent: a gradient-
+            # filled shape drawn flat is a real, visible gap until then.
+            if isinstance(style.fill_style, dict) and \
+                    style.fill_style.get("type") == "SS_Gradient2":
+                self.warnings["gradient"] += 1
+            fill_color = Color.from_raw(exp.eval(style.fill_color, frame0))
+
+        return {
+            "name": shape.name or "",
+            "has_fill": shape.has_fill,
+            "fill_color": fill_color,
+            "fill_per_frame": [],
+            "outline_kind": outline_kind,
+            "tapered": tapered,
+            "line_width": line_width,
+            "outline_color": outline_color,
+            "outline_cap": outline_cap,
+            "outline_per_frame": [],
+            "outline_width_per_frame": [],
+        }
+
+    def _finalize_shapes(self, layer, accs: list, frames) -> list:
+        """Turn every shape's already-collected per-frame data into Lottie
+        shape-group elements.  Pure data transformation - no exp.eval()/
+        to_px() calls here, which is exactly why _accumulate_frame had to
+        do all of that eagerly (see its own docstring).
 
         Each Moho shape becomes up to TWO Lottie groups - one for its fill,
         one for its outline - rather than one group holding both a "fl" and
@@ -168,43 +405,33 @@ class LottieExporter:
         reproduces _render_shape's own paint order (fill drawn first/under,
         the outline drawn after/on top).
         """
-        exp, frame = self.exporter, frames[0]
-        style_names_used = set()
+        style_names_used: set = set()
         out = []
-        for shape in item.layer.mesh.shapes:
-            if not shape.edges:
-                continue
-            if shape.combo_mode != 0:
-                self.warnings["combo_mode"] += 1
-
+        for acc in accs:
             # Built unconditionally, even for an outline-only shape, purely
             # as the SVG writer's own "does this shape have any geometry at
             # all" gate - mirrors build_path_d()'s use in _render_shape.
-            fill_beziers = build_path_bezier(item.geometries, shape.edges, item.to_px)
-            if not fill_beziers:
+            if not acc["fill_per_frame"][0]:
                 continue
+            if len(acc["fill_per_frame"]) != len(frames):
+                raise ValueError(
+                    f"{layer.name!r} shape {acc['name']!r}: only "
+                    f"{len(acc['fill_per_frame'])}/{len(frames)} frames were "
+                    f"captured for it - its own visibility appears to be "
+                    f"animated, which this exporter does not yet handle")
+            self._assert_stable(layer, acc["name"], "fill", acc["fill_per_frame"])
 
-            style = shape.style
-            name = shape.name or ""
+            name = acc["name"]
             if name in style_names_used:
                 name = f"{name}_{len(style_names_used)}"
             style_names_used.add(name)
 
-            outline_group = self._build_outline_group(item, shape, style, frame, name)
-            if outline_group is not None:
-                out.append(outline_group)
+            if acc["outline_kind"] is not None and acc["outline_per_frame"][0]:
+                out.append(self._finalize_outline_group(layer, acc, frames, name))
 
-            if shape.has_fill:
-                # A gradient fill (style.fill_style["type"] == "SS_Gradient2")
-                # is drawn as this same flat fill_color for now - Task 5 adds
-                # a real Lottie "gf" gradient fill.  Counted, not silent: a
-                # gradient-filled shape drawn flat is a real, visible gap
-                # until then.
-                if isinstance(style.fill_style, dict) and \
-                        style.fill_style.get("type") == "SS_Gradient2":
-                    self.warnings["gradient"] += 1
-                color = Color.from_raw(exp.eval(style.fill_color, frame))
-                elements = [{"ty": "sh", "ks": {"a": 0, "k": b}} for b in fill_beziers]
+            if acc["has_fill"]:
+                color = acc["fill_color"]
+                elements = self._sh_elements(acc["fill_per_frame"], frames)
                 elements.append({"ty": "fl", "r": 1,
                                   "c": {"a": 0, "k": [color.r, color.g, color.b]},
                                   "o": {"a": 0, "k": color.a * 100}})
@@ -212,63 +439,31 @@ class LottieExporter:
                 out.append({"ty": "gr", "nm": f"{name}_fill", "it": elements})
         return out
 
-    def _build_outline_group(self, item, shape, style, frame: float, name: str):
-        """One Moho shape's outline as a Lottie group, or None if the shape
-        has no outline to draw.
-
-        Mirrors _render_shape's own branching (brush -> tapered -> plain),
-        simplified for this exporter's v1 scope: a brush-styled outline
-        counts a warning and falls back to a plain uniform stroke (the same
-        fallback Exporter._mask_source_shapes already uses when a mask
-        source's own outline is brush-styled or tapered, for the same
-        reason - the real geometry is unconfirmed) instead of the textured
-        dabs the SVG writer can produce.
-        """
-        if not shape.has_outline:
-            return None
-        exp = self.exporter
-        line_width = exp.eval(style.line_width, frame)
-        color = Color.from_raw(exp.eval(style.line_color, frame))
-        widths = self._point_widths(item.layer.mesh, shape.edges, frame)
-        tapered = (max(widths) - min(widths) > 1e-6) if widths else False
-
-        if style.brush_name:
-            self.warnings["brush"] += 1
-
-        if tapered and not style.brush_name:
-            width_px = exp._stroke_width_px(line_width, 1.0)
-            beziers = exp.tapered_outliner.build_bezier(
-                item.geometries, shape.edges, item.to_px, width_px)
-            if not beziers:
-                return None
-            elements = [{"ty": "sh", "ks": {"a": 0, "k": b}} for b in beziers]
+    def _finalize_outline_group(self, layer, acc: dict, frames, name: str) -> dict:
+        """One shape's outline as a Lottie group - the pure-data half of
+        what used to be _build_outline_group, split out once geometry
+        collection became eager (see _accumulate_frame)."""
+        self._assert_stable(layer, acc["name"], f"outline({acc['outline_kind']})",
+                             acc["outline_per_frame"])
+        color = acc["outline_color"]
+        elements = self._sh_elements(acc["outline_per_frame"], frames)
+        if acc["outline_kind"] == "taper":
             # A closed ring comes back as two counter-wound loops (see
             # TaperedStrokeOutliner.build_bezier) that need an evenodd fill
             # to leave the hole between them; an open "capsule" polygon is
-            # a single loop and needs the ordinary nonzero rule.
-            fill_rule = 2 if len(beziers) > 1 else 1
+            # a single loop and needs the ordinary nonzero rule.  Subpath
+            # count is asserted stable above, so checking frame 0 suffices.
+            fill_rule = 2 if len(acc["outline_per_frame"][0]) > 1 else 1
             elements.append({"ty": "fl", "r": fill_rule,
                               "c": {"a": 0, "k": [color.r, color.g, color.b]},
                               "o": {"a": 0, "k": color.a * 100}})
         else:
-            point_width = widths[0] if (widths and not tapered) else 1.0
-            width_px = exp._stroke_width_px(line_width, point_width)
-            # visible_only=True + close=False, NEVER close=True, matching
-            # build_path_d()'s own stroke_path call in _render_shape - see
-            # build_path_bezier()'s docstring for why an open path renders a
-            # genuinely different stroke join at the seam than a closed one.
-            beziers = build_path_bezier(item.geometries, shape.edges, item.to_px,
-                                         visible_only=True, close=False)
-            if not beziers:
-                return None
-            elements = [{"ty": "sh", "ks": {"a": 0, "k": b}} for b in beziers]
             elements.append({"ty": "st",
                               "c": {"a": 0, "k": [color.r, color.g, color.b]},
                               "o": {"a": 0, "k": color.a * 100},
-                              "w": {"a": 0, "k": width_px},
-                              "lc": LINE_CAPS.get(style.line_cap_name(), 2),
+                              "w": self._scalar_property(acc["outline_width_per_frame"], frames),
+                              "lc": acc["outline_cap"],
                               "lj": 2})
-
         elements.append({"ty": "tr", **identity_transform()})
         return {"ty": "gr", "nm": f"{name}_line", "it": elements}
 
@@ -279,14 +474,24 @@ def main() -> None:
                     "Lottie JSON animation.")
     parser.add_argument("project")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--frame", type=float, default=0,
-                        help="frame to export (single-frame still, for now)")
+    parser.add_argument("--frame", type=float,
+                        help="export a single still frame instead of the document's "
+                             "own [start_frame, end_frame] range")
     parser.add_argument("--include-hidden", action="store_true")
     args = parser.parse_args()
 
     document = load_document(args.project)
+    if args.frame is not None:
+        frames = [args.frame]
+    else:
+        # Every INTEGER frame in the document's own declared range, both
+        # ends inclusive - matches Document.start_frame/.end_frame's own
+        # Moho-side inclusivity.  Real (non-integer) frame numbers exist in
+        # Lottie's data model, but Moho's own channels are keyframed at
+        # integer frames, so sampling anything finer would not add fidelity.
+        frames = list(range(document.start_frame, document.end_frame + 1))
     exporter = LottieExporter(document, RenderSettings())
-    lottie = exporter.export([args.frame], include_hidden=args.include_hidden)
+    lottie = exporter.export(frames, include_hidden=args.include_hidden)
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(lottie, f, separators=(",", ":"))

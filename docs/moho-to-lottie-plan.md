@@ -33,7 +33,7 @@ which step it stopped at, so a reader knows where to resume.
 | 1 | A Bezier path builder beside the SVG one | **DONE** | `a91df9f` |
 | 2 | One shared tree walk | **DONE** | `a81a6cb` |
 | 3 | A Lottie file with one static frame | **DONE** | `4189275` |
-| 4 | Path keyframes across the frame range | TODO | — |
+| 4 | Path keyframes across the frame range | **DONE** | (pending commit) |
 | 5 | Gradients | TODO | — |
 | 6 | Masking | TODO | — |
 | 7 | Switch layers | TODO | — |
@@ -753,16 +753,79 @@ git commit -m "Write a static Lottie frame from a Moho document"
 
 ## Task 4: Path keyframes across the frame range
 
-**Status:** TODO
+**Status:** DONE — two real bugs were found and fixed while implementing
+this, plus one earlier measurement (from Task 3's own completion notes) was
+found to be **wrong** and is corrected below. Read all three before touching
+this code again.
+
+**⚠ Bug 1 (real, serious): `to_px()` reads exporter state LAZILY, at call
+time, not at closure-creation time.** The first implementation of
+`_build_layers` walked every frame first, collecting a `RenderItem` per
+(layer, frame) pair into a dict, and only afterwards looped back over them
+calling `.to_px()`/`build_path_bezier()`. This is wrong:
+`Exporter._skin_data`'s cache key is `(bone_layer, frame,
+tuple(self._active_actions))`, read at the moment `to_px(p)` actually runs,
+not baked into the closure when `walk_render_tree` builds it. By the time
+the second pass ran, `exporter._active_actions` held whatever the LAST
+frame/layer processed had left it as - every geometry call silently used the
+WRONG Smart Bone context. `tools/check_lottie_geometry.py` caught this
+immediately: coordinates off by hundreds of pixels (e.g. x=805.9 expected,
+x=-287.5 got), not a rounding-sized discrepancy. **Fixed** by restructuring
+so every `to_px()`/`exp.eval()` call happens synchronously, inside the same
+`for item in walk_render_tree(...)` iteration that produced `item` - see
+`_accumulate_frame`'s docstring. This is the single most important
+correctness fact about this file: **never hold a `RenderItem` past asking
+`walk_render_tree` for its successor.**
+
+**⚠ Bug 2 (real, mine): conflating "is this shape tapered" with "is its
+`outline_kind` == 'stroke'".** A brush-styled shape's `outline_kind` is
+*always* `"stroke"` (the brush fallback - see `_new_accumulator`), even when
+its width genuinely varies along its length. An early per-frame consistency
+check compared each frame's *actual* tapered-ness against
+`outline_kind == "stroke"` instead of against the *stored* tapered flag, so
+it flagged every brush-and-tapered shape as "changed" on literally its
+second frame. **12 of 19 sample documents raised on the first run** - AddBone,
+AnglePositionScale, BoneParenting, ControlBones, IK-FK, IndependentAngle,
+MaximumIKStrethching, OffsetBoneTool, SketchBone, TargetBone, WhatIsBone (one
+more, mid-list, not re-listed to avoid transcription error - see the full
+first-run output in the session transcript). **Fixed** by storing the raw
+`tapered` boolean in the accumulator and comparing against *that*,
+independent of `outline_kind`.
+
+**⚠ Correction to Task 3's own completion notes: the "6 of 63 layers vary in
+scale by 21%" measurement was WRONG.** It grouped scale samples by
+`layer.name`, which conflated distinct layers sharing a name -
+`WhatIsBone.animeproj` has three separately-modelled layers all named
+"goz-sol", each with its OWN constant scale (1.0, 0.79, 1.0), which looked
+like one layer whose scale changes over time. Re-measured keyed by layer
+IDENTITY: **0 of 103 layers in `WhatIsBone.animeproj`, 0 of 21 in
+`Bandit.mohoproj`, 0 of 86 in `SketchBone.animeproj` actually vary** across
+their own full frame range. The `_scalar_property`/per-frame stroke-width
+machinery this "finding" motivated is **kept anyway** - a genuinely
+scale-animated bone is a real Moho capability, not a fabricated edge case,
+and the static branch already covers everything actually observed in this
+corpus - but the docstring's own claim is corrected to say so, not repeat
+the wrong number.
+
+**Also found, not a bug: `SketchBone.animeproj` cannot export its full frame
+range yet.** Its `agiz` (mouth) layer is a `SwitchLayer` whose active child
+changes across the animation (lip sync), so the SET of drawable layers
+itself differs frame to frame - exactly the case `_build_layers`'s own
+docstring already anticipated and named as **Task 7's job**. The exporter
+correctly raises a clear `ValueError` naming the layer rather than silently
+producing a wrong file. **18 of 19 sample documents export their full range
+successfully; `SketchBone.animeproj` is expected to start working once Task
+7 lands**, and was not force-fixed here.
 
 **Files:**
-- Modify: `moho2lottie.py` — `_build_shapes` and `_build_layers`
+- Modify: `moho2lottie.py` — `_build_layers` restructured around eager per-frame accumulation (`_accumulate_frame`, `_new_accumulator`, `_finalize_shapes`, `_finalize_outline_group`), plus `_path_property`, `_scalar_property`, `_sh_elements`, `_assert_stable`
 - Create: `tools/check_lottie_geometry.py`
 
 **Interfaces:**
-- Produces: `LottieExporter.export(frames)` now emits `{"a": 1, "k": [...]}` for any path whose vertices move, and keeps `{"a": 0, "k": ...}` for one that does not.
+- Produces: `LottieExporter.export(frames)` now emits `{"a": 1, "k": [...]}` for any path (or, for a plain stroke's width, any scalar) whose value moves, and keeps `{"a": 0, "k": ...}` for one that does not.
+- The accumulator dict built by `_new_accumulator` (one per shape, keyed by position within `Mesh.shapes` — stable across frames) carries: `name`, `has_fill`, `fill_color`, `fill_per_frame`, `outline_kind` (`None`/`"taper"`/`"stroke"`), `tapered` (the RAW boolean — see Bug 2 above), `line_width`, `outline_color`, `outline_cap`, `outline_per_frame`, `outline_width_per_frame`.
 
-- [ ] **Step 1: Write the failing check script**
+- [x] **Step 1: Write the failing check script**
 
 Create `tools/check_lottie_geometry.py`. It reads an emitted Lottie file, pulls
 every path value at frame N, and compares it against `build_path_bezier` run
@@ -794,13 +857,19 @@ For each checked frame it must:
    scripts cannot disagree about what "equal" means;
 4. print the layer name, shape index and frame of every disagreement.
 
-- [ ] **Step 2: Run it to verify it fails**
+Built with `--require-gradients`/`--require-masks` flags too, ahead of
+Tasks 5/6, since the script's own frame-walking machinery is identical -
+they currently only check that the emitted file contains a `"gf"` element
+or `hasMask`/`masksProperties` when the source document has one, i.e. they
+are a REMINDER that those tasks are not done yet, not a claim that they are.
 
-Run: `python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 40`
-Expected: FAIL — the file from Task 3 holds only frame 25's geometry, so frame
-40 disagrees on every moving shape.
+- [x] **Step 2: Run it to verify it fails**
 
-- [ ] **Step 3: Emit keyframes**
+Run against the Task 3 single-frame file: FAILED as expected, on every
+moving shape - confirmed the check script itself works before Step 3 made
+it pass for the right reason.
+
+- [x] **Step 3: Emit keyframes**
 
 In `_build_shapes`, build each shape's bezier list **once per frame** and
 compare. Rewrite the path element as:
@@ -820,32 +889,42 @@ compare. Rewrite the path element as:
                 "k": [{"t": float(f), "s": [b]} for f, b in zip(frames, per_frame)]}
 ```
 
-`_build_layers` now samples every frame in the range and must **assert
-structural stability**: if a shape's vertex count or `c` flag changes between
-frames, raise a clear error naming the layer, the shape index and the two
-frames. Measurement says this never happens (0 unstable of 2,659 shapes), so a
-failure means a document exercises something new, not that the assert is
-noise.
+`_build_layers` samples every frame in the range and **asserts structural
+stability** via `_assert_stable`: if a shape's vertex count or `c` flag
+changes between frames, it raises a clear error naming the layer, the shape
+name and the two frames. Measurement says this never happens (0 unstable of
+2,659 shapes) - confirmed still true after this task's own changes, since
+`_assert_stable` never fired across any of the 18 documents that exported
+successfully.
 
-The frame list is every integer in `[start_frame, end_frame]`.
+The frame list is every integer in `[start_frame, end_frame]` (see
+`main()`'s own default, added this task: previously `--frame` was required).
 
-- [ ] **Step 4: Re-run the geometry check**
+- [x] **Step 4: Re-run the geometry check**
 
-Run:
-```bash
-python3 moho2lottie.py moho/Bandit.mohoproj --out /tmp/bandit.json
-python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 25 40 60 87 127
-```
-Expected: `OK` for all five frames.
+Ran against `Bandit.mohoproj` (frames 25/40/60/87/127) and, going further
+than the plan asked, `WhatIsBone.animeproj` (frames 1/60/120/180/240) and
+`OffsetBoneTool.animeproj` (frames 1/12/24) - `OK` on every frame of every
+document checked.
 
-- [ ] **Step 5: Check the size against the design's estimate**
+Also ran a full-corpus smoke export (`--out` with no `--frame`, i.e. the
+whole range) across all 19 sample documents: **18 succeed**;
+`SketchBone.animeproj` raises the SwitchLayer-visibility `ValueError`
+described above, which is expected and deferred to Task 7.
 
-Run: `ls -la /tmp/bandit.json && gzip -c /tmp/bandit.json | wc -c`
-Expected: raw size in the low megabytes. The design estimated ~1.8 MB raw for
-this document; more than about 3 MB means the static-path rule is not firing
-and `_path_property` is keyframing shapes that never move.
+- [x] **Step 5: Check the size against the design's estimate**
 
-- [ ] **Step 6: Commit**
+`Bandit.mohoproj`: 932,584 bytes raw, 35,218 bytes gzipped - well inside the
+design's ~1.8 MB estimate.
+`WhatIsBone.animeproj` (the largest, most-animated document, 227 frames):
+18,641,999 bytes raw, 1,774,737 bytes gzipped (~10.5x) - large in absolute
+terms but the STATIC-path optimisation is confirmed firing (verified
+directly: `AddBone.animeproj`, whose main timeline has no animation at all,
+produces byte-IDENTICAL output whether exported at a single frame or its
+full 175-frame range - 291,936 bytes either way, 0 keyframed `"sh"`
+elements, all 336 static).
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add moho2lottie.py tools/check_lottie_geometry.py
