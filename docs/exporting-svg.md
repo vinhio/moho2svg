@@ -143,9 +143,8 @@ whose asset it can actually find.
 
 To enable this, point `--brush-dir` at a folder containing the relevant
 brush files (single PNGs and/or multi-frame brush folders, named to match a
-style's `brush_name` — see [Moho project file format § Brush
-styles](moho-project-file-format.md#8-brush-styles) for exactly how that
-name is resolved to a file). The simplest source for these is Moho's own
+style's `brush_name` — see [Moho project file format § 8.6](moho-project-file-format.md#86-resolving-a-brush_name-to-a-file)
+for exactly how that name is resolved to a file). The simplest source for these is Moho's own
 installation, which ships every brush it uses:
 
 ```bash
@@ -289,8 +288,8 @@ writing to the gitignored `svg-raster/`.
 
 Without Pillow, each stamped dab is a `<g transform="..."><rect .../></g>`
 masked by a shared `<mask>` containing an `<image>` (the brush texture) plus
-a `<feColorMatrix>` filter (see [Moho project file format §
-8](moho-project-file-format.md#8-brush-styles) for why the filter is there).
+a `<feColorMatrix>` filter (see [Moho project file format § 8.5](moho-project-file-format.md#85-brush-styles)
+for why the filter is there).
 Every element that references a `mask` forces a spec-compliant renderer to
 render the mask's own content into an offscreen buffer, apply the filter to
 it, then use the result to composite that one element — three real steps,

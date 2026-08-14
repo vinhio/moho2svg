@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/project.schema.json",
+  "title": "Moho project file (.mohoproj / .animeproj)",
+  "description": "Root schema for a Moho project file. Despite the extension, both are plain JSON. See docs/moho-project-file-format.md §1-3 for the evidence base and §1's version-generation table. Validated against 19 real sample documents spanning format version 1021 through 1045 (moho/ in this repository) - see schema/README.md for the validation report and what each version generation omits.",
+  "type": "object",
+  "required": ["version", "project_data", "styles", "layers"],
+  "properties": {
+    "mime_type": { "const": "application/x-vnd.lm_mohodoc" },
+    "version": {
+      "type": "integer",
+      "description": "Format revision. Observed: 1021 (oldest sampled, missing doc_uuid/action_refs/modified_date entirely), 1038 (the large majority of samples), 1045 (newest sampled). Named styles and shape styling are used very differently across 1038 vs 1045 - see docs/moho-project-file-format.md §8.2."
+    },
+    "major_version": { "type": "integer", "description": "Observed constant 1." },
+    "rev_version": { "type": "integer", "description": "Observed constant 0." },
+    "doc_uuid": { "type": "string", "description": "ABSENT entirely in the oldest sampled format generation (version 1021)." },
+    "created_date": { "type": "string", "description": "Human-readable, e.g. \"Wed Aug 31 16:17:24 2016\" - not a machine-parseable timestamp format." },
+    "modified_date": { "type": "string", "description": "ABSENT in the oldest sampled format generation (version 1021)." },
+    "comment": { "type": "string", "description": "Observed only in newer-generation documents, e.g. \"Created in Moho version 14.3, ...\"." },
+    "thumbnail": { "type": "string", "description": "Base64-encoded JPEG preview. Observed only in newer-generation documents." },
+
+    "project_data": { "$ref": "#/$defs/ProjectData" },
+    "styles": { "type": "array", "items": { "$ref": "style.schema.json#/$defs/Style" } },
+    "layers": { "type": "array", "items": { "$ref": "layer.schema.json#/$defs/Layer" }, "description": "The document's root layer(s). 1-4 root layers observed across the sample set. Draw order (back to front) is simply this array's own order." },
+    "animated_values": { "$ref": "#/$defs/AnimatedValues" },
+
+    "layercomps": {
+      "type": "array",
+      "description": "Layer comps (saved show/hide sets). Empty in EVERY one of the 19 sampled documents - element shape is unknown. Not read by moho2svg.py."
+    },
+    "action_refs": {
+      "type": "array",
+      "description": "Empty in every sampled document that has this key at all (absent in the oldest, version-1021, sample). Element shape unknown; presumably references to actions defined outside this document. Not read by moho2svg.py."
+    },
+
+    "metadata": { "$ref": "#/$defs/DocumentMetadata" },
+    "documentviewstate": { "$ref": "#/$defs/DocumentViewState" },
+
+    "onions_enabled": { "type": "boolean" },
+    "onions_sellayer": { "type": "boolean" },
+    "onions_filled": { "type": "boolean" },
+    "onions_colored": { "type": "boolean" },
+    "onions_relative": { "type": "boolean" },
+    "onions_behind": { "type": "boolean" },
+    "onions_frame0": { "type": "integer", "description": "Unset frame slots are -100000." },
+    "onions_frame1": { "type": "integer" },
+    "onions_frame2": { "type": "integer" },
+    "onions_frame3": { "type": "integer" },
+    "onions_frame4": { "type": "integer" },
+    "onions_frame5": { "type": "integer" },
+    "onions_frame6": { "type": "integer" },
+    "onions_frame7": { "type": "integer" }
+  },
+  "additionalProperties": true,
+
+  "$defs": {
+
+    "ProjectData": {
+      "type": "object",
+      "required": ["width", "height", "start_frame", "end_frame", "fps"],
+      "properties": {
+        "width": { "type": "number", "description": "Canvas width in pixels." },
+        "height": { "type": "number", "description": "Canvas height in pixels. Together with width, this is the ONLY project_data used by moho2svg.py - see docs/moho-project-file-format.md §4 for the coordinate system this defines (2 Moho-space units span the canvas height)." },
+        "fps": { "type": "number", "description": "Observed constant 24.0 across the sample set." },
+        "start_frame": { "type": "integer" },
+        "end_frame": { "type": "integer" },
+        "antialiasing": { "type": "boolean" },
+        "back_color": { "$ref": "layer.schema.json#/$defs/PlainRGBA", "description": "Canvas background, plain 0-255 integers. Not drawn - the exported SVG has a transparent background." },
+        "color_palette": { "type": "string" },
+        "depth_of_field": { "type": "boolean" },
+        "focus_blur": { "type": "number" },
+        "focus_distance": { "type": "number" },
+        "focus_range": { "type": "number" },
+        "depth_sort": { "type": "boolean" },
+        "distance_sort": { "type": "boolean" },
+        "noise_grain": { "type": "number" },
+        "pixelation": { "type": "number" },
+        "stereo_mode": { "type": "integer" },
+        "stereo_separation": { "type": "number" },
+        "global_render_style_fill_style": { "type": ["string", "integer"], "description": "A document-wide style override applied at render time. Observed as the integer 0 in every one of the 19 sampled documents (re-checked directly against the raw JSON - an earlier pass of this schema mistakenly reported seeing an empty string \"\" in some samples). Typed as [string, integer] defensively, since a single observed value across 19 files does not prove the value set is closed to 0. Not read by moho2svg.py, which would ignore it and could produce visibly wrong colours if a document ever sets it to something meaningful." },
+        "global_render_style_line_style": { "type": ["string", "integer"] },
+        "global_render_style_layer_style": { "type": ["string", "integer"] },
+        "global_render_style_minimize_randomness": { "type": "boolean" },
+        "soundtrack": { "type": "string" },
+        "extra_swf_frame": { "type": "boolean" },
+        "display_quality": { "type": "integer", "description": "Observed only in a single (newer-generation) sample document." }
+      },
+      "additionalProperties": true
+    },
+
+    "DocumentMetadata": {
+      "type": "object",
+      "description": "Small document-level key/value bag written by Moho's editor. Pure bookkeeping - not read by moho2svg.py. Distinct from the PER-LAYER metadata bag (layer.schema.json's LayerMetadata), which has a different key set.",
+      "properties": {
+        "what": { "type": "integer", "description": "Present in all 19 samples, observed constant 0. Meaning unknown; the same key also appears in each layer's own metadata bag." },
+        "save_time": { "type": "integer", "description": "Present in all 19 samples, observed constant 1 - so NOT a timestamp despite the name." },
+        "layerwnd_searchcontext": { "type": "integer", "description": "Layer-window search filter state. Present in 18 of 19 samples; observed values include 5070." }
+      },
+      "additionalProperties": true
+    },
+
+    "DocumentViewState": {
+      "type": "object",
+      "description": "Editor viewport state: exactly 48 DocState_* keys in every one of the 19 sampled documents. Twelve are document-global (grid, playback range, viewport split); the remaining 36 are nine per-quadrant families suffixed 0-3, one set per pane of Moho's four-way viewport split (quadrant 0 is the single/active pane - it is the only one with a non-zero zoom in any sample). Pure UI state: NOT read by moho2svg.py, and it does not affect exported geometry.",
+      "properties": {
+        "DocState_viewportSetting": { "type": "integer", "description": "Which viewport split layout is active. Observed constant 1." },
+        "DocState_gridOn": { "type": "boolean" },
+        "DocState_gridStyle": { "type": "integer", "description": "Observed constant 0." },
+        "DocState_gridSize": { "type": "integer", "description": "Observed constant 20." },
+        "DocState_gridSnappingOn": { "type": "boolean", "description": "Observed constant true." },
+        "DocState_showOutputOnly": { "type": "boolean" },
+        "DocState_showVideoSafeZones": { "type": "boolean" },
+        "DocState_showRuleOfThirds": { "type": "boolean" },
+        "DocState_viewPortLeftWidthPct": { "type": "number", "description": "Horizontal split position, 0.0-1.0. Observed constant 1.0 (unsplit)." },
+        "DocState_viewPortTopWidthPct": { "type": "number", "description": "Vertical split position. Observed constant 1.0 (unsplit)." },
+        "DocState_playStart": { "type": "integer", "description": "Playback range start, or -1 when unset. Observed constant -1." },
+        "DocState_playEnd": { "type": "integer", "description": "Observed constant -1." }
+      },
+      "patternProperties": {
+        "^DocState_zoom[0-3]$": { "type": "number", "description": "Per-quadrant zoom. Non-zero only for the active quadrant (observed 0.802971 / 0.9 / 1.0368 / 1.398525 on quadrant 0); 0.0 means that pane is unused." },
+        "^DocState_viewOffset[0-3]$": { "$ref": "#/$defs/PlainVec2", "description": "Per-quadrant pan offset. Observed {0.0, 0.0} everywhere." },
+        "^DocState_rotation[0-3]$": { "type": "number", "description": "Per-quadrant view rotation in radians. Observed 0.0 everywhere." },
+        "^DocState_stereo[0-3]$": { "type": "boolean", "description": "Per-quadrant stereoscopic preview toggle." },
+        "^DocState_enableOutsideView[0-3]$": { "type": "boolean", "description": "Per-quadrant \"outside view\" (orbit the scene in 3D) toggle." },
+        "^DocState_outsideViewPitch[0-3]$": { "type": "number", "description": "Outside-view orbit camera pitch, radians. Observed 0.0 everywhere." },
+        "^DocState_outsideViewYaw[0-3]$": { "type": "number", "description": "Outside-view orbit camera yaw, radians. Observed 0.0 everywhere." },
+        "^DocState_outsideViewRadius[0-3]$": { "type": "number", "description": "Outside-view orbit camera distance. Observed 0.0 everywhere." },
+        "^DocState_outsideViewAttn[0-3]$": { "$ref": "#/$defs/PlainVec3", "description": "Outside-view orbit camera look-at point. Observed {0.0, 0.0, 0.0} everywhere." }
+      },
+      "additionalProperties": true
+    },
+
+    "PlainVec2": {
+      "type": "object",
+      "description": "A plain (non-channel) 2D vector - as opposed to channel.schema.json's Vec2Channel.",
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+      "additionalProperties": true
+    },
+
+    "PlainVec3": {
+      "type": "object",
+      "description": "A plain (non-channel) 3D vector.",
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } },
+      "additionalProperties": true
+    },
+
+    "AnimatedValues": {
+      "type": "object",
+      "description": "Document-level channels: camera and a document-wide timeline-markers string. Every sample has exactly one keyframe (frame 0) on all five - i.e. an implicit fixed, unmoved, unzoomed camera in every sampled document. NOT read by moho2svg.py, which therefore renders with an implicit fixed camera regardless - untested against a document that actually moves/zooms the camera.",
+      "properties": {
+        "camera_track": { "$ref": "channel.schema.json#/$defs/Vec3Channel", "description": "Camera position. Default observed value {0, 0, 3.732051} (the default camera distance)." },
+        "camera_pan_tilt": { "$ref": "channel.schema.json#/$defs/Vec2Channel" },
+        "camera_zoom": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "camera_roll": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "timeline_markers": { "$ref": "channel.schema.json#/$defs/StringChannel" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

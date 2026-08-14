@@ -32,9 +32,13 @@ note below.
 Repository layout:
 
 - `moho2svg.py` — the tool itself.
-- `docs/` — usage guide (`exporting-svg.md`) and file-format reference
-  (`moho-project-file-format.md`) for humans; read these before the module
-  docstring if you want a shorter orientation first.
+- `docs/` — usage guide (`exporting-svg.md`), file-format reference
+  (`moho-project-file-format.md`), the animation/transform model
+  (`moho-animation-and-transform.md`), the rigging and deformation reference
+  (`moho-rigging-and-deformation.md` — bones, Smart Warp, mesh-level
+  constraints), and the export pipeline (`export-pipeline.md`), all for
+  humans; read these before the module docstring if you want a shorter
+  orientation first.
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
   used for development/regression-checking.
 - `svg/` — the corresponding exported SVGs, tracked as reference output

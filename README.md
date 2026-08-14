@@ -63,6 +63,14 @@ reference, typical workflows, and the brush-texture render options
 - [`docs/moho-project-file-format.md`](docs/moho-project-file-format.md) —
   a readable summary of the reverse-engineered `.mohoproj`/`.animeproj`
   file format.
+- [`docs/moho-animation-and-transform.md`](docs/moho-animation-and-transform.md)
+  — how Moho stores motion (keyframed channels, tweening, actions/Smart Bones)
+  and how the transform stack composes layers, bones and skinning.
+- [`docs/moho-rigging-and-deformation.md`](docs/moho-rigging-and-deformation.md)
+  — the bone system in depth (skinning math, binding modes, angle
+  constraints, control bones, IK/target bones, bone dynamics), what Smart
+  Warp leaves behind in the format, and the mesh-level fields that constrain
+  deformation.
 - The module docstring at the top of [`moho2svg.py`](moho2svg.py) — the
   authoritative, evidence-by-evidence source both documents above are
   distilled from.
@@ -91,8 +99,19 @@ are best-fit heuristics. See the module docstring's KNOWN GAPS section for
 the current list — notably: one boolean shape-combination mode
 (`combo_mode == 2`) is not reverse-engineered, gradient placement is
 approximate, the flexible bone-binding weight falloff is unvalidated for
-overlapping-influence cases, `PatchLayer` is not modelled, and textured
-brush strokes are an approximation with several further simplifications.
+overlapping-influence cases, and textured brush strokes are an approximation
+with several further simplifications. `PatchLayer` **is** rendered (it
+redraws its target layer's mesh at the patch's own point in the draw order),
+but by a heuristic that reuses the target's transform instead of the patch's
+own — no reference export of a `PatchLayer` document was available to confirm
+it pixel-for-pixel.
+
+Two rigging features are missing rather than approximate: **Smart Warp**
+(distortion-mesh layers — not implemented and not even detected, so the
+artwork exports undeformed) and the **playback-time bone features**
+(bone dynamics/spring physics, control bones, IK against a moving target),
+whose results are never written into the file's channels. See
+[`docs/moho-rigging-and-deformation.md` § 8](docs/moho-rigging-and-deformation.md#8-gaps-ranked-by-how-likely-they-are-to-show).
 
 ## Development
 

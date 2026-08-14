@@ -1,0 +1,554 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/layer.schema.json",
+  "title": "Moho layer tree",
+  "description": "See docs/moho-project-file-format.md §6 and docs/export-pipeline.md §2-3 for the full field-by-field evidence and the render-time decision order. Draw order (back to front) is simply the order layers appear in a `layers` array - nothing in the document is a z-order index.",
+  "$defs": {
+
+    "FileRef": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "relativeTo": { "type": "string", "description": "Observed values include \"Project\" and \"Absolute\"." }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerEffects": {
+      "type": "object",
+      "description": "Per-layer image effects. Every sample has these at their default/off values; NOT applied by moho2svg.py.",
+      "properties": {
+        "alpha": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Layer opacity. Observed 1.0 in the overwhelming majority of layers, but 0.6 on a real minority (~9 layers in one document) - ignoring this is a confirmed, currently-visible output difference, not just a theoretical gap." },
+        "visibility": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "ANIMATED show/hide, independent of the static `visible` flag." },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "noise": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "pixelation": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "threshold": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "ambient_occlusion": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerOutline": {
+      "type": "object",
+      "description": "An extra outline stroked around the whole layer's silhouette. Off in every sample.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "width": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerColor": {
+      "type": "object",
+      "description": "A flat colour override for the whole layer. Off in every sample.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerShadow": {
+      "type": "object",
+      "description": "Drop shadow. Off in every sample. Note: `threshold` here is a BOOL channel, not numeric, despite the name.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "expansion": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "clip_to_group": { "type": "boolean", "description": "Plain (not a channel)." }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerShading": {
+      "type": "object",
+      "description": "Inner shading. Off in every sample. Note: `threshold` here is a BOOL channel, not numeric.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "contraction": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "PerspectiveShadow": {
+      "type": "object",
+      "description": "Off in every sample. Note: `threshold` here is a BOOL channel, not numeric.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "shear": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "MotionBlur": {
+      "type": "object",
+      "description": "Off in every sample; not meaningful for a flat single-frame export anyway. An older-generation variant omits extended_frames/frame_percentage/sub_frames.",
+      "properties": {
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "frames": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "skip": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "alpha_start": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "alpha_end": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "radius": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "frame_percentage": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "extended_frames": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "sub_frames": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "Physics": {
+      "type": "object",
+      "description": "2D physics simulation parameters. Disabled in every sample; not applied by moho2svg.py.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "static": { "type": "boolean" },
+        "sleeping": { "type": "boolean" },
+        "respawn": { "type": "integer" },
+        "velocity": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
+        "density": { "type": "number" },
+        "friction": { "type": "number" },
+        "restitution": { "type": "number" },
+        "pivot": { "type": "boolean" },
+        "enable_motor": { "type": "boolean" },
+        "motor_speed": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "motor_torque": { "type": "number" },
+        "force_field": { "type": "boolean" },
+        "force_field_vector": { "$ref": "channel.schema.json#/$defs/Vec2Channel" }
+      },
+      "additionalProperties": true
+    },
+
+    "Transforms": {
+      "type": "object",
+      "description": "A layer's local transform. Rotation and scale pivot on the layer's own `origin`, not local (0,0). Only translation/scale (Vec3, though the z component is ignored by this 2D-only reverse-engineering)/rotation_z/flip_h/flip_v are applied by moho2svg.py; rotation_x/rotation_y (3D) and shear are read but never applied.",
+      "properties": {
+        "translation": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
+        "scale": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
+        "shear": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
+        "rotation_z": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "rotation_x": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "rotation_y": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "flip_h": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "flip_v": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "following": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Path-following offset." },
+        "physics_nudge": { "$ref": "channel.schema.json#/$defs/Vec2Channel" }
+      },
+      "additionalProperties": true
+    },
+
+    "ActionRegistryEntry": {
+      "type": "object",
+      "description": "An entry of a layer's own `actions` list - a document-wide action-NAME REGISTRY replicated on nearly every layer, not a per-layer list of that layer's own actions (confirmed: a BoneLayer with zero bones can carry the exact same action names as a 157-bone skeleton elsewhere in the same document). `pose` is always the literal integer 0 here - the REAL pose data lives on individual channels' own `actions[]` entries (see channel.schema.json ActionRef), keyed by the same `name`. See docs/moho-project-file-format.md §11.",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "pose": { "const": 0 }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerCommon": {
+      "type": "object",
+      "description": "Fields observed on every layer type regardless of `type`. Container-only fields (layers[], group_mask, expanded, skeleton, ...) are NOT here - see the per-type schemas below.",
+      "required": ["type", "name", "uuid", "visible"],
+      "properties": {
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "uuid": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "edit_only": { "type": "boolean", "description": "Kept for editing convenience, never rendered - Moho's own SVG export defines an empty <g> for such a layer rather than drawing its shapes." },
+        "origin": {
+          "type": "object",
+          "description": "Plain (not a channel) - the pivot point for `transforms`.",
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+        "parent_bone": {
+          "type": "integer",
+          "description": "Index into the enclosing BoneLayer's skeleton.bones, or -1 for flexible (\"region\") binding across the whole skeleton (or flexi_bone_subset, if narrower). -1 is overwhelmingly the most common value. -3 has also been observed, exclusively on ImageLayer instances that also carry a non-trivial flexi_bone_subset - presumably a distinct binding mode specific to raster/bone-warped images; not decoded, and NOT handled by moho2svg.py (which only distinguishes -1 from >=0)."
+        },
+        "flexi_bone_subset": {
+          "type": "string",
+          "description": "A \"|\"-joined list of BONE INDICES (not names), e.g. \"1|2\", restricting flexible binding to those bones. \"\" means all bones in the skeleton (or, per the -3 finding above, some other full-skeleton default). Distinct from mesh.groups' PointGroup, which names point indices, not bone indices."
+        },
+        "masking": {
+          "type": "integer",
+          "description": "This layer's role within its parent's mask, when the parent container has group_mask active: 2 = mask source (still drawn normally - being the mask source does not hide it, and confirmed to paint on TOP of whatever it masks, achieved in moho2svg.py via mask-geometry exclusion of the source's own stroke rather than z-order). 1 = exempt (\"don't mask this layer\" - drawn normally, ignoring the mask). Anything else (typically 0) = clipped to the union of all masking==2 siblings. Values 5 and 6 have also been observed in real files (a handful of layers) - not decoded, and moho2svg.py treats any value other than 1 or 2 as \"clipped\", so 5/6 currently behave as ordinary clipped children. See docs/moho-project-file-format.md §10."
+        },
+        "transforms": { "$ref": "#/$defs/Transforms" },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/ActionRegistryEntry" } },
+
+        "layer_color": { "$ref": "#/$defs/LayerColor" },
+        "layer_effects": { "$ref": "#/$defs/LayerEffects" },
+        "layer_outline": { "$ref": "#/$defs/LayerOutline" },
+        "layer_shadow": { "$ref": "#/$defs/LayerShadow" },
+        "layer_shading": { "$ref": "#/$defs/LayerShading" },
+        "perspective_shadow": { "$ref": "#/$defs/PerspectiveShadow" },
+        "motion_blur": { "$ref": "#/$defs/MotionBlur" },
+        "physics": { "$ref": "#/$defs/Physics" },
+
+        "blend_mode": { "type": "integer", "description": "0 (large majority) = normal. 1 observed on a real minority of layers - meaning not decoded, and NOT applied by moho2svg.py (a confirmed, currently-visible output difference where sampled)." },
+        "quality_flags": { "type": "integer", "description": "A bit field of per-layer render toggles. Not decoded. Observed values include 4092, 4094, 45052, 45054, 2044." },
+        "label_col": { "type": "integer", "description": "Editor tab colour." },
+        "random_num": { "type": "integer" },
+        "camera_immune": { "type": "boolean" },
+        "dof_immune": { "type": "boolean" },
+        "face_camera": { "type": "boolean" },
+        "face_camera_mode": { "type": "integer", "description": "Observed constant 2 in every sample." },
+        "flexi_bone_elbow": { "type": "boolean" },
+        "follow_bending": { "type": "boolean" },
+        "follow_curve": { "type": "integer", "description": "Observed constant -1 in every sample." },
+        "follow_layer_uuid": { "type": "string" },
+        "distortion_layer_uuid": { "type": "string", "description": "UUID of another layer used as a distortion mesh - the most likely storage hook for Moho's Smart Warp feature, though nothing in the sample confirms that. Empty in all 827 layers that carry the field; absent from the 1021 format generation. Not read by moho2svg.py, which does not even warn about it. See docs/moho-rigging-and-deformation.md section 5." },
+        "rotate_to_follow": { "type": "boolean" },
+        "scale_compensation": { "type": "boolean", "description": "How a layer's stroke width reacts to ancestor scaling." },
+        "scale_normalization": { "type": "number" },
+        "render_only": { "type": "boolean" },
+        "shown_in_timeline": { "type": "boolean" },
+        "timing_offset": { "type": "integer", "description": "Shifts this layer's whole timeline. Observed constant 0 in every sample - a non-zero value would desync the frame moho2svg.py evaluates, since it is not applied." },
+        "timeline_markers": { "$ref": "channel.schema.json#/$defs/StringChannel" },
+        "layer_ref_fileref": { "$ref": "#/$defs/FileRef" },
+        "layer_ref_mod_date": { "type": "integer" },
+        "layer_ref_path": { "type": "string" },
+        "layer_ref_same_doc": { "type": "boolean" },
+        "layer_ref_uuid": { "type": "string" },
+        "layer_user_comments": { "type": "string" },
+        "layer_user_tags": { "type": "string" },
+        "consolidated_channels": { "type": "boolean" },
+        "animated_layer_effects": { "type": "boolean" },
+        "mask_expansion": { "type": "boolean", "description": "Presumably grows/shrinks the mask edge. Observed false in every sample; not used by moho2svg.py." },
+        "ignored_by_layer_picker": { "type": "boolean" },
+        "metadata": { "$ref": "#/$defs/LayerMetadata" },
+        "script_data": { "$ref": "#/$defs/ScriptData" }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerMetadata": {
+      "type": "object",
+      "description": "Small per-layer key/value bag written by Moho's editor and by layer scripts. Observed on MeshLayer, BoneLayer and SwitchLayer instances. Purely editor bookkeeping - not read by moho2svg.py. Left open (additionalProperties) because the key set is tool/script dependent, but every key seen across the 19 sampled documents is enumerated below.",
+      "properties": {
+        "what": { "type": "integer", "description": "Observed constant 0. Meaning unknown - the same key appears in the document-level `metadata` bag." },
+        "NewLayerScript": { "type": "boolean", "description": "Set by Moho's \"new layer\" script hook." },
+        "LM_GrandpaBones": { "type": "boolean", "description": "Observed only on SwitchLayer instances (ReparentBone.animeproj). Presumably the same feature as BoneLayer.grandpa_bone." },
+        "psd_layers": { "type": "string", "description": "A \"|\"-joined list of PSD layer indices, e.g. \"24|12|7|23|...\". Observed on the BoneLayer wrapping a PSD cutout-puppet import (BoneStrengthTool.animeproj), recording which PSD layers became ImageLayer children." }
+      },
+      "patternProperties": {
+        "^g_[0-9]+$": { "type": "boolean", "description": "Numbered editor toggles (g_10000, g_10001, g_10002, g_10031, g_10033, g_10056, g_10069, g_10082 observed). Not decoded." }
+      },
+      "additionalProperties": true
+    },
+
+    "ScriptData": {
+      "type": "object",
+      "description": "Per-layer data written by a Moho layer script. Rare (2 BoneLayer instances, WhatIsBone.animeproj). Not read by moho2svg.py.",
+      "properties": {
+        "what": { "type": "integer", "description": "Observed constant 0." },
+        "NewLayerScript": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+
+    "LayerContainer": {
+      "type": "object",
+      "description": "Fields shared by every layer type that HOLDS other layers (BoneLayer, GroupLayer, SwitchLayer). Kept separate from LayerCommon because a leaf layer (MeshLayer, ImageLayer, PatchLayer, TextLayer) never carries them. Note `depth_sort`/`distance_sort`/`layer_ordering`/`animated_layer_order` were observed on BoneLayer and GroupLayer only, never on SwitchLayer - they are declared here as optional rather than duplicated per type.\n\nDELIBERATELY NOT HERE: the `layers` array itself. Reaching the recursive `$ref: Layer` through this extra `$ref` hop - inside an allOf, inside the recursive Layer oneOf - costs about 11x in wall-clock validation time (measured: SketchBone.animeproj 16.6s -> 182.8s) for exactly the same semantics. Each of the three container types therefore declares `layers` in its own branch. Do not \"tidy\" it in here.",
+      "properties": {
+        "group_mask": { "type": "integer", "description": "Non-zero if this layer, as a mask CONTAINER, masks its children at all (see LayerCommon.masking on the children). 0/absent = falsy. Observed values: 0, 2, and (once) 1." },
+        "expanded": { "type": "boolean", "description": "Editor UI state (tree expanded/collapsed)." },
+        "depth_sort": { "type": "boolean", "description": "Sort children by depth instead of list order. Observed false everywhere; NOT implemented by moho2svg.py, which always uses list order." },
+        "distance_sort": { "type": "boolean", "description": "Observed false everywhere; not implemented by moho2svg.py." },
+        "layer_ordering": {
+          "$ref": "channel.schema.json#/$defs/StringChannel",
+          "description": "An animated child draw-order override. Present on effectively every container (150 instances), but with an EMPTY string value in all of them - so no sampled document actually reorders its children over time. Not read by moho2svg.py: a document that does use it would export with the wrong stacking order."
+        },
+        "animated_layer_order": { "type": "boolean", "description": "Whether `layer_ordering` above is active. Observed true on exactly 2 containers across the sample set (ControlBones.animeproj, SketchBone.animeproj) - and even there the paired layer_ordering channel is empty." }
+      },
+      "additionalProperties": true
+    },
+
+    "MeshLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "mesh"],
+          "properties": {
+            "type": { "const": "MeshLayer" },
+            "mesh": { "$ref": "mesh.schema.json#/$defs/Mesh" },
+            "3d_mode": { "type": "integer", "description": "Observed constant 0 in every sample." },
+            "3d_options": { "$ref": "#/$defs/Mesh3DOptions" },
+            "antialiasing": { "type": "boolean" },
+            "animated_noise": { "type": "boolean" },
+            "noise_amp": { "type": "number" },
+            "noise_scale": { "type": "number" },
+            "noise_interval": { "type": "integer", "description": "Observed 1 (majority) or 2." },
+            "noisy_lines": { "type": "boolean" },
+            "noisy_shapes": { "type": "boolean" },
+            "extra_lines": { "type": "integer", "description": "Observed constant 0 except on a real minority of layers with extra_sketchy=true, where it is 5 - a confirmed, currently-visible output difference (repeated jittered strokes are not drawn)." },
+            "extra_sketchy": { "type": "boolean" },
+            "gap_filling": { "type": "boolean" },
+            "exclude_lines_from_mask": { "type": "boolean" },
+            "fill_texture_path": { "type": "string" },
+            "fill_texture_fileref": { "$ref": "#/$defs/FileRef" },
+            "line_texture_path": { "type": "string" },
+            "line_texture_fileref": { "$ref": "#/$defs/FileRef" },
+            "squashable_deformer": { "type": "boolean", "description": "Deformer flag, present only in the 1045 format generation (all 21 MeshLayers of the one 1045 document; absent from 1038 and 1021). false in every sample. Meaning not decoded - see docs/moho-rigging-and-deformation.md section 5.2." },
+            "triangulated": { "type": "boolean", "description": "Deformer flag, 1045-only, false in every sample. A triangulated mesh is what a deformation mesh needs and a drawing mesh does not - see docs/moho-rigging-and-deformation.md section 5.2." },
+            "frame_zero_deformer": { "type": "boolean", "description": "Deformer flag, 1045-only, true in every sample. Presumably 'this deformer is defined at frame 0', matching the rest-pose-at-frame-0 convention bones already use. Not decoded." }
+          }
+        }
+      ]
+    },
+
+    "Mesh3DOptions": {
+      "type": "object",
+      "description": "Settings for Moho's 3D-mesh-extrusion rendering of a MeshLayer, gated by the sibling `3d_mode` field. Present on EVERY sampled MeshLayer (648 instances across all three format generations, including the MeshLayer nested inside a TextLayer), always with identical default values, and always inert because `3d_mode` is 0 everywhere. Not read by moho2svg.py, which exports flat 2D geometry only - a document that actually enables 3d_mode would export without any extrusion or 3D shading.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "Mesh3DOptions" },
+        "3d_shading_mode": { "type": "integer", "description": "Observed constant 1." },
+        "3d_shading_density": { "type": "integer", "description": "Observed constant 50." },
+        "3d_shading_color": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour. Observed constant {64, 64, 64, 255}." },
+        "3d_silhouette_edges": { "type": "boolean", "description": "Observed constant true." },
+        "3d_material_edges": { "type": "boolean", "description": "Observed constant true." },
+        "3d_crease_edges": { "type": "boolean", "description": "Observed constant true." },
+        "3d_crease_angle": { "type": "number", "description": "Radians. Observed constant 1.047198 (= pi/3, i.e. 60 degrees)." },
+        "3d_edge_extension": { "type": "number", "description": "Observed constant 0.0." },
+        "3d_backface_removal": { "type": "boolean", "description": "Observed constant false." },
+        "3d_reset_z": { "type": "boolean", "description": "Observed constant false." }
+      },
+      "additionalProperties": true
+    },
+
+    "BoneLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        { "$ref": "#/$defs/LayerContainer" },
+        {
+          "type": "object",
+          "required": ["type", "skeleton"],
+          "properties": {
+            "type": { "const": "BoneLayer" },
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there. NOTE: Moho's own Layer Pool panel lists children in the REVERSE of this order (topmost-drawn first) - the JSON order IS the draw order and needs no reversal." },
+            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton" },
+            "grandpa_bone": { "type": "boolean", "description": "Lets bones in this skeleton also bind layers nested deeper than its own direct children." },
+            "gravity": {
+              "type": "object",
+              "description": "Bone-physics gravity. Rare - observed on exactly one BoneLayer across the whole sample set (Bandit.mohoproj, version 1045). Note the shape differs from GroupLayer's own `gravity` field in BOTH key names and value type: {direction,strength} as CHANNELS here, vs {x,y} as plain floats there. Not read by moho2svg.py.",
+              "properties": {
+                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Angle in radians (observed 4.712389 = 3*pi/2, i.e. straight down)." },
+                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+              },
+              "additionalProperties": true
+            },
+            "wind": {
+              "type": "object",
+              "description": "Bone-physics wind. Same rarity and same channel-wrapped value convention as `gravity` above. Not read by moho2svg.py.",
+              "properties": {
+                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+                "turbulence_amplitude": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+                "turbulence_frequency": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+
+    "GroupLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        { "$ref": "#/$defs/LayerContainer" },
+        {
+          "type": "object",
+          "required": ["type", "layers"],
+          "properties": {
+            "type": { "const": "GroupLayer" },
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there." },
+            "enable_physics": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+            "use_baked_physics": { "type": "boolean" },
+            "gravity": {
+              "type": "object",
+              "description": "Group-physics gravity as a plain 2D vector. Note the shape differs from BoneLayer's own `gravity` field in BOTH key names and value type: {x,y} as plain floats here, vs {direction,strength} as channels there. Observed on 16 GroupLayers across all three format generations (1021/1038/1045). Not read by moho2svg.py.",
+              "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+              "additionalProperties": true
+            },
+            "modification_date": { "type": "integer" }
+          }
+        }
+      ]
+    },
+
+    "SwitchLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        { "$ref": "#/$defs/LayerContainer" },
+        {
+          "type": "object",
+          "required": ["type", "layers", "switch_keys"],
+          "properties": {
+            "type": { "const": "SwitchLayer" },
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "The alternatives; exactly one is shown at a time, selected by switch_keys." },
+            "switch_keys": { "$ref": "channel.schema.json#/$defs/StringChannel", "description": "An animated string naming the currently-active CHILD LAYER NAME (not an index). The recorded name can go stale if that child was later renamed - moho2svg.py falls back to the first child, matching Moho's own behaviour." },
+            "switch_data": { "type": "string", "description": "Observed empty in every sample." },
+            "switch_interpolation": { "type": "boolean" },
+            "frame_by_frame": { "type": "boolean" },
+            "previewAlignment": { "type": "integer", "description": "Observed constant 0 in every sample." },
+            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton", "description": "Present but with an empty bones list in every sample - do not mistake a SwitchLayer for a BoneLayer." }
+          }
+        }
+      ]
+    },
+
+    "PatchLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "target_layer_uuid"],
+          "properties": {
+            "type": { "const": "PatchLayer" },
+            "target_layer_uuid": { "type": "string", "description": "Names another layer elsewhere in the document (in every sample, a sibling within the same group) whose mesh this patch reuses, redrawn at this patch's own draw-order position." },
+            "target_layer_id": { "type": "integer", "description": "Present alongside target_layer_uuid in every sample; observed values include 0, 1, 2, 3, 7. Purpose beyond the uuid is unknown." }
+          }
+        }
+      ],
+      "description": "Carries NO `mesh` or `layers` field of its own in the raw JSON. moho2svg.py resolves it after the whole tree is built, copying the TARGET's mesh/transform/parent_bone/flexi_bone_subset/origin onto the patch (the patch's own transform is confirmed wrong to use - see docs/moho-project-file-format.md §12) and drawing the target's FILL only, never its outline (confirmed against the Moho app)."
+    },
+
+    "TextLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "text", "mesh_layer"],
+          "properties": {
+            "type": { "const": "TextLayer" },
+            "text": { "type": "string", "description": "The literal string; \\n for line breaks." },
+            "font": { "type": "string" },
+            "textsize": { "type": "integer" },
+            "justification": { "type": "integer", "description": "Observed 0, 1, 2." },
+            "leading": { "type": "integer" },
+            "kerning": { "type": "integer" },
+            "fill": { "type": "boolean" },
+            "stroke": { "type": "boolean" },
+            "fillcolor": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour (not a channel), unlike almost every other colour field in the format." },
+            "linecolor": { "$ref": "#/$defs/PlainRGBA" },
+            "linewidth": { "type": "number" },
+            "textinheritedstyle1": { "type": "string" },
+            "textinheritedstyle2": { "type": "string" },
+            "balloonfill": { "type": "boolean" },
+            "balloonfillcolor": { "$ref": "#/$defs/PlainRGBA" },
+            "balloonlinecolor": { "$ref": "#/$defs/PlainRGBA" },
+            "balloonlinewidth": { "type": "number" },
+            "balloonfliph": { "type": "boolean" },
+            "balloonflipv": { "type": "boolean" },
+            "balloonposes": { "type": "string" },
+            "balloonsize": { "type": "integer" },
+            "balloonsizeproportional": { "type": "boolean" },
+            "balloonstroke": { "type": "boolean" },
+            "balloonstyle": { "type": "string" },
+            "mesh_layer": {
+              "$ref": "#/$defs/MeshLayer",
+              "description": "The laid-out glyph outlines as a COMPLETE, ordinary MeshLayer - confirmed to carry the full MeshLayer field set (noise/sketchy fields, 3d_mode, 3d_options, texture paths and filerefs, ...), not just type+mesh. moho2svg.py synthesises it into a real child Layer at load time (named `<layer>_text` if it has no name of its own), after which nothing downstream special-cases TextLayer at all - the font/balloon fields above are then purely informational."
+            }
+          }
+        }
+      ]
+    },
+
+    "PlainRGBA": {
+      "type": "object",
+      "description": "A plain (non-channel, non-animated) colour using 0-255 integer components - as opposed to the 0.0-1.0 float components used inside a ColorChannel.",
+      "required": ["r", "g", "b", "a"],
+      "properties": {
+        "r": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "g": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "b": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "a": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    },
+
+    "ImageLayer": {
+      "description": "A raster image/movie/PSD-import layer. NOT covered by docs/moho-project-file-format.md (discovered only once a broader sample of Moho's own bundled tutorial documents was censused - e.g. BoneStrengthTool.animeproj's \"dude side.psd\" rig, one ImageLayer per PSD layer). NOT handled at all by moho2svg.py (a vector-only exporter) - a document using ImageLayer will silently lose that artwork on export. Participates in the same bone-deformation fields (parent_bone, flexi_bone_subset) as a MeshLayer, including the otherwise-unseen parent_bone==-3 value (see LayerCommon.parent_bone) - presumably Moho's bone-mesh-warp deformation for a raster image, distinct from a vector mesh's rigid/flexible binding, and not reverse-engineered.",
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "image_path", "width", "height"],
+          "properties": {
+            "type": { "const": "ImageLayer" },
+            "image_path": { "type": "string" },
+            "image_fileref": { "$ref": "#/$defs/FileRef" },
+            "width": { "type": "number", "description": "PLAIN (not a channel)." },
+            "height": { "type": "number" },
+            "image_cropped": { "type": "boolean" },
+            "avi_alpha": { "type": "boolean", "description": "Whether an embedded movie's alpha channel is used." },
+            "movie_looping": { "type": "boolean" },
+            "interpreted_fps": { "type": "number" },
+            "persist_first_frame": { "type": "boolean" },
+            "persist_last_frame": { "type": "boolean" },
+            "premultiplied_movie": { "type": "boolean" },
+            "reverse_movie": { "type": "boolean" },
+            "psd_layer": { "type": "integer", "description": "Present on most, not all, sampled ImageLayer instances." },
+            "psd_layerid": { "type": "integer" },
+            "psd_layer_bounds": {
+              "type": "object",
+              "properties": {
+                "top": { "type": "number" },
+                "left": { "type": "number" },
+                "right": { "type": "number" },
+                "bottom": { "type": "number" }
+              }
+            },
+            "sampling_mode": { "type": "integer" },
+            "quality_level": { "type": "integer" },
+            "toon_effect": { "type": "boolean" },
+            "toon_black_threshold": { "type": "integer" },
+            "toon_gray_threshold": { "type": "integer" },
+            "toon_lightness": { "type": "integer" },
+            "toon_saturation": { "type": "integer" },
+            "toon_quantize": { "type": "integer" },
+            "toon_min_edge_threshold": { "type": "integer" },
+            "toon_max_edge_threshold": { "type": "integer" }
+          }
+        }
+      ]
+    },
+
+    "Layer": {
+      "description": "Any layer node, discriminated by its `type` field.",
+      "oneOf": [
+        { "$ref": "#/$defs/MeshLayer" },
+        { "$ref": "#/$defs/BoneLayer" },
+        { "$ref": "#/$defs/GroupLayer" },
+        { "$ref": "#/$defs/SwitchLayer" },
+        { "$ref": "#/$defs/PatchLayer" },
+        { "$ref": "#/$defs/TextLayer" },
+        { "$ref": "#/$defs/ImageLayer" }
+      ]
+    }
+  }
+}

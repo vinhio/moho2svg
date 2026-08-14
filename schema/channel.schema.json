@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/channel.schema.json",
+  "title": "Moho animated value (\"channel\")",
+  "description": "Almost every numeric/colour/boolean/string property in a Moho document is stored as this one repeated structure - confirmed 201,185+ instances across the reverse-engineering sample set (see docs/moho-project-file-format.md §5). A field that is never animated may instead appear as a bare scalar or plain object (see ChannelOrPlain below) - Moho accepts both forms transparently.",
+  "$defs": {
+
+    "InterpEntry": {
+      "type": "object",
+      "description": "One entry of a channel's interp[] array, one per keyframe, describing the interpolation of the segment LEAVING that keyframe. moho2svg.py ignores this entirely and always interpolates linearly - exact at keyframes, approximate between them. The meaning of t/im/in/s/h is NOT decoded; only the observed value sets are recorded here. See docs/moho-project-file-format.md §5.3.",
+      "required": ["t", "im", "in", "s", "h", "v1", "v2"],
+      "properties": {
+        "t": {
+          "type": "integer",
+          "description": "Interpolation type. Observed: 0 (208,858+ of ~all entries, overwhelming default), 4, 2, 6, 1. Meaning not decoded. Non-zero values appear almost exclusively on pose/anim_pos/anim_angle/anim_scale/physics_motor_speed."
+        },
+        "im": { "type": "integer", "description": "Not decoded. Observed: 0, 1, 3, 5, 9." },
+        "in": { "type": "integer", "description": "Not decoded. Observed: 0, 1." },
+        "s": { "type": "boolean", "description": "Not decoded. Observed false in every sampled entry." },
+        "h": { "type": "integer", "description": "Not decoded. Observed 0 in every sampled entry." },
+        "v1": { "type": "number", "description": "Not decoded. Commonly 0.1 (an apparently-unused default); also -1, 15." },
+        "v2": { "type": "number", "description": "Not decoded. Commonly 0.5; also -1, 2, -1000000." },
+        "b": {
+          "type": "array",
+          "description": "Rare (observed on <20 entries total, only alongside t==4). Explicit Bezier-like handles for the timing curve itself, one object per control point.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ao": { "type": "number" },
+              "ai": { "type": "number" },
+              "po": { "type": "number" },
+              "pi": { "type": "number" }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "ActionRef": {
+      "type": "object",
+      "description": "One entry of a channel's actions[] list: this channel takes its value from `pose` instead of its own when/val while the Smart Bone dial named `name` is active. `pose` is itself a full channel of the SAME type as the parent channel, but keyed by \"pose-curve position\" rather than by document frame - see docs/moho-project-file-format.md §11 and §5.4 for how the active pose-frame is found (inverting the pose curve against the dial's own current angle).",
+      "required": ["name", "pose"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "An action name, matched against a registry on some ancestor BoneLayer's own `actions` list. If this name also matches a bone's own name in the same skeleton, that bone is the \"dial\" whose angle drives this override; otherwise this pose is dormant (this tool only activates the dial kind)."
+        },
+        "pose": { "$ref": "#/$defs/Channel" }
+      },
+      "additionalProperties": true
+    },
+
+    "_ChannelBase": {
+      "type": "object",
+      "description": "Fields common to every channel regardless of `type`. `when`, `val`, and `interp` are always exactly the same length (verified with zero exceptions across the entire sample set).",
+      "required": ["type", "when", "val", "interp"],
+      "properties": {
+        "ref": { "type": "boolean", "description": "Observed false on every sampled channel. Meaning not decoded." },
+        "mute": { "type": "boolean", "description": "Disables the channel when true. Observed false on every sampled channel - untested whether this tool's evaluator (which ignores it) would misbehave on a genuinely muted channel." },
+        "when": {
+          "type": "array",
+          "description": "Keyframe frame numbers, ascending. Length always equals val's and interp's.",
+          "items": { "type": "number" }
+        },
+        "interp": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/InterpEntry" }
+        },
+        "actions": {
+          "type": "array",
+          "description": "Smart Bone action overrides for this channel. Present on a small minority of channels (observed ~2% of all channels in the sample set, concentrated on mesh point positions and bone transforms).",
+          "items": { "$ref": "#/$defs/ActionRef" }
+        },
+        "split": {
+          "type": "array",
+          "description": "Vec2/Vec3 channels only, and rare (observed exactly once in the reverse-engineering sample set). One independent Val sub-channel per axis (Moho's \"separate the x/y curves\" feature). moho2svg.py does not read this - it evaluates the parent Vec2/Vec3 arrays directly, which could go stale if an axis is keyframed differently from its parent. See docs/moho-project-file-format.md §5.4.",
+          "items": { "$ref": "#/$defs/Channel" }
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "ValChannel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Val" },
+            "val": { "type": "array", "items": { "type": "number" } }
+          }
+        }
+      ],
+      "description": "A single-float channel. By far the most common channel type (423,642+ instances in the reverse-engineering sample set). Used for curve-point smoothness/weight/offset, mesh point width, bone anim_angle/anim_scale, line_width, and many more."
+    },
+
+    "ColorChannel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Color" },
+            "val": { "type": "array", "items": { "$ref": "#/$defs/ColorValue" } }
+          }
+        }
+      ],
+      "description": "An RGBA colour channel (components are floats in 0.0-1.0, NOT the 0-255 integers used by a few plain non-channel colour fields like project_data.back_color). Used for fill_color, line_color, mesh point vertex colour."
+    },
+
+    "ColorValue": {
+      "type": "object",
+      "required": ["r", "g", "b", "a"],
+      "properties": {
+        "r": { "type": "number", "minimum": 0, "maximum": 1 },
+        "g": { "type": "number", "minimum": 0, "maximum": 1 },
+        "b": { "type": "number", "minimum": 0, "maximum": 1 },
+        "a": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+
+    "Vec2Channel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Vec2" },
+            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec2Value" } }
+          }
+        }
+      ],
+      "description": "A 2D vector channel. Used for mesh point position, bone anim_pos, effect_offset, ik_parent_target, camera_pan_tilt."
+    },
+
+    "Vec2Value": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+
+    "Vec3Channel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Vec3" },
+            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec3Value" } }
+          }
+        }
+      ],
+      "description": "A 3D vector channel. Used for transforms.translation/.scale/.shear and camera_track. moho2svg.py is a 2D exporter and ignores the z component of translation/scale."
+    },
+
+    "Vec3Value": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+
+    "BoolChannel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "Bool" },
+            "val": { "type": "array", "items": { "type": "boolean" } }
+          }
+        }
+      ],
+      "description": "A boolean channel. Used for flip_h/flip_v, layer_effects.visibility, ik_lock, bone_dynamics, on/off toggles throughout layer_effects/layer_shadow/etc."
+    },
+
+    "StringChannel": {
+      "allOf": [
+        { "$ref": "#/$defs/_ChannelBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "String" },
+            "val": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ],
+      "description": "A string channel. Used for switch_keys (child layer names), shape_order, layer_ordering, timeline_markers."
+    },
+
+    "Channel": {
+      "description": "A channel of any of the six observed types. Prefer the specific *Channel $defs (ValChannel, ColorChannel, ...) wherever the expected type is known from context - this generic union exists for places (e.g. an action's pose, a split axis) where the type must match whatever the sibling/parent channel already uses.",
+      "oneOf": [
+        { "$ref": "#/$defs/ValChannel" },
+        { "$ref": "#/$defs/ColorChannel" },
+        { "$ref": "#/$defs/Vec2Channel" },
+        { "$ref": "#/$defs/Vec3Channel" },
+        { "$ref": "#/$defs/BoolChannel" },
+        { "$ref": "#/$defs/StringChannel" }
+      ]
+    }
+  }
+}

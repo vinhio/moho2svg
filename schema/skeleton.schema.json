@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/skeleton.schema.json",
+  "title": "Moho skeleton and bones",
+  "description": "A BoneLayer's (or SwitchLayer's) `skeleton` field. See docs/moho-project-file-format.md §9 for the deformation model (rigid vs flexible/region binding) and the module docstring's BONE DEFORMATION and SMART BONES sections.",
+  "$defs": {
+
+    "Skeleton": {
+      "type": "object",
+      "required": ["type", "binding_mode", "bones"],
+      "properties": {
+        "type": { "const": "Skeleton" },
+        "binding_mode": { "type": "integer", "description": "Observed values: 1 (large majority), 2 (rare). Meaning not decoded; moho2svg.py never branches on it." },
+        "bones": { "type": "array", "items": { "$ref": "#/$defs/Bone" } },
+        "bones_groups": { "type": "array", "description": "Observed only rarely, and empty in every sample seen. Presumably a bone-grouping feature parallel to mesh.groups." }
+      },
+      "additionalProperties": true
+    },
+
+    "Bone": {
+      "type": "object",
+      "description": "One bone. A flat list (Skeleton.bones) - `parent` is an index into the SAME list, not a tree. Parents are not guaranteed to appear earlier in the list than their children. Every constraint/IK/physics/control field below (angle_control_*, pos_control_*, scale_control_*, ik_*, min/max_constraint, and every *_dynamics/*_force/physics_* field) is read by moho2svg.py in the sense that the document model exposes it, but NOT applied when rendering - see docs/moho-project-file-format.md §9 KNOWN GAPS. They matter only for posing live in the Moho editor; the resulting angle/position is already baked into anim_angle/anim_pos by the time the document is saved, EXCEPT for anim_parent, which can genuinely diverge from the static `parent` field (see below).",
+      "required": ["type", "name", "parent", "length", "strength"],
+      "properties": {
+        "type": { "const": "Bone" },
+        "name": { "type": "string", "description": "Also how a Smart Bone dial is matched: a bone counts as a dial if its own name appears in the enclosing BoneLayer's `actions` registry - see docs/moho-project-file-format.md §11." },
+        "parent": { "type": "integer", "description": "-1 for a root bone, otherwise an index into this same bones array." },
+        "length": { "type": "number", "description": "In document units (2 units span the canvas height)." },
+        "strength": { "type": "number", "description": "Influence radius for flexible binding. 0 disables this bone's influence entirely, checked before any weight-falloff calculation - Moho's own \"this bone does not deform this mesh\" gate." },
+        "offset": {
+          "type": "object",
+          "description": "Plain (not a channel).",
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+
+        "anim_pos": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "Animated position, relative to the parent bone." },
+        "anim_angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Animated angle in radians." },
+        "anim_scale": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "A SINGLE, uniform scale (unlike a layer's transforms.scale, which is per-axis) - see Skeleton.world_matrices in the module docstring." },
+        "anim_parent": {
+          "$ref": "channel.schema.json#/$defs/ValChannel",
+          "description": "Animated reparenting: the value at each keyframe is a bone INDEX (or -1), letting a bone change parent mid-animation (the Reparent Bone tool). moho2svg.py uses the static `parent` field instead and ignores this - confirmed harmless in the reverse-engineering sample set only because every sampled anim_parent channel has exactly one keyframe whose value equals the bone's own static `parent` (zero mismatches across 550+ bones, including in a document created specifically to demonstrate the Reparent Bone tool) - a document that actually keyframes a mid-animation reparent would be rendered wrong."
+        },
+
+        "scaling_mode": { "type": "integer", "description": "Observed values: 0, 2. Meaning not decoded; possibly related to the intentionally-preserved asymmetric bone scale in Skeleton.world_matrices (only the matrix's first column is scaled by anim_scale)." },
+        "squash_stretch_scaling": { "type": "number" },
+        "max_auto_scaling": { "type": "number" },
+
+        "hidden": { "type": "boolean", "description": "Editor state." },
+        "shy": { "type": "boolean", "description": "Editor state." },
+        "selected": { "type": "boolean", "description": "Editor state." },
+        "bone_label_showing": { "type": "boolean" },
+        "bone_tags": { "type": "integer" },
+
+        "fixed_angle": { "type": "boolean" },
+        "min_constraint": { "type": "number", "description": "In radians. Only meaningful in the Moho editor while posing - the resulting angle is already baked into anim_angle." },
+        "max_constraint": { "type": "number" },
+        "constraints": { "type": "boolean" },
+
+        "ik_lock": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "ik_global_angle": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "ik_parent_target": { "$ref": "channel.schema.json#/$defs/Vec2Channel" },
+        "ignored_by_ik": { "type": "boolean" },
+        "bone_enable_arc_solver": { "type": "boolean" },
+        "target_bone": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "The Target Bone tool's own target reference." },
+
+        "angle_control_parent": { "type": "integer", "description": "Index into this same bones array (or -1). Observed non-trivial targets in bone-control-focused documents (e.g. ControlBones.animeproj, IndependentAngle.animeproj)." },
+        "angle_control_scale": { "type": "number" },
+        "angle_control_delay": { "type": "integer" },
+        "pos_control_parent": { "type": "integer" },
+        "pos_control_scale": {
+          "type": "object",
+          "description": "Plain (not a channel).",
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+        "pos_control_delay": { "type": "integer" },
+        "scale_control_parent": { "type": "integer" },
+        "scale_control_scale": { "type": "number" },
+        "scale_control_delay": { "type": "integer" },
+
+        "angle_weight": { "type": "number", "description": "Observed -1.0 or 1.0." },
+        "pos_weight": { "type": "number" },
+        "scale_weight": { "type": "number" },
+
+        "flip_h": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "flip_v": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+
+        "bone_dynamics": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
+        "angle_dynamics": { "type": "boolean" },
+        "pos_dynamics": { "type": "boolean" },
+        "scale_dynamics": { "type": "boolean" },
+        "wind_dynamics": { "type": "boolean" },
+        "spring_force": { "type": "number" },
+        "damping_force": { "type": "number" },
+        "torque_force": { "type": "number" },
+        "pos_spring_force": { "type": "number" },
+        "pos_damping_force": { "type": "number" },
+        "pos_torque_force": { "type": "number" },
+        "scale_spring_force": { "type": "number" },
+        "scale_damping_force": { "type": "number" },
+        "scale_torque_force": { "type": "number" },
+        "physics_lock_tip": { "type": "boolean" },
+        "physics_radius": { "type": "number", "description": "Observed constant -1.0 in every sample." },
+        "physics_return_to_zero": { "type": "boolean" },
+        "physics_torque": { "type": "number", "description": "Observed constant 10.0 in every sample." },
+        "physics_motor_speed": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

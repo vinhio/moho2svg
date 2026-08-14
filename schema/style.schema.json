@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/style.schema.json",
+  "title": "Moho style (named style and a shape's own inline style)",
+  "description": "See docs/moho-project-file-format.md §8 for the full inheritance-resolution rule and the two-generation (version 1038 vs 1045) usage split. IMPORTANT: `line_width`, `line_caps`, and every `brush_*` field are PLAIN values, never channels - confirmed across every sampled style (Moho does not animate them).",
+  "$defs": {
+
+    "Style": {
+      "type": "object",
+      "description": "The exact same object shape is used both for doc.styles[] (a document-wide named style) and for shape.style (a shape's own, usually-partial style). A shape's own style additionally carries the inherited_style*_uuid/name fields shown on Shape (mesh.schema.json) - both locations (on the shape itself, or inside the shape's own style object) are observed in real files and both must be checked.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "Style" },
+        "name": { "type": "string", "description": "Empty on a shape's own inline style; a real name (e.g. \"yanak\") on a document-wide named style." },
+        "uuid": { "type": "string", "description": "Lookup key used by Shape.inherited_style_uuid / inherited_style2_uuid." },
+
+        "define_fill_color": { "type": "boolean", "description": "If true on a NAMED style and false on the shape's own style, the named style's fill_color overrides the shape's own - see the resolution rule in docs/moho-project-file-format.md §8.2." },
+        "define_line_col": { "type": "boolean" },
+        "define_line_width": { "type": "boolean", "description": "Also gates whether line_caps and the brush_* fields are inherited from the named style (they ride on this same flag, since a brush only ever styles the line)." },
+
+        "fill_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "line_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+
+        "line_width": { "type": "number", "description": "PLAIN float (not a channel) - Moho does not animate line width. Observed as a handful of quantised values per document (e.g. 0.0028-0.092)." },
+        "line_caps": { "type": "integer", "enum": [0, 1, 2], "description": "0 = butt, 1 = round, 2 = square. Only 1 (round) observed across the entire sample set, but 0/2 are named in moho2svg.py's own LINE_CAP_NAMES mapping." },
+
+        "fill_style": {
+          "oneOf": [
+            { "$ref": "#/$defs/Gradient" },
+            { "$ref": "#/$defs/Crayon" }
+          ],
+          "description": "A styled fill effect. Confirmed present BOTH on a named style AND inline on a shape's own style object (e.g. OffsetBoneTool.animeproj's \"pant-shades\" shape carries its own fill_style of type SS_Crayon directly). Two variants observed as a fill: SS_Gradient2 (1196 occurrences across 17 files, format versions 1021 and 1038) and SS_Crayon (19 occurrences in 1 file, version 1038). moho2svg.py only reads SS_Gradient2; SS_Crayon is not decoded and falls back to the shape's flat fill_color." },
+        "fill_style_id": { "type": "integer", "description": "Not decoded - an internal reference id, observed values include 9 and 12." },
+        "line_style": {
+          "oneOf": [
+            { "$ref": "#/$defs/Gradient" },
+            { "$ref": "#/$defs/SoftStyle" },
+            { "$ref": "#/$defs/ShadowStyle" }
+          ],
+          "description": "A styled STROKE effect rather than a fill. Rare. Three variants observed as a line: SS_Gradient2 (116 occurrences across 16 files), SS_Soft (9 occurrences, 3 files) and SS_Shadow (3 occurrences, 3 files) - all in format version 1038. NOT read by moho2svg.py - a style carrying any line_style renders its stroke as a flat colour instead. Note the fill/line variant sets are disjoint in the sample: SS_Crayon only ever appears as a fill_style, SS_Soft/SS_Shadow only ever as a line_style, and SS_Gradient2 appears as both." },
+        "line_style_id": { "type": "integer", "description": "Not decoded. Observed values include 9, 2, 11." },
+        "fill_style2": {
+          "$ref": "#/$defs/Texture2",
+          "description": "A SECOND fill effect slot, layered on top of `fill_style`. Only ever observed holding SS_Texture2 (12 occurrences across 3 files, format version 1038). Not read by moho2svg.py - a shape using it exports without the texture."
+        },
+        "fill_style2_id": { "type": "integer", "description": "Not decoded; observed constant 10. Same kind of internal reference id as fill_style_id/line_style_id." },
+
+        "brush_name": { "type": "string", "description": "Identifies a brush texture asset by name, possibly with an old-style numeric suffix baked in (e.g. Brush567_0_20_50.png names the file Brush567.png) - see docs/moho-project-file-format.md §8.5 for the full resolution algorithm. Empty string means no brush (plain uniform stroke)." },
+        "brush_jitter": { "type": "number", "description": "Random rotation spread per dab, in RADIANS." },
+        "brush_spacing": { "type": "number", "description": "Dab spacing, as a fraction of the dab's own diameter." },
+        "brush_align": { "type": "boolean", "description": "Whether each dab rotates to the local path tangent." },
+        "brush_tint": { "type": "boolean", "description": "Whether the (greyscale) texture is recoloured to line_color, or used with its own native multi-colour pixels as-is." },
+        "brush_randomize": { "type": "boolean", "description": "Per-dab size variance. Read by moho2svg.py but not applied when rendering." },
+        "brush_rand_order": { "type": "boolean", "description": "Read by moho2svg.py but not applied - randomOrder is instead read from the brush's own .mohobrush archive (see docs/moho-project-file-format.md §8.5)." },
+        "brush_merged_alpha": { "type": "boolean", "description": "Whether overlapping dabs cap combined opacity instead of compounding. Read but not applied - overlapping dabs always compound via ordinary SVG alpha blending." },
+        "brush_angle_drift": { "type": "number", "description": "Read but not applied." },
+        "brush_random_interval": { "type": "integer", "description": "Observed only in newer-generation documents, always 1." },
+        "brush_size_amp": { "type": "number", "description": "Observed only in newer-generation documents." },
+        "brush_size_scale": { "type": "number", "description": "Observed only in newer-generation documents." },
+        "brush_hue_drift": { "type": "number", "description": "Observed only in newer-generation documents, always 0.0." },
+        "brush_sat_drift": { "type": "number" },
+        "brush_val_drift": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+
+    "Gradient": {
+      "type": "object",
+      "description": "A gradient fill (or, rarely, stroke) specification. Placement (centre/radius) as computed by moho2svg.py is approximate, not pixel-matched to Moho's own differently-parameterised placement - see docs/moho-project-file-format.md §8.3.",
+      "required": ["type", "gradient_type", "gradients"],
+      "properties": {
+        "type": { "const": "SS_Gradient2", "description": "Only this literal type is understood; any other value is rejected by moho2svg.py with a warning (and the flat fill colour is used instead)." },
+        "gradient_type": { "type": "integer", "enum": [0, 1], "description": "0 = linear, 1 = radial." },
+        "through_alpha": { "type": "boolean", "description": "Not read by moho2svg.py." },
+        "gradients": {
+          "type": "array",
+          "description": "Gradient stops, each with its own animatable position and colour.",
+          "items": {
+            "type": "object",
+            "required": ["location", "color"],
+            "properties": {
+              "location": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Stop position, 0.0-1.0." },
+              "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "Crayon": {
+      "type": "object",
+      "description": "A textured, crayon-like fill effect. Not decoded - not read by moho2svg.py, which falls back to the shape's flat fill_color.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Crayon" },
+        "line_width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Despite the name, this styles the crayon texture's own stroke-like density, not the shape's line_width." },
+        "density": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "clear_background": { "type": "boolean" },
+        "reduce_randomization": { "type": "boolean" },
+        "rand_seed": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+
+    "SoftStyle": {
+      "type": "object",
+      "description": "A soft/blurred stroke effect, used only as a line_style. Not decoded - not read by moho2svg.py.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Soft" },
+        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "threshold": { "type": "boolean", "description": "Observed as a plain boolean here (not wrapped in a channel), unlike LayerShadow/LayerShading/PerspectiveShadow's own threshold field which IS a BoolChannel - confirmed by direct inspection (TargetBone.animeproj)." }
+      },
+      "additionalProperties": true
+    },
+
+    "Texture2": {
+      "type": "object",
+      "description": "An image-texture fill, referenced from a style's `fill_style2` slot. Not decoded - not read by moho2svg.py. Note that in all 12 sampled occurrences both the `path` string and the fileref's own path are EMPTY, so no sampled document actually resolves to a texture file; the shape of a populated instance is therefore inferred from the field names, not confirmed.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Texture2" },
+        "path": { "type": "string", "description": "Texture image path. Empty in every sample." },
+        "SS_Texture2FileRef": { "$ref": "layer.schema.json#/$defs/FileRef", "description": "The same {relativeTo, path} shape used by every other file reference in the format. Observed {relativeTo: \"Absolute\", path: \"\"}." },
+        "fill_mode": { "type": "integer", "description": "Presumably tile/stretch/centre. Observed constant 0; other values not sampled, so the value set is unknown." },
+        "through_alpha": { "type": "boolean", "description": "Same field name as Gradient.through_alpha. Observed constant false." }
+      },
+      "additionalProperties": true
+    },
+
+    "ShadowStyle": {
+      "type": "object",
+      "description": "A per-shape drop-shadow effect on the stroke, used only as a line_style. Distinct from the LAYER-level shadow (LayerShadow in layer.schema.json), which has a different field set. Not decoded - not read by moho2svg.py.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Shadow" },
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow direction in radians (observed 2.432966)." },
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow distance in Moho space units (observed 0.001786 - very small)." },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Observed as opaque black {0,0,0,1}." },
+        "threshold": { "type": "boolean", "description": "Plain boolean, same as SS_Soft's own threshold field." }
+      },
+      "additionalProperties": true
+    }
+  }
+}

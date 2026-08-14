@@ -30,24 +30,59 @@ walking the project files in the (gitignored) `moho/` folder. That sample is
 small, so treat "the only values observed" as *evidence*, not as *the complete
 set the format allows*.
 
-| Document | `version` | Canvas | `fps` | Frames | Layers | Named styles | Shapes | Points | Bones |
-|---|---|---|---|---|---|---|---|---|---|
-| `AddBone.animeproj` | 1038 | 1280×720 | 24 | 1–25 | 229 | 201 | 310 | 4,663 | 188 |
-| `ReparentBone.animeproj` | 1038 | 1280×720 | 24 | 1–120 | 42 | 201 | 144 | 3,436 | 24 |
-| `SketchBone.animeproj` | 1038 | 1280×720 | 24 | 1–120 | 108 | 239 | 190 | 3,556 | 94 |
-| `WhatIsBone.animeproj` | 1038 | 1280×720 | 24 | 1–240 | 140 | 118 | 203 | 4,176 | 216 |
-| `Bandit.mohoproj` | 1045 | 1920×1080 | 24 | 25–127 | 25 | 12 | 112 | 396 | 28 |
+The sample was broadened partway through this document's life from an
+original 5 files to **19**, adding Moho's own bundled bone-tool tutorial
+documents (`AnglePositionScale`, `BoneDynamics`, `BoneParenting`,
+`BoneStrengthTool`, `ControlBones`, `IK-FK`, `IndependentAngle`,
+`MaximumIKStrethching`, `OffsetBoneTool`, `Rabbit`,
+`SelectandReparentBoneTool`, `TargetBone`, `TransformBoneTool`, plus
+`SlickObjectTransition`). Findings that only the broader 19-file pass
+surfaced are marked **(19-file finding)** below so it stays clear which
+claims rest on the original 5-file evidence and which needed the larger
+sample. A machine-checkable counterpart to this document — a JSON Schema
+validated against all 19 files, with its own gap-coverage audit — lives in
+`schema/`; see `schema/README.md`.
 
-(The layer counts include the `MeshLayer` nested inside each `TextLayer`.)
+| Document | `version` | Canvas | Frames | Layers | Named styles |
+|---|---|---|---|---|---|
+| `AddBone.animeproj` | 1038 | 1280×720 | 1–25 | 229 | 201 |
+| `ReparentBone.animeproj` | 1038 | 1280×720 | 1–120 | 42 | 201 |
+| `SketchBone.animeproj` | 1038 | 1280×720 | 1–120 | 108 | 239 |
+| `WhatIsBone.animeproj` | 1038 | 1280×720 | 1–240 | 140 | 118 |
+| `Bandit.mohoproj` | 1045 | 1920×1080 | 25–127 | 25 | 12 |
+| `AnglePositionScale.animeproj` | 1038 | 1280×720 | 1–120 | 10 | 273 |
+| `BoneDynamics.animeproj` | 1038 | 1280×720 | 1–29 | 14 | 273 |
+| `BoneParenting.animeproj` | 1038 | 1280×720 | 1–120 | 10 | 273 |
+| `BoneStrengthTool.animeproj` | 1038 | 1280×720 | 1–25 | 22 | 201 |
+| `ControlBones.animeproj` | 1038 | 1280×720 | 1–120 | 25 | 240 |
+| `IK-FK.animeproj` | 1038 | 1280×720 | 1–120 | 10 | 273 |
+| `IndependentAngle.animeproj` | 1038 | 1280×720 | 1–120 | 45 | 273 |
+| `MaximumIKStrethching.animeproj` | 1038 | 1280×720 | 1–120 | 45 | 273 |
+| `OffsetBoneTool.animeproj` | 1038 | 1280×720 | 1–120 | 25 | 201 |
+| `Rabbit.animeproj` | **1021** | 1920×1080 | 1–29 | 17 | 0 |
+| `SelectandReparentBoneTool.animeproj` | 1038 | 1280×720 | 1–120 | 42 | 201 |
+| `SlickObjectTransition.mohoproj` | 1038 | 1280×720 | 1–96 | 7 | 0 |
+| `TargetBone.animeproj` | 1038 | 1280×720 | 1–120 | 45 | 273 |
+| `TransformBoneTool.animeproj` | 1038 | 1280×720 | 1–120 | 15 | 239 |
 
-Totals across the five documents: 544 layers, 771 named styles, 959 shapes,
-1,088 curves, 16,227 mesh points, 16,378 curve points, 550 bones, and 201,185
-animation channels.
+(Layer counts include the `MeshLayer` nested inside each `TextLayer`. `fps` is
+`24.0` in every sample, so it is dropped from this table.)
 
-The two `version` values matter, because they behave differently in several
-places (styles, per-point fields, `combo_mode`). Throughout this document,
-**"older"** means the four `1038` documents and **"newer"** means the single
-`1045` document. A conclusion drawn from `1045` alone rests on one file.
+Totals across the 19 documents: 876 layers (of which 648 are `MeshLayer`, 103
+`GroupLayer`, 47 `BoneLayer`, 34 `TextLayer`, 17 `SwitchLayer`, 15
+`ImageLayer` **(19-file finding — [§ 6.1](#61-layer-types))**, 12
+`PatchLayer`), 3,764 named styles, 2,660 shapes, 3,045 curves, 52,748 mesh
+points, 53,027 curve points, 850 bones, and 584,616 animation channels
+(423,642 `Val`, 72,646 `Color`, 68,903 `Vec2`, 14,896 `Bool`, 2,812 `Vec3`,
+1,717 `String`). A document can also carry **zero** named styles at all
+(`Rabbit`, `SlickObjectTransition` **(19-file finding)**).
+
+Three `version` values are now sampled, and they behave differently in
+several places (styles, per-point fields, `combo_mode`). Throughout this
+document, **"oldest"** means `Rabbit.animeproj`'s `1021` **(19-file
+finding)**, **"older"** means the `1038` documents (17 of the 19), and
+**"newer"** means the single `1045` document (`Bandit.mohoproj`) — still one
+file, so a conclusion drawn from it alone rests on that one file.
 
 ---
 
@@ -72,19 +107,26 @@ Every top-level key observed, and whether `moho2svg.py` reads it:
 | `layers` | list | The document's layer tree ([§ 6](#6-layers)). 1–4 root layers observed. | **yes** |
 | `styles` | list | Document-wide named style list ([§ 8](#8-styles)). | **yes** |
 | `project_data` | obj | Canvas and render settings ([§ 3](#3-project_data)). | partly — `width`/`height` only |
-| `version` | int | Format revision: `1038` or `1045`. | **yes** — read, but no branch depends on it |
+| `version` | int | Format revision: `1021` (oldest sampled), `1038` (majority), or `1045` (newest sampled) **(1021 is a 19-file finding)**. | **yes** — read, but no branch depends on it |
 | `animated_values` | obj | Document-level channels: camera + timeline markers ([§ 5.5](#55-document-level-animated_values)). | no |
-| `layercomps` | list | Layer comps (saved show/hide sets). **Empty in all five documents**, so its element shape is unknown. | no |
-| `action_refs` | list | **Empty in all five documents**, so its element shape is unknown. Presumably references to actions in external/linked documents; see [§ 11.4](#114-action_refs-and-layercomps). | no |
+| `layercomps` | list | Layer comps (saved show/hide sets). **Empty in all 19 documents**, so its element shape is unknown. | no |
+| `action_refs` | list | **Empty in every document that has the key at all**, so its element shape is unknown. Presumably references to actions in external/linked documents; see [§ 11.4](#114-action_refs-and-layercomps). Absent entirely in the `1021` document — see the row below. | no |
 | `major_version` / `rev_version` | int | Always `1` / `0`. | no |
 | `mime_type` | str | Always `"application/x-vnd.lm_mohodoc"`. | no |
 | `doc_uuid` | str | Document identity. | no |
 | `created_date` / `modified_date` | str | Human-readable timestamps, e.g. `"Wed Aug 31 16:17:24 2016"`. | no |
-| `comment` | str | Only in the `1045` file: `"Created in Moho version 14.3, ..."`. | no |
-| `thumbnail` | str | Only in the `1045` file: base64 JPEG preview. | no |
-| `documentviewstate` | obj | 48 `DocState_*` editor keys (zoom, grid, playback range, viewport split). Pure UI state. | no |
-| `metadata` | obj | Small key/value bag; `{"what": 0}` plus tool-specific keys. | no |
+| `comment` | str | Only in newer-generation files: `"Created in Moho version 14.3, ..."`. | no |
+| `thumbnail` | str | Only in newer-generation files: base64 JPEG preview. | no |
+| `documentviewstate` | obj | Exactly 48 `DocState_*` editor keys in every one of the 19 documents (zoom, grid, playback range, viewport split, per-quadrant outside-view camera) **(the full 48-key enumeration is a 19-file finding — see `schema/project.schema.json`'s `DocumentViewState`)**. Pure UI state, no effect on exported geometry. | no |
+| `metadata` | obj | Small key/value bag: `what` (`0`), `save_time` (`1` — not a timestamp despite the name), `layerwnd_searchcontext` **(the latter two are a 19-file finding)**. | no |
 | `onions_*` (14 keys) | mixed | Onion-skin editor settings. Unset frame slots are `-100000`. | no |
+
+**The `1021` format generation (`Rabbit.animeproj`) omits `doc_uuid`,
+`action_refs`, and `modified_date` entirely — not as empty values, the keys
+are absent from the JSON altogether (19-file finding).** It also has zero
+named styles (`styles: []`), which the `1038`/`1045` generations never show.
+Anything in this document that says a field is "always present" implicitly
+excludes this one generation unless stated otherwise.
 
 **Nothing in the document is a z-order index.** The draw order (back to
 front) is simply the order layers appear in `layers`, recursively, and the
@@ -125,7 +167,8 @@ what is being skipped.
 | `depth_of_field`, `focus_distance`, `focus_range`, `focus_blur` | `false`, numbers | Camera depth-of-field. |
 | `noise_grain`, `pixelation` | `0.0` | Global render effects. |
 | `stereo_mode`, `stereo_separation` | `0`, number | Stereoscopic output. |
-| `global_render_style_fill_style`, `..._line_style`, `..._layer_style`, `..._minimize_randomness` | strings / bool | A document-wide style override applied at render time. **Empty in all five documents** — if a document ever sets these, this tool would ignore them and could produce visibly wrong colours. |
+| `global_render_style_fill_style`, `..._line_style`, `..._layer_style` | int (`0` in every one of the 19 sampled documents) | A document-wide style override applied at render time. **Correction:** an earlier revision of this document reported these as an empty string in the 5-file sample; direct inspection of the raw JSON shows the true value is the **integer `0`**, in the original 5 files too, not `""`. `schema/project.schema.json` types the field as `["string", "integer"]` precisely because the *value set this format allows* is not yet known to be closed to `0` — if a document ever sets a non-zero value, this tool would ignore it and could produce visibly wrong colours. | 
+| `global_render_style_minimize_randomness` | bool | Same override family. `false` throughout. |
 | `color_palette` | `"Basic Colors.png"` | Editor swatch palette. |
 | `soundtrack` | str | Audio file reference. |
 | `extra_swf_frame`, `display_quality` | bool, int | Legacy export options. |
@@ -156,7 +199,7 @@ colour fields such as `project_data.back_color` and the `TextLayer` colours.
 
 Almost every numeric, colour, boolean, or string property in Moho is stored
 as the same "channel" object. This is the single most repeated structure in
-the format: 201,185 instances across the five documents.
+the format: 584,616 instances across the 19-file sample.
 
 ### 5.1 Channel object fields
 
@@ -174,12 +217,26 @@ the format: 201,185 instances across the five documents.
 ```
 
 - `when`, `val`, and `interp` are **always exactly the same length** — verified
-  on all 201,185 channels, zero exceptions. `interp[i]` describes the segment
-  leaving keyframe `i`.
-- `mute` and `ref` are `false` on every channel in all five documents.
-  `moho2svg.py` does not read either. **A `mute: true` channel would be
-  silently animated by this tool where Moho would freeze it** — an untested
-  gap, not a confirmed bug, since no sample exercises it.
+  on all 584,616 channels (19-file total), zero exceptions. `interp[i]`
+  describes the segment leaving keyframe `i`.
+- `mute` is `false` on all but **one** channel across the 19-file sample:
+  `Bandit.mohoproj`'s root `BoneLayer`'s own `transforms.translation` is
+  `mute: true` **(correction — this is in the original 5-file sample, an
+  earlier revision of this document reported `mute` as false everywhere)**.
+  That channel has a single keyframe at the default `{0,0,0}`, so muting it
+  has no visible effect either way — the gap remains untested for a document
+  where a *multi-keyframe* channel is muted. `ref` is `true` on 207 channels
+  across 3 documents (mostly single-keyframe `transforms.translation`
+  channels in `BoneStrengthTool.animeproj`'s PSD-import rig and
+  `OffsetBoneTool.animeproj`, plus one `timeline_markers` channel in
+  `Bandit.mohoproj`) **(19-file finding, also correcting the same "false
+  everywhere" claim)** — its meaning is still not decoded, and every
+  occurrence sampled happens to be a single, non-conflicting keyframe, so
+  nothing about current output is known to be wrong. `moho2svg.py` does not
+  read either field. **A `mute: true` channel with more than one keyframe
+  would be silently animated by this tool where Moho would freeze it** — an
+  untested gap, not a confirmed bug, since no sample exercises that
+  combination.
 - A field that is never animated is sometimes stored as a bare scalar or a
   plain dict instead of a channel object. Both forms are accepted
   transparently (`Channel` treats a bare scalar as a single keyframe).
@@ -222,6 +279,15 @@ inexact.
 | `h` | `0` everywhere | Not decoded. |
 | `b` | absent on all but 16 entries | When present: a list of `{ao, ai, po, pi}` objects — plausibly explicit Bezier handles for the timing curve (angle/position, out/in). Only ever seen alongside `t == 4`, but most `t == 4` entries have no `b`, so `t == 4` is not simply "Bezier". |
 
+A later pass that also descends into `actions[].pose` and `split[]` channels
+counts 604,139 `interp` entries rather than the ~210,000 behind the table above
+(the non-zero `t` counts agree exactly; the `t == 0` total does not), and
+decodes part of the table: `b` is present on 182 entries, always exactly the
+ones with `im == 9`, and its length equals the number of components in the
+channel's value (1 for `Val`, 2 for `Vec2`, 3 for `Vec3`). See
+[`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 3 for
+that analysis, including the cycle marker carried on a channel's last keyframe.
+
 ### 5.4 `split` — per-axis keyframes
 
 A `Vec2` or `Vec3` channel may carry a `split` list holding one **independent
@@ -237,20 +303,26 @@ the stale parent values** — an untested gap.
 ### 5.5 Document-level `animated_values`
 
 `doc.animated_values` is an object of five channels, all with exactly one
-keyframe at frame `0` in all five documents:
+keyframe at frame `0` in all 19 documents:
 
 | Key | `type` | Value seen | Meaning |
 |---|---|---|---|
-| `camera_track` | `Vec3` | `{0, 0, 3.732051}` | Camera position. The `z` value is the default camera distance. |
-| `camera_pan_tilt` | `Vec2` | `{0, 0}` | Camera pan/tilt. |
-| `camera_zoom` | `Val` | `0.0` | Camera zoom. |
-| `camera_roll` | `Val` | `0.0` | Camera roll. |
-| `timeline_markers` | `String` | `""` | Editor timeline annotations. |
+| `camera_track` | `Vec3` | `{0, 0, 3.732051}` in 18 of 19; `{0.232877, 0.481034, 3.732051}` in `Rabbit.animeproj` **(19-file finding — a real x/y camera pan, not the default)** | Camera position. The `z` value is the default camera distance. |
+| `camera_pan_tilt` | `Vec2` | `{0, 0}` in every document | Camera pan/tilt. |
+| `camera_zoom` | `Val` | `2.0` in 18 of 19; `1.413848` in `Rabbit.animeproj` | Camera zoom. **Correction:** an earlier revision of this document reported `0.0` from the 5-file sample; direct inspection shows the true value is `2.0` in every one of the original 5 files too, not `0.0`. Whether `2.0` is itself Moho's neutral/no-op zoom value, or a real non-default zoom this tool should be applying, is not decoded. |
+| `camera_roll` | `Val` | `0.0` in every document | Camera roll. |
+| `timeline_markers` | `String` | `""` in every document | Editor timeline annotations. |
 
-None of these are used. This tool renders with an implicit fixed camera. **A
-document with a moved or zoomed camera would export with the wrong framing**,
-since nothing here is applied. Every sample happens to sit at the default, so
-this gap is invisible in current output.
+None of these are read by `moho2svg.py` (confirmed: no reference to
+`animated_values` or any `camera_*` key anywhere in the source). This tool
+renders with an implicit fixed camera. **A document with a moved or zoomed
+camera would export with the wrong framing.** Given the corrected
+`camera_zoom` value above and `Rabbit.animeproj`'s real pan, this is **less
+settled than previously stated** — it is not confirmed that "every sample
+sits at the default", only that `camera_pan_tilt`/`camera_roll` do, and that
+`camera_zoom`'s uniform non-zero value across all 19 files might itself be
+the neutral default rather than a real zoom. Until that is resolved, treat
+this as an open risk rather than an invisible one.
 
 ---
 
@@ -260,15 +332,18 @@ this gap is invisible in current output.
 
 Each layer is a JSON object with a `type` field naming its kind:
 
+Counts below are across all 19 sampled documents.
+
 | `type` | Count | Meaning | Rendered? |
 |---|---|---|---|
-| `MeshLayer` | 428 | Vector artwork (points/curves/shapes) — the only layer kind that actually draws pixels. | **yes** |
-| `GroupLayer` | 61 | Children with no skeleton. | **yes** (container) |
-| `BoneLayer` | 31 | A skeleton (`skeleton.bones`) plus child layers deformed by it. | **yes** (container + skinning) |
-| `TextLayer` | 8 | A caption. Moho keeps the laid-out glyph outlines in a nested `mesh_layer` field, which is an ordinary `MeshLayer` object. | **yes**, via `mesh_layer` |
-| `SwitchLayer` | 8 | Children are alternatives; only one shows at a time. | **yes** |
-| `PatchLayer` | 8 | No mesh of its own — reuses another layer's mesh ([§ 12](#12-patch-layers)). | **yes**, resolved |
-| anything else | 0 in these files | Image, audio, particle, note, 3D layers etc. are not modelled. | no |
+| `MeshLayer` | 648 | Vector artwork (points/curves/shapes) — the only layer kind that actually draws pixels. | **yes** |
+| `GroupLayer` | 103 | Children with no skeleton. | **yes** (container) |
+| `BoneLayer` | 47 | A skeleton (`skeleton.bones`) plus child layers deformed by it. | **yes** (container + skinning) |
+| `TextLayer` | 34 | A caption. Moho keeps the laid-out glyph outlines in a nested `mesh_layer` field, which is a **complete** `MeshLayer` object — not a stripped-down `{type, mesh}` pair, it carries the full `MeshLayer` field set (noise/sketchy fields, `3d_mode`, `3d_options`, texture paths/filerefs) **(the full-field-set confirmation is a 19-file finding)**. | **yes**, via `mesh_layer` |
+| `SwitchLayer` | 17 | Children are alternatives; only one shows at a time. | **yes** |
+| `ImageLayer` | 15 | **(19-file finding, not in the original 5-file sample.)** A raster image/movie/PSD-import layer — see [§ 6.5](#65-imagelayer-19-file-finding). | **no** — silently dropped |
+| `PatchLayer` | 12 | No mesh of its own — reuses another layer's mesh ([§ 12](#12-patch-layers)). | **yes**, resolved |
+| anything else | 0 in these 19 files | Audio, particle, note, 3D layers etc. are not modelled. | no |
 
 ### 6.2 Common fields that affect rendering and **are** used
 
@@ -289,7 +364,13 @@ Present on every layer type unless noted.
 - `parent_bone` — index into an ancestor `BoneLayer`'s `skeleton.bones`, or
   `-1`. `-1` means *flexible* ("region") binding; a non-negative index means
   *rigid* binding to that one bone. See [§ 9](#9-bones-and-skinning).
-  Observed: `-1` on 513 of 544 layers, and 31 layers rigidly bound.
+  Observed across the 19-file sample: `-1` on 813 of 876 layers, 54 layers
+  rigidly bound to a non-negative index, and **`-3` on 9 layers — all of them
+  `ImageLayer` instances that also carry a non-trivial `flexi_bone_subset`
+  (19-file finding, not decoded — see [§ 6.5](#65-imagelayer-19-file-finding))**.
+  `moho2svg.py` only distinguishes `-1` from `>= 0`, so `-3` is currently
+  handled the same as any other negative value (i.e. as flexible binding),
+  which is unconfirmed against real Moho output for this value.
 - `flexi_bone_subset` — a `"|"`-separated list of **bone indices as a
   string**, e.g. `""` (all bones), `"0"`, `"1|2"`, `"30|31|32|33|34|35"`.
   Restricts flexible binding to those bones. These are indices into
@@ -320,47 +401,101 @@ This is the important gap list: every field here changes what Moho draws.
 | `transforms.translation.z`, `.scale.z` | float | defaults | Layer depth. |
 | `transforms.following`, `.physics_nudge` | channels | defaults | Path-following offset and physics displacement. |
 | `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: false` | Motion blur. Not meaningful for a single-frame export anyway. |
-| `distortion_layer_uuid` | str | `""` everywhere | Points at another layer used as a distortion mesh. |
+| `distortion_layer_uuid` | str | `""` in all 827 layers that have it; **absent in the `1021` file** | Points at another layer used as a distortion mesh — the most likely storage hook for Smart Warp. See [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp). |
 | `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`, defaults | "Follow path" rigging. |
 | `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | disabled | 2D physics simulation. |
 | `scale_compensation`, `scale_normalization` | bool/float | defaults | How a layer's stroke width reacts to scaling. Relevant to [§ 7.6](#76-stroke-width) if ever non-default. |
 | `layer_ordering` | `String` channel | `""` | Animated child reordering (with `animated_layer_order` on `BoneLayer`). Would change draw order per frame. |
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |
 | `layer_ref_*` (`uuid`, `path`, `fileref`, `mod_date`, `same_doc`) | mixed | empty | Linked/referenced external layer. A document using these would be missing artwork here. |
-| `camera_immune`, `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode`, `3d_options` | mixed | defaults, `face_camera_mode: 2` | 3D / camera behaviour. |
+| `camera_immune`, `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / camera behaviour. |
+| `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (648 instances), always at identical defaults | 3D-extrusion rendering settings, entirely inert in every sample because `3d_mode` is `0` everywhere. |
 | `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. |
-| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `mask_expansion`, `script_data`, `metadata`, `modification_date` | mixed | — | Editor state, or (for `render_only` / `mask_expansion`) undecoded render toggles that are off in every sample. |
+| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `mask_expansion`, `modification_date` | mixed | — | Editor state, or (for `render_only` / `mask_expansion`) undecoded render toggles that are off in every sample. |
+| `metadata`, `script_data` | obj | see [§ 6.4](#64-type-specific-fields) | Editor/script bookkeeping bags, key sets now enumerated. |
 
 ### 6.4 Type-specific fields
 
 **`MeshLayer`** — `mesh` is the only field used ([§ 7](#7-mesh-model)). Not used:
 
 - `fill_texture_path` / `fill_texture_fileref`, `line_texture_path` /
-  `line_texture_fileref` — image textures for fills and lines. Empty in all
-  428 mesh layers.
+  `line_texture_fileref` — image textures for fills and lines. Empty in
+  every mesh layer.
 - `noisy_lines`, `noisy_shapes`, `extra_sketchy`, `extra_lines`, `noise_amp`,
   `noise_scale`, `noise_interval`, `animated_noise` — the "sketchy lines"
   look. `extra_sketchy: true` with `extra_lines: 5` on **2 layers** (in
   `SketchBone`), so those two layers should render with repeated jittered
   strokes and do not.
-- `gap_filling`, `exclude_lines_from_mask`, `antialiasing`, `triangulated`,
-  `squashable_deformer`, `frame_zero_deformer`.
+- `gap_filling`, `exclude_lines_from_mask`, `antialiasing`.
+- `triangulated`, `squashable_deformer`, `frame_zero_deformer` — three
+  deformer flags that exist **only in the `1045` format generation** (all 21
+  `MeshLayer`s of `Bandit.mohoproj`; absent from every `1038` and `1021`
+  layer), at `false`/`false`/`true` throughout. They are the clearest sign in
+  this sample that a mesh can act as a deformation mesh — see
+  [`moho-rigging-and-deformation.md` § 5.2](moho-rigging-and-deformation.md#52-what-the-files-actually-show).
+- `3d_mode` (always `0`) and `3d_options` — see `Mesh3DOptions` below.
+- `metadata` — see below.
+
+**`Mesh3DOptions`** (`MeshLayer.3d_options`) — **(19-file finding.)** Ten
+3D-extrusion settings gated by `3d_mode`, present on **every single sampled
+`MeshLayer`** (648 instances, including the one nested inside each
+`TextLayer`), always at identical default values:
+`3d_shading_mode: 1`, `3d_shading_density: 50`,
+`3d_shading_color: {64,64,64,255}` (plain 0–255 RGBA), `3d_silhouette_edges`
+/ `3d_material_edges` / `3d_crease_edges: true`,
+`3d_crease_angle: 1.047198` (π/3), `3d_edge_extension: 0.0`,
+`3d_backface_removal` / `3d_reset_z: false`. Because `3d_mode` is `0` in
+every sample, the whole block is currently inert — but it is large and was
+completely undocumented before this pass; a document that actually enables
+3D extrusion would export as flat 2D geometry with no extrusion or 3D
+shading at all. Full field list in `schema/layer.schema.json`'s
+`Mesh3DOptions`.
 
 **`BoneLayer`** — `skeleton` and `actions` are used. `skeleton` is
 `{type, binding_mode, bones}`, plus `bones_groups` in the `1045` document
-(present but empty there). `binding_mode` is `1` on all 39 skeletons; its
-other values are unknown, and this tool never branches on it. Also carries
-`grandpa_bone`, `flexi_bone_elbow`, `animated_layer_order`,
-`animated_layer_effects` — none used.
+(present but empty there). `binding_mode` is `1` on 41 of the 42 skeletons
+that actually hold bones, and **`2` on one** (`OffsetBoneTool.animeproj`,
+layer `Happy Dance`) — an earlier revision of this document claimed `1`
+everywhere, which was too strong. Its meaning is not decoded, and this tool
+never branches on it. Also
+carries `grandpa_bone` (lets bones bind layers nested deeper than direct
+children), `flexi_bone_elbow`, `animated_layer_effects` — none used. See
+`layer_ordering`/`animated_layer_order` and `gravity`/`wind` below, both
+shared with `GroupLayer` but shaped differently.
 
-**`GroupLayer`** — no extra rendering fields beyond the common set.
+**`GroupLayer`** — no extra rendering fields beyond the common set, but see
+`gravity` below.
+
+**Container `layer_ordering` / `animated_layer_order` (`BoneLayer` and
+`GroupLayer`) — (19-file finding).** `layer_ordering` is a `String` channel
+meant to animate child draw order over time; `animated_layer_order` is the
+bool that gates whether it is active. Present on ~150 containers across the
+sample (effectively every `BoneLayer`/`GroupLayer`) — but `layer_ordering`'s
+value is an **empty string in every single instance**, and
+`animated_layer_order` is `true` on only 2 containers in the whole sample
+(`ControlBones.animeproj`, `SketchBone.animeproj`), where the paired channel
+is still empty. So no sampled document actually reorders its children over
+time, and `moho2svg.py` — which always uses the raw `layers` array order — is
+correct for every file here, but would stack layers wrongly for a document
+that does use this feature.
+
+**`gravity` / `wind` (bone and group physics) — (19-file finding.)** Two
+unrelated fields share the name `gravity` with **different shapes**:
+`BoneLayer.gravity` is `{direction, strength}` as **`Val` channels**
+(radians / magnitude — observed `direction: 4.712389` = 3π/2, i.e. straight
+down); `GroupLayer.gravity` is `{x, y}` as **plain floats**. `BoneLayer` also
+has a `wind` field (`{direction, strength, turbulence_amplitude,
+turbulence_frequency}`, also channels). Bone-physics gravity/wind is rare —
+observed on exactly one `BoneLayer` in the whole sample (`Bandit.mohoproj`);
+group-physics gravity is common (16 `GroupLayer`s, all three format
+generations). Neither is read by `moho2svg.py`.
 
 **`SwitchLayer`** — `switch_keys` (a `String` channel whose `val` entries are
 **child layer names**) selects the active child; used. Not used:
-`switch_interpolation`, `switch_data` (`""` in all 8), `frame_by_frame`,
-`previewAlignment`. A `SwitchLayer` also carries its own `skeleton` object
-(with an empty `bones` list in all 8 cases) — do not mistake it for a
-`BoneLayer`.
+`switch_interpolation`, `switch_data` (`""` in every sample),
+`frame_by_frame`, `previewAlignment`. A `SwitchLayer` also carries its own
+`skeleton` object (with an empty `bones` list in every sample) — do not
+mistake it for a `BoneLayer`.
 
 **`PatchLayer`** — `target_layer_uuid` and `target_layer_id`; see
 [§ 12](#12-patch-layers).
@@ -375,6 +510,52 @@ for speech balloons (all off in the samples). Because the glyph outlines are
 already baked into `mesh_layer`, ignoring the font fields costs nothing —
 **unless** a viewer needs to re-layout the text, which this tool never does.
 `TextLayer` is the one layer type that never carries an `actions` list.
+**`mesh_layer` is confirmed to be a complete `MeshLayer` object, not a
+stripped-down `{type, mesh}` pair (19-file finding)** — it carries the whole
+`MeshLayer` field set, including `Mesh3DOptions`, texture paths/filerefs, and
+the "sketchy lines" fields, all likewise unused.
+
+**Per-layer `metadata` / `script_data` bags — (19-file finding.)** Both are
+small free-form key/value bags, distinct from the document-level `metadata`
+in [§ 2](#2-top-level-structure). `metadata` appears on `MeshLayer`,
+`BoneLayer`, and `SwitchLayer` instances; observed keys: `what` (`0`),
+`NewLayerScript` (bool), `LM_GrandpaBones` (bool, `SwitchLayer` only,
+presumably the same feature as `BoneLayer.grandpa_bone`), `psd_layers` (a
+`"|"`-joined list of PSD layer indices, e.g. `"24|12|7|23|..."`, on the
+`BoneLayer` wrapping a PSD cutout-puppet import — recording which PSD layers
+became `ImageLayer` children), and a `g_<number>` boolean-toggle family
+(`g_10000`, `g_10001`, `g_10002`, `g_10031`, `g_10033`, `g_10056`, `g_10069`,
+`g_10082` observed). `script_data` (rare — 2 `BoneLayer` instances in
+`WhatIsBone.animeproj`) has the shape `{NewLayerScript, what}`. Neither bag
+is read by `moho2svg.py`.
+
+### 6.5 `ImageLayer` (19-file finding)
+
+A raster image/movie/PSD-import layer, absent from the original 5-file
+sample — found in `BoneStrengthTool.animeproj`'s "dude side.psd" cutout-puppet
+rig (one `ImageLayer` per PSD layer, 15 total, each bound to a bone subset).
+**Not handled at all by `moho2svg.py`, a vector-only exporter — a document
+using `ImageLayer` silently loses that artwork on export.**
+
+It carries the same `LayerCommon` fields as any other layer (including the
+`parent_bone == -3` value noted in [§ 6.2](#62-common-fields-that-affect-rendering-and-are-used),
+observed only on `ImageLayer` instances, always alongside a real
+`flexi_bone_subset` — presumably a bone-mesh-warp deformation mode specific
+to raster images, not reverse-engineered), plus its own fields:
+
+| Field | Meaning |
+|---|---|
+| `image_path` / `image_fileref` | The source image/movie file. |
+| `width` / `height` | Plain (not channels) pixel dimensions. |
+| `image_cropped` | Whether the image is cropped to a sub-region. |
+| `psd_layer` / `psd_layerid` | Which PSD layer this instance came from. Present on most, not all, sampled instances. |
+| `psd_layer_bounds` | `{top, left, right, bottom}` — the PSD layer's bounding box. |
+| `avi_alpha`, `movie_looping`, `interpreted_fps`, `persist_first_frame` / `_last_frame`, `premultiplied_movie`, `reverse_movie` | Embedded-movie playback settings. |
+| `sampling_mode`, `quality_level` | Image resampling settings. |
+| `toon_effect`, `toon_black_threshold`, `toon_gray_threshold`, `toon_lightness`, `toon_saturation`, `toon_quantize`, `toon_min_edge_threshold`, `toon_max_edge_threshold` | A cel-shading post-process filter over the raster image. |
+
+None of the above is read by `moho2svg.py`. See `schema/layer.schema.json`'s
+`ImageLayer` for the full field list with per-field descriptions.
 
 ---
 
@@ -391,9 +572,9 @@ A `MeshLayer`'s `mesh` has three parallel structures plus metadata:
 | `shapes` | Filled/stroked regions ([§ 7.4](#74-shapes-and-edges)). | **yes** |
 | `groups` | Named point groups ([§ 7.10](#710-point-groups-meshgroups)). | no |
 | `shape_order` | `String` channel; a `"\|"`-joined list of `shape.id` values, e.g. `"23\|24\|...\|33"`. | no — see [§ 7.9](#79-why-edges-and-shape_order-are-not-trustworthy) |
-| `anim_shape_order` | bool, `false` on all 428 meshes. Presumably enables keyframing `shape_order`. | no |
+| `anim_shape_order` | bool, `false` on all 648 meshes (19-file total). Presumably enables keyframing `shape_order`. | no |
 | `next_shape_id` | int; the id allocator's next value. | no |
-| `curve_interpretation` | int: `1` on 426 meshes, `0` on 2. Meaning not decoded; both render the same way here. | no |
+| `curve_interpretation` | int: `1` on 643 meshes, `0` on 5 (19-file totals). Meaning not decoded; both render the same way here. | no |
 
 ### 7.2 Mesh points
 
@@ -403,7 +584,7 @@ A `MeshLayer`'s `mesh` has three parallel structures plus metadata:
 | `width` | `Val` channel | `1.0` on 12,797 points; also `0.34`, `0.32`, `0.14`, `0.0`, `0.46`, `0.2`, `0.26`, … | **yes** — per-point stroke width ([§ 7.6](#76-stroke-width), [§ 7.7](#77-tapered-strokes)) |
 | `curves` | list of ints | indices of the curves through this point | no (the reverse mapping is rebuilt from `curves`) |
 | `parent` | int | point-level parenting | no |
-| `colored` | bool | `false` on all 16,227 points | no |
+| `colored` | bool | `false` on all 52,748 points (19-file total) | no |
 | `color` | `Color` channel | per-point vertex colour | no — inert while `colored` is `false` |
 | `color_strength` | `Val` channel | `1.0` everywhere | no |
 | `opacity` | `Val` channel | present on 396 points (`1045` only), `1.0` | no |
@@ -425,7 +606,7 @@ open (one fewer segment than points).
 | `points` | list of curve points (below) | **yes** |
 | `closed` | bool | **yes** |
 | `num_points` | int, matches `len(points)` | no (redundant) |
-| `start_percent` / `end_percent` | `Val` channels, `-0.1` / `1.1` on all 1,088 curves | no — these trim the drawn portion of a line. The defaults extend slightly past both ends. **A keyframed `end_percent` is how Moho animates a line drawing itself on, and this tool would draw the whole line instead.** |
+| `start_percent` / `end_percent` | `Val` channels; `start_percent` is `-0.1` on all 3,045 curves (19-file total); `end_percent` is `1.1` on all but 3, which are `1.008296` (the same "nose" curve, shared across 3 sibling tutorial documents — **19-file finding**, still a single unkeyframed value, so no animated behaviour difference) | no — these trim the drawn portion of a line. The defaults extend slightly past both ends. **A keyframed `end_percent` is how Moho animates a line drawing itself on, and this tool would draw the whole line instead.** |
 | `profile_layer_uuid`, `profile_curve_id`, `profile_repeat`, `profile_offset` | `""`, `-1`, `16`, `0.0` | no — a "curve profile" that repeats another curve's shape along this one. Unset in all samples. |
 
 Curve point fields — all seven, all used:
@@ -436,7 +617,21 @@ Curve point fields — all seven, all used:
 | `smoothness` | `Val` channel | Curvature; `0` = sharp corner (handles collapse onto the point). |
 | `weight_in` / `weight_out` | `Val` channels | How far each handle reaches toward its neighbour, as a fraction of the distance to it. |
 | `offset_in` / `offset_out` | `Val` channels | A small rotation (radians) producing asymmetric curves. |
-| `segments_on` | bool | `false` on 375 of 16,378 curve points. `false` means the segment leaving this point is **not drawn** — the path breaks into a fresh subpath. |
+| `segments_on` | bool | `false` on 583 of 53,027 curve points (19-file totals). `false` means the segment leaving this point is **not drawn** — the path breaks into a fresh subpath. |
+
+**In the `1021` format generation, `weight_in`/`weight_out`/`offset_in`/
+`offset_out` are absent entirely — (19-file finding), and this currently
+CRASHES `moho2svg.py`.** Every one of `Rabbit.animeproj`'s 95 curve points has
+exactly `{point, smoothness, segments_on}` and nothing else, while every
+`1038`/`1045` curve point has all seven fields (12,500 curve points checked).
+This is presumably a simpler, symmetric-handle-only curve representation
+predating the asymmetric weight/offset feature. **Confirmed by direct run:**
+`CurvePoint._build` reads these four fields with plain dict indexing
+(`raw["weight_in"]`, not `.get(...)`), so loading `Rabbit.animeproj` raises
+`KeyError: 'weight_in'` and the tool cannot export any layer from it at all —
+this is not a rendering-accuracy gap like most items in this document, it is
+a hard failure to load. Confirmed by running
+`python3 moho2svg.py moho/Rabbit.animeproj --list`.
 
 ### 7.4 Shapes and `edges`
 
@@ -450,9 +645,9 @@ Curve point fields — all seven, all used:
 | `combo_mode` | int | **only present in the `1045` document** (112 shapes): `0`×96, `1`×2, `3`×14 | **yes** — see [§ 7.8](#78-boolean-shape-combination) |
 | `effect_scale` / `effect_rotation` | `Val` channels | `1.0`/`0.0` on ~895 shapes, varying on the rest | **yes** — but only to place a gradient |
 | `effect_offset` | `Vec2` channel | mostly `{0,0}` | no |
-| `fill_allowed` | bool | `true` 730, `false` 229 | no — presumably "this shape may be filled at all", distinct from `has_fill` |
+| `fill_allowed` | bool | `true` 1,801, `false` 859 (19-file totals) | no — presumably "this shape may be filled at all", distinct from `has_fill` |
 | `combo_blend_anim` | `Val` channel | `0.0`, `1045` only | no — presumably animates a soft boolean blend |
-| `3d_thickness` | `Val` channel | `0.125` on all 959 shapes | no |
+| `3d_thickness` | `Val` channel | `0.125` on all 2,660 shapes (19-file total) | no |
 | `name` | str | `""` or `"S1"`, `"S2"`, … | no |
 | `selected` | bool | editor state | no |
 
@@ -473,8 +668,9 @@ for the exact formula and its empirical derivation).
 Two independent, non-pixel quantities scale a stroke:
 
 - `line_width` — a per-shape/style value (a handful of quantised values per
-  document; 11 distinct values across the 771 named styles, from `0.002778`
-  to `0.092223`). It is a **plain float, not a channel** — Moho does not
+  document; 33 distinct values across the 19-file sample, from `0.001389`
+  to `0.092223` (widened from the original 5-file sample's 11 values,
+  `0.002778`–`0.092223` — **19-file finding**). It is a **plain float, not a channel** — Moho does not
   animate it.
 - point `width` — normally `1.0`, but can vary per point.
 
@@ -492,7 +688,7 @@ Where a shape's points do not all share one `width`, Moho's own exporter does
 not use a variable `<path stroke-width>` (SVG cannot express one) — it walks
 the stroke and emits the literal filled outline instead, visible as dozens of
 tiny filled paths for something like a bushy tail. The samples exercise this
-heavily: 3,430 of 16,227 mesh points have a `width` other than `1.0`. See the
+heavily: 7,470 of 52,748 mesh points (19-file total) have a `width` other than `1.0`. See the
 module docstring's TAPERED STROKES section.
 
 ### 7.8 Boolean shape combination
@@ -507,7 +703,7 @@ present on all 112 shapes of the `1045` one — treat a missing `combo_mode` as
 | `0` | 96 | Normal — starts a new independent boolean group. |
 | `1` | 2 | Union — merged into the current group; the shared boundary disappears, and the *combined* outline is stroked using the group's first (base) member's styling, not its own. |
 | `3` | 14 | Intersect — clipped to the union of the group's solid members so far. |
-| `2` | **0** | Not present in any of these five documents. The module docstring reports having seen it in a real file; there is no sample here to decode it from, and `moho2svg.py` falls through to normal handling for it. |
+| `2` | **0** | Not present in any of these 19 documents. The module docstring reports having seen it in a real file; there is no sample here to decode it from, and `moho2svg.py` falls through to normal handling for it. |
 
 **A `combo_mode == 3` (intersect) member's own outline no longer shows a real
 gap that Moho does not draw.** `moho2svg.py` implements `combo_mode` by
@@ -562,9 +758,11 @@ does not read `shape_order` at all.
 ### 7.10 Point groups (`mesh.groups`)
 
 `mesh.groups` is a list of `{"type": "PointGroup", "name": ..., "points":
-[indices into mesh.points]}`. Seven point-group objects exist across the samples, with six distinct
-names: `"Right Hand"` (in two different meshes), `"Left Laces"`, `"Right
-Laces"`, `"top lip"`, `"bottom lip"`, and `"bottom Teeth"`.
+[indices into mesh.points]}`. 14 point-group objects exist across the
+19-file sample — the same 7-name set (`"Right Hand"` twice, `"Left Laces"`,
+`"Right Laces"`, `"top lip"`, `"bottom lip"`, `"bottom Teeth"`), duplicated
+identically across `ReparentBone.animeproj` and
+`SelectandReparentBoneTool.animeproj` (two very similar tutorial rigs).
 
 These are an editor convenience for selecting points. **They are not the same
 namespace as `flexi_bone_subset`**, which holds bone indices
@@ -602,11 +800,12 @@ Every field observed on a named style:
 | `define_fill_color`, `define_line_col`, `define_line_width` | bool | true/false | **yes** — see [§ 8.2](#82-a-shapes-own-style-and-inheritance) |
 | `fill_color`, `line_color` | `Color` channels | — | **yes** |
 | `line_width` | float (not a channel) | 11 distinct values | **yes** |
-| `line_caps` | int | `1` on all 1,730 style objects | **yes** — `0` butt, `1` round, `2` square (mapping from `LINE_CAP_NAMES`; only `1` is exercised) |
-| `fill_style` | obj | on 256 styles | **yes** — gradient fill ([§ 8.3](#83-gradients)) |
-| `line_style` | obj | on **25** styles | **no** — a gradient on the *stroke*, same shape as `fill_style`. These 25 styles stroke with a gradient in Moho and a flat colour here. |
-| `fill_style_id`, `line_style_id` | int | `9` whenever present | no |
-| `brush_name` | str | 20+ distinct values | **yes** ([§ 8.5](#85-resolving-a-brush_name-to-a-file)) |
+| `line_caps` | int | `5,659`×`1` (round), `765`×`0` (butt) across 6,424 style objects (19-file totals) | **yes** — `0` butt, `1` round, `2` square (mapping from `LINE_CAP_NAMES`). The original 5-file sample saw only `1`; **`0` is a 19-file finding** (`IndependentAngle`, `MaximumIKStrethching`, `TargetBone` each have 255 styles with `line_caps: 0`) — confirmed exercised in the broader sample, so a butt-cap style now genuinely differs from what this tool draws if `LINE_CAP_NAMES`' `0` mapping is wrong (unverified against Moho for that value). |
+| `fill_style` | obj | on 256 styles (original sample); 1,196 across the 19-file sample | **yes** — gradient fill ([§ 8.4](#84-gradients)), but see [§ 8.3](#83-style-effect-variants-19-file-finding): `fill_style` is not always a gradient. |
+| `line_style` | obj | on 25 styles (original sample); 116 `SS_Gradient2` + 9 `SS_Soft` + 3 `SS_Shadow` across the 19-file sample | **no** — see below; none of the three variants are read. |
+| `fill_style_id`, `line_style_id` | int | `9` in the large majority; also `12` (`fill_style_id`, 19×), `11` and `2` (`line_style_id`, 3× and 9×) **(the non-9 values are a 19-file finding)** | no — reinforces that these are arbitrary internal reference ids, not a small closed enum |
+| `fill_style2`, `fill_style2_id` | obj, int | **(19-file finding, absent from the original 5-file sample.)** `fill_style2` holds `SS_Texture2` on 12 occurrences (3 files); `fill_style2_id` is constant `10`. A *second* fill-effect slot layered on top of `fill_style`. | no |
+| `brush_name` | str | 20+ distinct values | **yes** ([§ 8.6](#86-resolving-a-brush_name-to-a-file)) |
 | `brush_jitter` | float (radians) | `0.0`–`6.283185` | **yes** |
 | `brush_spacing` | float (fraction of dab diameter) | `0.0`–`0.7` | **yes** |
 | `brush_align` | bool | true/false | **yes** |
@@ -626,7 +825,7 @@ Every field observed on a named style:
 > `brush_jitter`, `brush_spacing`, `brush_align`, and `brush_tint`, and no
 > other brush field name appears anywhere in `moho2svg.py`. The equivalent
 > library-level defaults `randomOrder` / `randomInterval` *are* read, but from
-> the `.mohobrush` archive ([§ 8.5](#85-resolving-a-brush_name-to-a-file)),
+> the `.mohobrush` archive ([§ 8.6](#86-resolving-a-brush_name-to-a-file)),
 > not from the style. Effect on output is nil either way.
 
 ### 8.2 A shape's own `style` and inheritance
@@ -665,9 +864,37 @@ So: **older documents drive everything through the named style list; the
 newer document barely uses it.** A tool that only handled one generation
 would silently produce colourless output on the other.
 
-### 8.3 Gradients
+### 8.3 Style effect variants (19-file finding)
 
-`fill_style` (and the unused `line_style`) have this shape:
+`fill_style`, `fill_style2`, and `line_style` each hold an *effect object*
+with its own `type`. The original 5-file sample only ever saw
+`SS_Gradient2`, which made "these fields mean a gradient" look like a safe
+rule — it is not. The 19-file sample shows **five** distinct effect types,
+and the fill/line variant sets are disjoint except for `SS_Gradient2`:
+
+| Effect `type` | Slot | Occurrences | Files | Fields | Read by `moho2svg.py`? |
+|---|---|---|---|---|---|
+| `SS_Gradient2` | `fill_style` | 1,196 | 17 | `gradient_type`, `gradients[]`, `through_alpha` | **yes** ([§ 8.4](#84-gradients)) |
+| `SS_Gradient2` | `line_style` | 116 | 16 | same as above | no |
+| `SS_Crayon` | `fill_style` | 19 | 1 | `line_width`, `density` (both `Val` channels), `clear_background`, `reduce_randomization`, `rand_seed` | no — falls back to the shape's flat `fill_color` |
+| `SS_Soft` | `line_style` | 9 | 3 | `blur_radius` (`Val` channel), `threshold` (plain bool) | no — falls back to a flat stroke colour |
+| `SS_Shadow` | `line_style` | 3 | 3 | `angle`, `offset`, `blur` (`Val` channels), `color` (`Color` channel), `threshold` (plain bool) | no — a per-shape drop shadow on the stroke, distinct from the layer-level `layer_shadow` in [§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used) |
+| `SS_Texture2` | `fill_style2` | 12 | 3 | `path`, `SS_Texture2FileRef`, `fill_mode`, `through_alpha` | no — an image-texture fill layered on top of `fill_style`; in all 12 sampled occurrences both path fields are empty, so no sampled document actually resolves a texture file |
+
+A shape carrying `SS_Crayon`, `SS_Soft`, or `SS_Shadow` therefore renders with
+a plain flat fill/stroke here instead of Moho's textured/blurred/shadowed
+effect — an unconfirmed-but-plausible visible difference nothing in the
+original 5-file sample could have surfaced. `SS_Crayon` was also found
+**inline on a shape's own `style` object** (`OffsetBoneTool.animeproj`,
+shape "pant-shades"), disproving an earlier assumption in this document that
+a styled fill effect only ever lives on a document-wide named style. Full
+per-field descriptions: `schema/style.schema.json`'s `Gradient`, `Crayon`,
+`SoftStyle`, `ShadowStyle`, `Texture2`.
+
+### 8.4 Gradients
+
+`fill_style` (and the unused `line_style`) can have this shape — one of the
+five effect variants from [§ 8.3](#83-style-effect-variants-19-file-finding):
 
 ```jsonc
 {
@@ -693,13 +920,13 @@ is derived from the shape's bounding box, scaled and rotated by the shape's
 own `effect_scale` / `effect_rotation` — **approximate, not pixel-matched** to
 Moho's own differently-parameterised placement.
 
-### 8.4 Brush styles
+### 8.5 Brush styles
 
 A named style's line can be a textured "brush" — a small image stamped
 repeatedly along the path (jittered in rotation, spaced as a fraction of its
 own size) instead of a plain uniform-width line.
 
-- `brush_name` — identifies the brush asset ([§ 8.5](#85-resolving-a-brush_name-to-a-file)).
+- `brush_name` — identifies the brush asset ([§ 8.6](#86-resolving-a-brush_name-to-a-file)).
 - `brush_jitter` — random rotation spread, in **radians**, applied per dab.
 - `brush_spacing` — dab spacing, as a **fraction of the dab's own diameter**.
 - `brush_align` — whether each dab rotates to the local path tangent (in
@@ -713,7 +940,7 @@ so this tool seeds its jitter deterministically per shape instead. See the
 module docstring's BRUSH STROKES section, and `docs/exporting-svg.md` § 7 for
 the three render paths and their performance.
 
-### 8.5 Resolving a `brush_name` to a file
+### 8.6 Resolving a `brush_name` to a file
 
 Moho ships its own brush assets as files installed alongside the application,
 not inside any project file. A brush asset takes one of three shapes on disk:
@@ -768,6 +995,11 @@ others) and is not decoded.
 
 ## 9. Bones and skinning
 
+> This section is the short version. The full bone-field reference, the
+> skinning math, the constraint/IK/control-bone/dynamics family, Smart Warp,
+> and the mesh-level deformation fields are in
+> [`moho-rigging-and-deformation.md`](moho-rigging-and-deformation.md).
+
 A `BoneLayer`'s `skeleton.bones` is a flat list of 0–157 bones. A bone's
 world transform composes with its parent's, with parents resolved regardless
 of list order.
@@ -778,20 +1010,30 @@ Fields used by this tool:
 |---|---|---|
 | `name` | str | Bone name. Also how a Smart Bone dial is matched ([§ 11](#11-actions-and-smart-bones)). |
 | `parent` | int | Index into the same `bones` list, or `-1` for a root. |
-| `length` | float | Bone length in document units (`0.015`–`0.6` observed). |
-| `strength` | float | Influence radius for flexible binding (`0.0`–`0.6` observed; `0.0` on some bones means no influence). |
+| `length` | float | Bone length in document units (`0.003117`–`0.981441` observed, 19-file total; original 5-file sample saw `0.015`–`0.6`). |
+| `strength` | float | Influence radius for flexible binding (`0.0`–`7.654676` observed, 19-file total — considerably wider than the original 5-file sample's `0.0`–`0.6`; `0.0` on some bones means no influence). |
 | `anim_pos` | `Vec2` channel | Animated position, relative to the parent bone. |
-| `anim_angle` | `Val` channel | Animated angle in radians. The most-animated channel in the samples after `pose` (302 bones keyframed). |
+| `anim_angle` | `Val` channel | Animated angle in radians. The most-animated channel in the samples after `pose` (383 of 850 bones keyframed, 19-file total). |
 | `anim_scale` | `Val` channel | Animated scale along the bone. |
 
 Deformation of a mesh layer is one of two modes, decided **per layer**:
 
 - **Rigid** (`parent_bone >= 0`): every point moves exactly as that one bone
-  does. 31 of 544 layers.
+  does. 54 of 842 layers (19-file total).
 - **Flexible / region** (`parent_bone == -1`): every point is a
   distance-weighted blend of every bone's transform, or of a named subset's
-  (`flexi_bone_subset`, a `"|"`-joined list of bone indices). 513 of 544
-  layers. The weight falloff shape (inverse-distance-squared by default) is a
+  (`flexi_bone_subset`, a `"|"`-joined list of bone indices). **779** of 842
+  layers (19-file total). A further 9 layers use `parent_bone == -3` — see
+  [§ 6.2](#62-common-fields-that-affect-rendering-and-are-used) — which this
+  tool also falls through to flexible handling for, unconfirmed against real
+  Moho output.
+
+  **Two layer populations, two sets of counts.** The numbers here count the
+  842 layers in the `layers` tree. [§ 6.2](#62-common-fields-that-affect-rendering-and-are-used)
+  counts 876, because it also includes the `MeshLayer` nested inside each of
+  the 34 `TextLayer`s; all 34 are `-1`, which is exactly the 813 − 779
+  difference. Both counts are correct — check which population a number
+  refers to before comparing. The weight falloff shape (inverse-distance-squared by default) is a
   heuristic, unvalidated for cases where more than one bone has significant
   influence near a given point.
 
@@ -807,9 +1049,10 @@ Bone fields **not** used, grouped by what they would change:
   `parent` index instead, so a frame after a reparent keyframe would attach
   the bone to the wrong parent.
 
-  **Ignoring it is currently free, and measurably so.** All 550
-  `anim_parent` channels have exactly **one** keyframe, and that single value
-  equals the bone's own static `parent` in **550 of 550** cases — zero
+  **Ignoring it is currently free, and measurably so.** All 850
+  `anim_parent` channels (19-file total) have exactly **one** keyframe, and
+  that single value equals the bone's own static `parent` in **850 of 850**
+  cases — zero
   mismatches. That holds even in `ReparentBone.animeproj`, which demonstrates
   the *tool* without ever keyframing a reparent. So `anim_parent` is fully
   redundant with `parent` across this whole sample set, and the risk is
@@ -822,17 +1065,37 @@ Bone fields **not** used, grouped by what they would change:
   defaults except `pos_control_parent` (`4`, `5` on a few bones) and the
   `min`/`max_constraint` pairs. Constraints only matter while posing in the
   editor; the resulting angles are already baked into `anim_angle`.
-- **Scaling behaviour**: `scaling_mode` (`0` on 308 bones, `2` on 242),
+- **Scaling behaviour**: `scaling_mode` (`0` on 586 bones, `2` on 264 — 19-file totals),
   `squash_stretch_scaling` (`0.44` or `1.0`), `max_auto_scaling`. `scaling_mode`
   is not decoded and is a plausible explanation for the intentionally-preserved
   asymmetric bone scale in `Skeleton.world_matrices`.
 - **Physics/dynamics**: `bone_dynamics`, `angle_dynamics`, `pos_dynamics`,
   `scale_dynamics`, `wind_dynamics`, `spring_force`, `damping_force`,
-  `torque_force`, `physics_*`, and the `pos_`/`scale_` variants of each. All
-  disabled in the samples.
+  `torque_force`, `physics_*`, and the `pos_`/`scale_` variants of each.
+  **Correction: these are *not* all disabled in the samples**, as an earlier
+  revision of this document stated. `bone_dynamics` is a `Bool` channel whose
+  value is `true` on **115 of the 850 bones**, across 6 documents —
+  `WhatIsBone` (52), `Bandit` (28, i.e. every bone in the file), `AddBone`
+  (21), `BoneDynamics` (6), `Rabbit` (6), `ControlBones` (2) — and
+  `BoneDynamics.animeproj` keyframes it (7 channels with more than one key).
+  `angle_dynamics` is `true` on 2 bones in `Bandit.mohoproj`; the `pos_`,
+  `scale_` and `wind_` variants are `false` everywhere. Moho adds the
+  resulting spring motion on top of the keyed pose at playback time, so
+  ignoring these fields drops real secondary motion (follow-through, overlap)
+  rather than nothing — an **exercised** gap. See
+  [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 6.
 - **Editor state**: `hidden`, `shy`, `selected`, `bone_label_showing`,
-  `bone_tags`, `offset`, `angle_weight`, `pos_weight`, `scale_weight`,
-  `flip_h`, `flip_v`.
+  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`, `flip_h`,
+  `flip_v`.
+- **`offset`** — a plain `Vec2`, listed as editor state by an earlier
+  revision of this document. **That was wrong**: it is non-zero on 5 bones in
+  `OffsetBoneTool.animeproj` (zero on the other 845), where it is roughly the
+  negative of the bone's own `anim_pos`. Whether ignoring it is correct
+  depends on whether Moho shifts only the bone's drawn position or its real
+  base; a constant offset cancels out of `pose · rest⁻¹` either way, so the
+  worst case is shifted flexible-binding weights, not a displaced limb. Not
+  decoded — see
+  [`moho-rigging-and-deformation.md` § 3.7](moho-rigging-and-deformation.md#37-offset-the-offset-bone-tool).
 
 ---
 
@@ -841,9 +1104,9 @@ Bone fields **not** used, grouped by what they would change:
 Two *separate* fields are involved:
 
 - `group_mask` on a *container* (`GroupLayer` or `BoneLayer` — the layer type
-  does not matter). Observed values: `0` (38 containers, no masking), `2` (53
-  containers, masking active), and `1` (**exactly 1** container, a
-  `GroupLayer`). This tool treats any non-zero value as "masking active", so
+  does not matter). Observed across the 19-file sample: `0` (78 containers,
+  no masking), `2` (70 containers, masking active), and `1` (**exactly 2**
+  containers). This tool treats any non-zero value as "masking active", so
   `1` and `2` behave identically here; whether Moho distinguishes them is not
   decoded. `MeshLayer`/`TextLayer`/`PatchLayer`/`SwitchLayer` do not carry
   the field at all.
@@ -855,9 +1118,15 @@ Two *separate* fields are involved:
   - anything else (typically `0`, Moho's UI default) — clipped to the union of
     all `masking == 2` siblings in the same container.
 
-Across the samples, `masking` is `0` on 416 layers, `2` on 76, `1` on 52.
-Note that a `masking` value is present on children of *non*-masking
-containers too (256 such pairs), where it is inert.
+Across the 19-file sample, `masking` is `0` on 714 layers, `2` on 93, `1` on
+62, and **`5`/`6` on 7 layers (1× and 6× respectively) — (19-file finding,
+not decoded)**, spread across `ControlBones.animeproj`,
+`OffsetBoneTool.animeproj`, and `SlickObjectTransition.mohoproj`.
+`moho2svg.py` treats any value other than `1`/`2` as "clipped", so `5`/`6`
+currently behave as ordinary clipped children — unconfirmed against real
+Moho output, since no independent export of a document using these values
+is available to compare against. Note that a `masking` value is present on
+children of *non*-masking containers too, where it is inert.
 
 This applies uniformly at every nesting depth, **including the document's own
 top-level layer** — masking is not special-cased away at the root. A
@@ -924,10 +1193,12 @@ different jobs.
 ### 11.1 The layer-level `actions` registry
 
 Almost every layer carries an `actions` list whose elements are always exactly
-`{"name": "<action name>", "pose": 0}` — 15,975 such entries across the
-samples, with `pose` an integer `0` in every single one. Present on 393 of 428
-`MeshLayer`s, 57 of 61 `GroupLayer`s, 26 of 31 `BoneLayer`s, 5 of 8
-`SwitchLayer`s, 4 of 8 `PatchLayer`s, and never on a `TextLayer`.
+`{"name": "<action name>", "pose": 0}` — 19,921 such entries across the
+19-file sample, with `pose` an integer `0` in every single one. Present on
+524 of 648 `MeshLayer`s, 90 of 103 `GroupLayer`s, 38 of 47 `BoneLayer`s, 11 of
+17 `SwitchLayer`s, 4 of 12 `PatchLayer`s, never on a `TextLayer`, and never on
+an `ImageLayer` **(the last is a 19-file finding — `ImageLayer` did not exist
+in the original sample)**.
 
 This is a **document-wide name registry, replicated on nearly every layer**,
 not a per-layer list of that layer's own actions. Evidence: in `WhatIsBone`,
@@ -948,12 +1219,12 @@ channel**:
 ]
 ```
 
-3,999 such poses exist across the samples. Their `pose` channel types are
-`Vec2` (2,932), `Val` (933), `Vec3` (120), `Bool` (8), and `String` (6) —
-i.e. an action can override any kind of property, but in practice it is
-mostly mesh point positions and bone transforms. `pose` is by far the most
-keyframed field in these documents (3,999 channels with more than one
-keyframe, versus 302 for `anim_angle`, the runner-up).
+11,816 such poses exist across the 19-file sample. Their `pose` channel types
+are `Vec2` (10,024), `Val` (1,561), `Vec3` (165), `Color` (37), `Bool` (22),
+and `String` (7) — i.e. an action can override any kind of property,
+including colour, but in practice it is mostly mesh point positions and bone
+transforms. `pose` is by far the most keyframed field in these documents,
+well ahead of `anim_angle`'s 383 keyframed bones ([§ 9](#9-bones-and-skinning)).
 
 ### 11.3 Which actions are Smart Bones
 
@@ -989,12 +1260,15 @@ itself part of; this is the one place `Channel.eval_raw()` is used.
 
 ### 11.4 `action_refs` and `layercomps`
 
-Both top-level lists are **empty in all five documents**, so their element
-shape cannot be documented from this evidence. `layercomps` is Moho's
-"layer comps" feature (named show/hide sets of layers, used to export
-variants of one document). `action_refs` most plausibly holds references to
-actions defined outside this document, matching the `layer_ref_*` fields on
-layers, but that is a guess, not a finding. Neither is read by this tool.
+`layercomps` is **empty in all 19 documents**, so its element shape cannot be
+documented from this evidence — it is Moho's "layer comps" feature (named
+show/hide sets of layers, used to export variants of one document).
+`action_refs` is empty in every document that carries the key at all, and is
+**absent entirely** (not just empty) in the `1021`-generation
+`Rabbit.animeproj` **(19-file finding)** — see [§ 2](#2-top-level-structure).
+It most plausibly holds references to actions defined outside this document,
+matching the `layer_ref_*` fields on layers, but that is a guess, not a
+finding. Neither is read by this tool.
 
 ---
 
@@ -1049,7 +1323,7 @@ wherever *it* renders in the tree.
 
 ## 13. Coverage summary
 
-What this tool reads, at a glance. "Exercised" means at least one of the five
+What this tool reads, at a glance. "Exercised" means at least one of the 19
 sample documents has a non-default value for it, so ignoring it changes the
 current reference output in `svg/`.
 
@@ -1071,14 +1345,29 @@ current reference output in `svg/`.
 
 Ranked by how visible the difference should be:
 
-1. `layer_effects.alpha` — 9 layers should be 60% opaque. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
-2. `blend_mode: 1` — 16 layers blend non-normally. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
-3. `style.line_style` — 25 styles stroke with a gradient, rendered flat. ([§ 8.1](#81-named-styles-docstyles))
-4. `extra_sketchy` / `extra_lines: 5` — 2 layers should draw repeated jittered strokes. ([§ 6.4](#64-type-specific-fields))
-5. `channel.interp` — non-linear timing on `pose`/`anim_*`; exact at keyframes, off between them. Only matters for a `--frame N` that is not a keyframe. ([§ 5.3](#53-the-interp-entries))
-6. `bone.scaling_mode: 2` — 242 bones; possibly related to the preserved asymmetric bone scale. ([§ 9](#9-bones-and-skinning))
-7. `mesh.curve_interpretation: 0` — 2 meshes differ from the other 426. ([§ 7.1](#71-the-mesh-object))
-8. `shape.fill_allowed: false` — 229 shapes. Interaction with `has_fill` undecoded. ([§ 7.4](#74-shapes-and-edges))
+1. **`Rabbit.animeproj` (the `1021` format generation) does not load at all —
+   `KeyError: 'weight_in'` on every curve point.** ([§ 7.3](#73-curves-and-curve-points))
+   This is a hard failure, not a rendering-accuracy gap; it is listed first
+   because it is strictly worse than everything else on this list. **(19-file
+   finding.)**
+2. `layer_effects.alpha` — 9 layers should be 60% opaque. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
+3. `blend_mode: 1` — 16 layers blend non-normally. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
+4. `ImageLayer` — 15 layers (one document) silently drop their raster
+   artwork entirely, since this is a vector-only exporter. **(19-file
+   finding.)** ([§ 6.5](#65-imagelayer-19-file-finding))
+5. `style.fill_style` / `.line_style` / `.fill_style2` holding `SS_Crayon`,
+   `SS_Soft`, `SS_Shadow`, or `SS_Texture2` — 43 occurrences total across 6
+   files render as a flat fill/stroke instead of Moho's textured, blurred,
+   shadowed, or textured-fill effect. **(19-file finding, supersedes the
+   original "25 styles stroke with a gradient" item — that count is now 116
+   `SS_Gradient2` occurrences, plus these 43 non-gradient ones.)**
+   ([§ 8.3](#83-style-effect-variants-19-file-finding))
+6. `extra_sketchy` / `extra_lines: 5` — 2 layers should draw repeated jittered strokes. ([§ 6.4](#64-type-specific-fields))
+7. `channel.interp` — non-linear timing on `pose`/`anim_*`; exact at keyframes, off between them. Only matters for a `--frame N` that is not a keyframe. ([§ 5.3](#53-the-interp-entries))
+8. `bone.scaling_mode: 2` — 242 bones; possibly related to the preserved asymmetric bone scale. ([§ 9](#9-bones-and-skinning))
+9. `mesh.curve_interpretation: 0` — 2 meshes differ from the rest. ([§ 7.1](#71-the-mesh-object))
+10. `shape.fill_allowed: false` — 859 shapes (19-file total, up from 229 in the original sample). Interaction with `has_fill` undecoded. ([§ 7.4](#74-shapes-and-edges))
+11. `style.line_caps: 0` — 765 styles (3 documents) use butt caps instead of the round caps the original 5-file sample exclusively showed. **(19-file finding.)** Whether `LINE_CAP_NAMES`' `0` mapping is actually correct is unverified. ([§ 8.1](#81-named-styles-docstyles))
 
 A masking==2 sibling's own stroke staying visible on top of whatever it masks
 was also on this list until it was fixed (mask geometry now excludes each
@@ -1093,7 +1382,7 @@ dropping its hidden segment) and letting the existing intersect-clip cut it
 correctly, sidestepping the need for real Bezier–Bezier intersection; see
 [§ 7.8](#78-boolean-shape-combination) for the full finding.
 
-Items 6–8 are *undecoded*, not *known-wrong*: the samples set them to a
+Items 8–10 are *undecoded*, not *known-wrong*: the samples set them to a
 non-default value, but nothing proves the current output is incorrect for
 them.
 
@@ -1101,18 +1390,32 @@ them.
 
 Present in the format, but at default values throughout the samples, so
 ignoring them is currently invisible: `channel.mute`, `channel.split`,
-`bone.anim_parent` (redundant with `parent` on all 550 bones — see
+`bone.anim_parent` (redundant with `parent` on all 850 bones — see
 [§ 9](#9-bones-and-skinning)),
 `doc.animated_values` (camera), `curve.start_percent`/`end_percent`, curve
 profiles, `point.colored`/`color`/`opacity`, `layer_effects.visibility` and
 the other five effect channels, `layer_outline`, `layer_shadow`,
 `layer_shading`, `perspective_shadow`, `layer_color`, `motion_blur`,
-`timing_offset`, `layer_ordering`, fill/line textures, `layer_ref_*`,
-`distortion_layer_uuid`, follow-path fields, all physics fields, all bone
+`timing_offset`, fill/line textures, `layer_ref_*`,
+`distortion_layer_uuid`, follow-path fields, all physics fields (including
+`gravity`/`wind` — see [§ 6.4](#64-type-specific-fields)), all bone
 constraint/IK fields, `project_data.global_render_style_*`, `mesh.groups`,
 `mesh.shape_order`, `shape.3d_thickness`/`effect_offset`/`combo_blend_anim`,
-`skeleton.binding_mode`, `quality_flags`, and the `TextLayer` font/balloon
-fields.
+`quality_flags`, `Mesh3DOptions`/`3d_mode`
+**(19-file finding — see [§ 6.4](#64-type-specific-fields))**, `parent_bone
+== -3` **(19-file finding, `ImageLayer` only)**, `masking == 5`/`6`
+**(19-file finding)**, and the `TextLayer` font/balloon fields.
+
+`layer_ordering`/`animated_layer_order` moved from "untested" to
+**confirmed-inert-in-this-sample (19-file finding)**: the channel's value is
+an empty string in all ~150 sampled instances, so this tool's fixed-order
+rendering is verifiably correct for every document here, not merely
+unexercised — see [§ 6.4](#64-type-specific-fields).
+
+Two bone/rig fields that used to sit in this list have moved out of it,
+because they are **not** at their defaults everywhere: `skeleton.binding_mode`
+(`2` on one skeleton) and `bone.offset` (non-zero on 5 bones). Both are now
+listed as known unknowns in [§ 14](#14-known-unknowns).
 
 The riskiest of these are the ones a real production document would plausibly
 use: **`layer_effects.visibility`** (animated show/hide),
@@ -1126,31 +1429,66 @@ use: **`layer_effects.visibility`** (animated show/hide),
 This is a living reverse-engineering effort, not a specification. Fields whose
 *values* are observed but whose *meaning* is not decoded:
 
-- `combo_mode: 2` — reported in the module docstring, absent from all five
+- `combo_mode: 2` — reported in the module docstring, absent from all 19
   sample documents. ([§ 7.8](#78-boolean-shape-combination))
 - `channel.interp.t` / `.im` / `.in` / `.s` / `.h` / `.v1` / `.v2` / `.b` —
   the interpolation-type enum and its parameters. ([§ 5.3](#53-the-interp-entries))
-- `channel.ref` — `false` everywhere.
-- `group_mask: 1` versus `2` — one container uses `1`. ([§ 10](#10-masking))
+- `channel.ref` — `true` on 207 channels across 3 documents; meaning not
+  decoded. **(19-file finding, corrects an earlier "false everywhere" claim
+  — see [§ 5.1](#51-channel-object-fields).)**
+- `group_mask: 1` versus `2` — 2 containers use `1`. ([§ 10](#10-masking))
+- `masking: 5` / `6` — 7 layers across 3 documents. **(19-file finding.)**
+  ([§ 10](#10-masking))
+- `parent_bone: -3` — 9 `ImageLayer` instances, always with a real
+  `flexi_bone_subset`. **(19-file finding.)** ([§ 6.2](#62-common-fields-that-affect-rendering-and-are-used))
 - The correct mask contribution of a `masking == 2` sibling whose own outline
   is tapered or brush-styled (a plain uniform stroke is handled — see
   [§ 10](#10-masking)).
 - `blend_mode: 1` — 16 layers. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
-- `bone.scaling_mode` (`0`/`2`), `skeleton.binding_mode` (always `1`),
+- `bone.scaling_mode` (`0`/`2`), `skeleton.binding_mode` (`1` on 41
+  skeletons, `2` on one — **corrects an earlier "always `1`" claim**),
+  `bone.offset` (non-zero on 5 bones — see [§ 9](#9-bones-and-skinning)),
+  `bone.fixed_angle` ("independent angle", `true` on 45 bones; whether the
+  result is already baked into `anim_angle` is unverified),
   `mesh.curve_interpretation` (`0`/`1`), `quality_flags` (a bit field),
   `face_camera_mode` (always `2`), `shape.fill_allowed`,
-  `PatchLayer.target_layer_id`, `fill_style_id`/`line_style_id` (always `9`).
-- `layercomps` and `action_refs` element shapes — both lists empty
-  everywhere. ([§ 11.4](#114-action_refs-and-layercomps))
+  `PatchLayer.target_layer_id`, `fill_style_id`/`line_style_id`/
+  `fill_style2_id` (mostly `9`; also `12`, `11`, `2`, `10` — **the non-9
+  values are a 19-file finding**).
+- `layercomps` and `action_refs` element shapes — both lists empty in every
+  document that has the key at all. ([§ 11.4](#114-action_refs-and-layercomps))
 - The first number of an old-style `brush_name` suffix.
-  ([§ 8.5](#85-resolving-a-brush_name-to-a-file))
+  ([§ 8.6](#86-resolving-a-brush_name-to-a-file))
+- `Mesh3DOptions`' own field meanings (`3d_shading_mode`, `3d_shading_density`,
+  crease/edge toggles) — present on every `MeshLayer` but entirely inert
+  since `3d_mode` is `0` everywhere. **(19-file finding.)**
+  ([§ 6.4](#64-type-specific-fields))
+- `ImageLayer`'s `toon_*` cel-shading fields, `sampling_mode`,
+  `quality_level` — an entire layer type not modelled at all. **(19-file
+  finding.)** ([§ 6.5](#65-imagelayer-19-file-finding))
+- `SS_Crayon`/`SS_Soft`/`SS_Shadow`/`SS_Texture2` internals — `rand_seed`,
+  `clear_background`, `reduce_randomization`, `fill_mode`, and the interplay
+  between a shape's `fill_style` and `fill_style2` when both are present.
+  **(19-file finding.)** ([§ 8.3](#83-style-effect-variants-19-file-finding))
+- The `g_<number>` boolean toggles and `psd_layers` in a layer's own
+  `metadata` bag. **(19-file finding.)** ([§ 6.4](#64-type-specific-fields))
+- **Smart Warp** — a whole Moho deformation feature with **no representation
+  at all in this sample**: a search for any JSON key containing "warp"
+  returns zero hits across all 19 files. The only hooks visible are
+  `distortion_layer_uuid` (empty everywhere) and the `1045`-only
+  `triangulated` / `squashable_deformer` / `frame_zero_deformer` flags. A
+  document that uses it would export with the deformation silently dropped.
+  See [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp).
 
 Plus the approximations already noted: gradient placement precision, the
 flexible bone-weight falloff shape for overlapping influence, the
 `PatchLayer` transform heuristic ([§ 12](#12-patch-layers)), and the brush
-stroke simplifications ([§ 8.4](#84-brush-styles)).
+stroke simplifications ([§ 8.5](#85-brush-styles)).
 
 See the module docstring's KNOWN GAPS section for the rendering-side list. If
 you find a real document that contradicts something here, prefer the evidence
 in the document over what is written in this file — and say so, since every
-count above is measured from five files only.
+count above is measured from 19 files, not from Moho's entire possible
+output space. A machine-checkable structural counterpart — a JSON Schema with
+its own completeness audit — lives in `schema/`; see `schema/README.md` § 3
+for how that audit works and what it additionally caught.

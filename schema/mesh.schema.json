@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moho2svg.local/schema/mesh.schema.json",
+  "title": "Moho vector mesh (points, curves, shapes)",
+  "description": "A MeshLayer's `mesh` field: the vector artwork itself. See docs/moho-project-file-format.md §7 for the full field-by-field evidence, and §5.1/§7.5 for why the Bezier control points are reconstructed from smoothness/weight/offset rather than stored directly.",
+  "$defs": {
+
+    "Mesh": {
+      "type": "object",
+      "required": ["type", "points", "curves", "shapes"],
+      "properties": {
+        "type": { "const": "Mesh" },
+        "points": { "type": "array", "items": { "$ref": "#/$defs/MeshPoint" } },
+        "curves": { "type": "array", "items": { "$ref": "#/$defs/Curve" } },
+        "shapes": { "type": "array", "items": { "$ref": "#/$defs/Shape" } },
+        "groups": {
+          "type": "array",
+          "description": "Named point groups (an editor selection convenience, e.g. \"Right Hand\", \"top lip\") - not read by moho2svg.py. Distinct from a layer's flexi_bone_subset, which names BONE indices, not point indices.",
+          "items": { "$ref": "#/$defs/PointGroup" }
+        },
+        "shape_order": {
+          "$ref": "channel.schema.json#/$defs/StringChannel",
+          "description": "A \"|\"-joined ascending id registry of shape.id values - NOT a z-order, despite the name. The real z-order (back to front) is simply the order shapes already appear in `shapes`. Not read by moho2svg.py. See docs/moho-project-file-format.md §7.9."
+        },
+        "anim_shape_order": { "type": "boolean", "description": "Observed false in every sample. Presumably enables keyframing shape_order." },
+        "next_shape_id": { "type": "integer", "description": "The id allocator's next value. Not semantically meaningful for a reader." },
+        "curve_interpretation": {
+          "type": "integer",
+          "description": "Observed values: 1 (overwhelming majority), 0 (rare). Meaning not decoded; moho2svg.py does not branch on it."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "MeshPoint": {
+      "type": "object",
+      "required": ["type", "position", "width"],
+      "properties": {
+        "type": { "const": "Point", "description": "Literally \"Point\", NOT \"MeshPoint\" - confirmed against every sampled document. The $def is named MeshPoint here only to disambiguate from Curve's own \"point\" (int, an index) and CurvePoint's own \"point\" field." },
+        "position": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "The point's position, in the layer's own local coordinate space (2 Moho units span the canvas height - see docs/moho-project-file-format.md §4)." },
+        "width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Per-point stroke-width multiplier. Normally 1.0; a shape whose points do NOT all share one width renders as a tapered (filled-outline) stroke instead of a plain <path stroke>. See §7.6-7.7." },
+        "curves": {
+          "type": "array",
+          "description": "The curves that pass through this point, as {curve, curve_points} pairs (NOT a plain array of curve indices, despite the field name). Not read by moho2svg.py - the reverse mapping is rebuilt from `curves` instead.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "curve": { "type": "integer", "description": "Index into mesh.curves." },
+              "curve_points": { "type": "integer", "description": "Index into that curve's own points array." }
+            },
+            "additionalProperties": true
+          }
+        },
+        "parent": { "type": "integer", "description": "Point-level parenting. Not read by moho2svg.py." },
+        "colored": { "type": "boolean", "description": "Whether per-point vertex colour (the `color` channel) is active. Observed false on every sampled point - this tool's disregard of `color`/`color_strength` is untested against a document with `colored: true`." },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "color_strength": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "color_drift": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation (version 1045-era) documents." },
+        "opacity": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation documents." },
+        "selected": { "type": "boolean", "description": "Editor state." }
+      },
+      "additionalProperties": true
+    },
+
+    "Curve": {
+      "type": "object",
+      "required": ["type", "closed", "points"],
+      "properties": {
+        "type": { "const": "Curve" },
+        "closed": { "type": "boolean", "description": "Closed: one segment per point, last wraps to first. Open: one fewer segment than points." },
+        "points": { "type": "array", "items": { "$ref": "#/$defs/CurvePoint" } },
+        "num_points": { "type": "integer", "description": "Redundant with len(points)." },
+        "start_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Trims the drawn start of the curve as a fraction of its length. Observed constant -0.1 (slightly past the true start) in every sample - not read by moho2svg.py, which would draw the whole curve regardless of a keyframed value here (e.g. Moho's \"line draws itself on\" effect)." },
+        "end_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "As start_percent, trimming the end. Observed constant 1.1 in every sample." },
+        "profile_layer_uuid": { "type": "string", "description": "A \"curve profile\" that repeats another curve's shape along this one. Empty in every sample; not read by moho2svg.py." },
+        "profile_curve_id": { "type": "integer", "description": "Observed constant -1 (unset) in every sample." },
+        "profile_repeat": { "type": "integer", "description": "Observed constant 16 in every sample where profile is unset." },
+        "profile_offset": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+      },
+      "additionalProperties": true
+    },
+
+    "CurvePoint": {
+      "type": "object",
+      "description": "One vertex of a Curve, referencing a MeshPoint by index plus the curvature data used to reconstruct explicit Bezier handles (see docs/moho-project-file-format.md §7.5: handle length = distance_to_neighbour * smoothness * weight, confirmed exact against 209 reference handles; handle direction is a chord-length-weighted blend of the two neighbouring chords, NOT a simple normalize(next-prev)). weight_in/weight_out/offset_in/offset_out are OPTIONAL - an older sampled document (format version 1021) carries only point/smoothness/segments_on on every curve point, with no weight or offset fields at all (presumably a simpler, symmetric-handle-only curve representation predating the asymmetric weight/offset feature).",
+      "required": ["point", "smoothness", "segments_on"],
+      "properties": {
+        "point": { "type": "integer", "description": "Index into the mesh's `points` array." },
+        "smoothness": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Curvature; 0 = sharp corner (handles collapse onto the point)." },
+        "weight_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "How far the incoming handle reaches toward its neighbour, as a fraction of the distance to it." },
+        "weight_out": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "offset_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "A small rotation in radians, producing asymmetric curves." },
+        "offset_out": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "segments_on": {
+          "type": "boolean",
+          "description": "Whether the segment LEAVING this point is drawn at all. false creates a real, deliberate gap in the outline (confirmed: an umbrella panel that only shows part of its boundary as a drawn line). For a combo_mode==3 (intersect) shape specifically, a false segment can instead mark a piece of curve Moho's own boolean solver replaced with a computed crossing edge - moho2svg.py handles that case by NOT dropping the segment and relying on the intersect-clip to cut it correctly (see Shape.combo_mode below and the module docstring's BOOLEAN SHAPE COMBINATIONS section)."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "Edges": {
+      "type": "object",
+      "description": "A shape's boundary as an UNORDERED set of curve segments - three parallel arrays, always equal length. NOT reliably a walk in list order, and `flag` is NOT a reliable direction bit (real files exist where segment order is strictly descending with flag 0 throughout). Must be re-traced as an undirected graph keyed by rounded endpoint coordinates - see docs/moho-project-file-format.md §7.9 and the module docstring's PathTracer.",
+      "required": ["curve", "segment", "flag"],
+      "properties": {
+        "curve": { "type": "array", "items": { "type": "integer" }, "description": "Index into mesh.curves for each edge." },
+        "segment": { "type": "array", "items": { "type": "integer" }, "description": "Index into that curve's segment list (segment i runs from curve_point[i] to curve_point[i+1])." },
+        "flag": { "type": "array", "items": { "type": "integer" }, "description": "Observed 0 (majority) or 1. NOT a reliable direction bit - do not trust it for path-walk order." }
+      },
+      "additionalProperties": true
+    },
+
+    "Shape": {
+      "type": "object",
+      "description": "One filled/stroked region of a mesh. See docs/moho-project-file-format.md §7.4/§7.8 and the module docstring's BOOLEAN SHAPE COMBINATIONS section.",
+      "required": ["type", "id", "has_fill", "has_outline", "edges", "style"],
+      "properties": {
+        "type": { "const": "Shape" },
+        "id": { "type": "integer", "description": "Shape identity, referenced by mesh.shape_order (an id registry, not a z-order)." },
+        "name": { "type": "string", "description": "Editor label, e.g. \"S1\", or \"\" (empty is a real value Moho itself writes, e.g. for a TextLayer glyph's synthesised shapes - distinct from the key being entirely absent)." },
+        "has_fill": { "type": "boolean" },
+        "has_outline": { "type": "boolean" },
+        "combo_mode": {
+          "type": "integer",
+          "description": "How this shape combines with the shape(s) immediately before it in the same layer. 0 = normal (starts a new independent group). 1 = union (merged into the current group; the shared boundary disappears; the combined outline is stroked using the group's FIRST/base member's own styling, not its own - confirmed: a union member's own line_width is absent from Moho's export). 3 = intersect (clipped to the union of the group's solid (0 or 1) members so far - moho2svg.py approximates this via SVG masking, not a true geometric path intersection, which can leave a gap in a member's own outline where Moho's real boolean solver would substitute a computed crossing edge - fixed for the plain-stroke case by not dropping segments_on==false segments on an intersect member and letting the clip cut them). 2 has been reported in real files but its effect has not been reverse-engineered (absent from every document censused so far). ABSENT from the shape entirely in older-generation (version 1038-era) documents - treat a missing combo_mode as 0.",
+          "enum": [0, 1, 2, 3]
+        },
+        "edges": { "$ref": "#/$defs/Edges" },
+        "style": { "$ref": "style.schema.json#/$defs/Style", "description": "The shape's own style values (same shape as a top-level named Style, see style.schema.json). May be fully populated (newer-generation documents) or left with every define_* flag false and real values kept in a document-wide named style referenced by inherited_style_uuid/name (older-generation documents) - see docs/moho-project-file-format.md §8.2." },
+        "inherited_style_uuid": { "type": "string" },
+        "inherited_style_name": { "type": "string" },
+        "inherited_style2_uuid": { "type": "string" },
+        "inherited_style2_name": { "type": "string" },
+        "effect_scale": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient scale (fill_style placement), default 1.0." },
+        "effect_rotation": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient rotation in radians, default 0.0. Only affects a LINEAR gradient - a radial gradient ignores rotation entirely (see docs/export-pipeline.md §7.4)." },
+        "effect_offset": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "A gradient centre offset. The formula supports it but nothing observed supplies a non-zero value." },
+        "fill_allowed": { "type": "boolean", "description": "Presumably \"this shape may be filled at all\", distinct from has_fill. Interaction with has_fill is undecoded." },
+        "combo_blend_anim": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Presumably animates a soft boolean-combination blend. Observed only in newer-generation documents, always 0.0." },
+        "3d_thickness": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed constant 0.125 in every sample." },
+        "selected": { "type": "boolean", "description": "Editor state." }
+      },
+      "additionalProperties": true
+    },
+
+    "PointGroup": {
+      "type": "object",
+      "required": ["type", "name", "points"],
+      "properties": {
+        "type": { "const": "PointGroup" },
+        "name": { "type": "string" },
+        "points": { "type": "array", "items": { "type": "integer" } }
+      },
+      "additionalProperties": true
+    }
+  }
+}
