@@ -43,6 +43,11 @@ WARNING_EXPLANATIONS = {
     "gradient_too_few_stops": "gradient fill(s) with fewer than 2 stops drawn "
                               "as a flat colour instead (matches "
                               "Exporter._build_gradient's own SVG fallback)",
+    "mask_stroke_exclusion": "masked layer(s) whose mask source has its own "
+                             "outline - the SVG writer carves that source's "
+                             "stroke band back out of the mask so it stays "
+                             "visible on top; this writer draws a plain "
+                             "union mask instead, without that carve-out",
 }
 
 # Lottie's line-cap constant (shapes/base-stroke.json's "lc"), keyed by the
@@ -142,44 +147,124 @@ class LottieExporter:
         the single easiest thing in this writer to get wrong without
         noticing: the artwork would still look right, just with the wrong
         parts in front.
+
+        Also handles "enter"/"exit" now (Task 4 skipped both, keeping only
+        "mesh"): a small `mask_stack`, rebuilt fresh every frame, mirrors
+        exactly what Exporter.export_document's own `render_scope` does with
+        `clip` - push this container's own mask sources (or None) on
+        "enter", pop on "exit", and a "mesh" item picks up ONLY
+        `mask_stack[-1]` (never a grandparent's mask - see Task 6's plan
+        notes for why that matches `emit`'s own scoping). Mask source
+        geometry is measured to vary significantly across frames (17 of 17
+        masked containers in SketchBone.animeproj alone), so it is collected
+        per frame here, exactly like shape geometry, not evaluated once.
         """
         order: list = []                      # Layer objects, frame[0]'s draw order
         accumulators: dict = {}               # id(layer) -> list of per-shape accumulators
+        mask_data: dict = {}                  # id(layer) -> {"has_mask": bool|None, "per_frame": [...]}
         for frame in frames:
+            mask_stack: list = []
             for item in walk_render_tree(self.exporter, frame, include_hidden):
-                if item.event != "mesh":
+                if item.event == "enter":
+                    sources = None
+                    if item.layer is not None:        # None only for the virtual root
+                        raw = self.exporter._mask_sources_bezier(item.layer, item.ancestors, frame)
+                        sources = raw if raw else None
+                    mask_stack.append(sources)
                     continue
+                if item.event == "exit":
+                    mask_stack.pop()
+                    continue
+
+                # "mesh"
                 lid = id(item.layer)
                 first_time = lid not in accumulators
                 if first_time:
                     order.append(item.layer)
                     accumulators[lid] = []
+                    mask_data[lid] = {"has_mask": None, "per_frame": []}
                 self._accumulate_frame(item, frame, accumulators[lid], first_time)
+
+                active_mask = mask_stack[-1] if mask_stack else None
+                applies = (not item.exempt) and active_mask is not None
+                info = mask_data[lid]
+                if info["has_mask"] is None:
+                    info["has_mask"] = applies
+                elif info["has_mask"] != applies:
+                    raise ValueError(
+                        f"{item.layer.name!r}: whether it is masked changed "
+                        f"at frame {frame} - masking configuration appears "
+                        f"to be animated, which this exporter does not yet "
+                        f"handle")
+                if applies:
+                    info["per_frame"].append(active_mask)
 
         collected = []
         for layer in order:
             shapes = self._finalize_shapes(layer, accumulators[id(layer)], frames)
-            if shapes:
-                collected.append(self._shape_layer(layer.name, shapes))
+            if not shapes:
+                continue
+            info = mask_data[id(layer)]
+            mask_properties = (self._finalize_mask(layer, info["per_frame"], frames)
+                                if info["has_mask"] else None)
+            collected.append(self._shape_layer(layer.name, shapes, mask_properties))
         collected.reverse()                  # Moho back-to-front -> Lottie front-to-back
         for index, layer in enumerate(collected, start=1):
             layer["ind"] = index
         return collected
 
-    def _shape_layer(self, name: str, shapes: list) -> dict:
+    def _shape_layer(self, name: str, shapes: list, mask_properties: list = None) -> dict:
         """A Lottie shape layer with an identity transform.
 
         Identity is correct because the geometry is already baked into
         canvas pixels, which is also Lottie's own coordinate system: pixels,
         y down, origin at the top left - no conversion needed.
         """
-        return {
+        layer = {
             "ty": 4, "nm": name, "ks": identity_transform(),
             "ao": 0, "shapes": shapes,
             "ip": float(self.document.start_frame),
             "op": float(self.document.end_frame + 1),
             "st": 0.0,
         }
+        if mask_properties:
+            layer["hasMask"] = True
+            layer["masksProperties"] = mask_properties
+        return layer
+
+    def _finalize_mask(self, layer, per_frame_sources: list, frames) -> list:
+        """Every mask-source shape's subpaths, flattened and keyframed, as
+        Lottie masksProperties entries - one entry per subpath, mode "a"
+        (union), matching how build_path_bezier's own multiple subpaths
+        become multiple "sh" elements elsewhere in this file. `_assert_stable`
+        applies here too: mask-source vertex/subpath counts must not change
+        across frames, for the same reason shape geometry can't.
+
+        The exclude-width carve-out Exporter._mask_element applies on the
+        SVG side (a mask source's own stroke band is cut back OUT of the
+        mask so it stays visible on top of whatever the mask clips - see
+        Exporter._mask_source_shapes's own docstring) is NOT reproduced
+        here. Lottie's mask model has only filled shapes, no "stroke this
+        path as a mask" primitive, so replicating it would mean building a
+        uniform-width stroke-band polygon per masked source - a project of
+        its own for a narrow effect, measured at 16 of 180 mask source
+        shapes (9%) across this repository's sample documents. Counted
+        (mask_stroke_exclusion), not silently dropped.
+        """
+        for beziers, exclude_width in per_frame_sources[0]:
+            if exclude_width > 0:
+                self.warnings["mask_stroke_exclusion"] += 1
+
+        # per_frame_sources[f] is a list of (beziers, exclude_width) - one
+        # per mask-source SHAPE.  Flatten to one list of subpath dicts per
+        # frame, dropping exclude_width (already counted above).
+        per_frame_flat = [[subpath for beziers, _exclude in sources for subpath in beziers]
+                           for sources in per_frame_sources]
+        self._assert_stable(layer, "<mask>", "mask", per_frame_flat)
+
+        return [{"inv": False, "mode": "a", "pt": self._path_property(list(per_subpath), frames),
+                 "o": {"a": 0, "k": 100}, "x": {"a": 0, "k": 0}}
+                for per_subpath in zip(*per_frame_flat)]
 
     def _point_widths(self, mesh, edges, frame: float) -> list:
         """The interpolated width at every point touched by `edges`, at

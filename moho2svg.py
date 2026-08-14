@@ -3396,6 +3396,59 @@ class Exporter:
                 paths += self._mask_source_shapes(child, chain_through_container, frame)
         return paths
 
+    def _mask_source_shapes_bezier(self, layer: Layer, ancestors: Sequence[Layer],
+                                    frame: float) -> list[tuple[list[dict], float]]:
+        """Bezier counterpart of _mask_source_shapes(), for a Lottie writer -
+        same recursion, same (per-shape geometry, exclude_width) pairing,
+        `build_path_bezier()` in place of `build_path_d()`.  See
+        _mask_source_shapes's own docstring for what `exclude_width` means;
+        a Lottie consumer is not required to use it (a plain per-source
+        union, dropping the exclude-width carve-out, is a documented,
+        counted simplification - see moho2lottie.py's own notes)."""
+        paths: list[tuple[list[dict], float]] = []
+        if layer.mesh is not None:
+            deform = build_deform_chain(ancestors, layer, frame, self)
+            geometries = self._curve_geometries(layer.mesh, frame)
+            to_px = self._deformed_pixel_mapper(deform, frame, layer)
+            for shape in layer.mesh.shapes:
+                beziers = build_path_bezier(geometries, shape.edges, to_px)
+                if not beziers:
+                    continue
+                exclude_width = 0.0
+                if shape.has_outline and not shape.style.brush_name:
+                    point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
+                                     for e in shape.edges}
+                    widths = [self.eval(layer.mesh.points[i].width, frame)
+                             for i in point_indices]
+                    tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                    if not tapered:
+                        point_width = widths[0] if widths else 1.0
+                        line_width = self.eval(shape.style.line_width, frame)
+                        exclude_width = self._stroke_width_px(line_width, point_width)
+                paths.append((beziers, exclude_width))
+        for child in layer.children:
+            if child.masking == 2:
+                paths += self._mask_source_shapes_bezier(child, ancestors + (layer,), frame)
+        return paths
+
+    def _mask_sources_bezier(self, container: Optional[Layer],
+                              chain_through_container: Sequence[Layer],
+                              frame: float) -> list[tuple[list[dict], float]]:
+        """Bezier counterpart of _mask_sources(), for a Lottie writer - same
+        group_mask/masking rules, same NOTE about the empty Smart Bone
+        context (see _mask_sources's own docstring), `_mask_source_shapes_bezier`
+        in place of `_mask_source_shapes`."""
+        if container is None:
+            return []
+        forced = container.name in self.settings.forced_mask_containers
+        if not forced and not container.group_mask:
+            return []
+        paths = []
+        for child in container.children:
+            if child.masking == 2:
+                paths += self._mask_source_shapes_bezier(child, chain_through_container, frame)
+        return paths
+
     def _mask_element(self, paths: Sequence[tuple[str, float]], mask_id: str,
                        indent: str) -> str:
         """Build a <mask> from `_mask_source_shapes`' (path, exclude_width)

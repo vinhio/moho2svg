@@ -35,7 +35,7 @@ which step it stopped at, so a reader knows where to resume.
 | 3 | A Lottie file with one static frame | **DONE** | `4189275` |
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
 | 5 | Gradients | **DONE** | `e1aa6d1` |
-| 6 | Masking | TODO | — |
+| 6 | Masking | **DONE** | (pending commit) |
 | 7 | Switch layers | TODO | — |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
 
@@ -1052,24 +1052,51 @@ git commit -m "Write Moho gradients as Lottie gradient fills"
 
 ## Task 6: Masking
 
-**Status:** TODO
+**Status:** DONE — one real design gap in the sketch below (mask geometry
+treated as static, same class of mistake as Task 5's gradient placement),
+plus one deliberate, counted scope cut (the stroke-exclusion carve-out).
+Read both notes before touching this code.
+
+**⚠ Mask geometry must be keyframed too - measured, not assumed.** A mask
+source's own geometry moves/deforms exactly like any other shape's. Checked
+directly before writing any code: **4 of 4 masked containers in
+`Bandit.mohoproj`, 17 of 17 in `SketchBone.animeproj`** have DIFFERENT mask
+source geometry across three sampled frames - not a corner case, the norm.
+So masks are collected **per frame**, exactly like shape geometry (Task 4)
+and gradient placement (Task 5): `_build_layers` now also handles the
+`"enter"`/`"exit"` events it previously skipped, maintaining a `mask_stack`
+that is **rebuilt fresh every frame** (never carried across frames - a mask
+scope's bracket structure is only valid within one frame's own walk), and
+calls a new `Exporter._mask_sources_bezier` **synchronously**, at the moment
+each `"enter"` event is seen, for the same staleness reason established in
+Task 4.
+
+**Deliberately not reproduced: the stroke-exclusion carve-out.**
+`Exporter._mask_element` (SVG side) paints a mask source's own outline band
+in BLACK on top of the union fill, so that source's own stroke stays visible
+over whatever the mask clips. Lottie's mask model has only filled shapes -
+no "stroke this path as a mask" primitive - so replicating this exactly
+would mean building a uniform-width stroke-band polygon per source, a
+project of its own for a narrow effect: measured at **16 of 180 mask source
+shapes (9%)** with a nonzero exclude width, across all 19 sample documents.
+Dropped, but **counted** (`mask_stroke_exclusion`), not silent - see the
+Global Constraint on this.
 
 **Files:**
-- Modify: `moho2lottie.py` — `_build_layers`, plus a new `_mask_properties`
+- Modify: `moho2svg.py` — new `Exporter._mask_source_shapes_bezier`/`_mask_sources_bezier` (bezier siblings of the existing SVG-string methods, purely additive - the SVG-only originals are untouched)
+- Modify: `moho2lottie.py` — `_build_layers` (now also consumes `"enter"`/`"exit"`), new `_finalize_mask`, `_shape_layer` gained a `mask_properties` parameter
 
 **Interfaces:**
-- Produces: `"hasMask": True` and a `"masksProperties"` list on every "mesh"
-  layer that is not `exempt` and sits inside an "enter" scope whose own
-  `mask_sources` is non-empty.
+- Produces: `"hasMask": True` and a `"masksProperties"` list on every mesh layer that is not `exempt` and sits inside an `"enter"` scope whose own mask sources are non-empty - determined once (frame 0) per layer and asserted stable thereafter (raises if it ever changes, since masking configuration is a static Layer field, not a Channel).
+- `Exporter._mask_sources_bezier(container, chain_through_container, frame) -> list[tuple[list[dict], float]]` — same `(geometry, exclude_width)` pairing as the existing `_mask_sources`, `build_path_bezier` output in place of an SVG `d` string.
 
-**Note:** `mask_sources` lives on the `"enter"` `RenderItem` (the container),
-not on the `"mesh"` item itself — see Task 2's interface. `_build_layers`
-must track the CURRENT mask context itself while consuming the event stream
-(a small stack, pushed on `"enter"` when `mask_sources` is non-empty, popped
-on the matching `"exit"`), exactly the way `export_document`'s
-`render_scope` tracks `clip` for the same reason.
+**Note (unchanged from the original sketch):** only the DIRECTLY enclosing
+container's mask ever applies to a child, never a grandparent's - `emit`'s
+own scoping (`member_clip` computed fresh per scope, never accumulated)
+confirms this, so `_build_layers` reads only `mask_stack[-1]`, never
+searches further down the stack.
 
-- [ ] **Step 1: Find the layers that must change**
+- [x] **Step 1: Find the layers that must change**
 
 Run:
 ```bash
@@ -1089,75 +1116,57 @@ for f in sorted(os.listdir('moho')):
     w(raw)
 print(dict(c))"
 ```
-Expected: `{0: 714, 2: 93, 1: 62, 6: 6, 5: 1}` — 162 layers carry a non-zero
-value.
+Expected `{0: 714, 2: 93, 1: 62, 6: 6, 5: 1}` — confirmed, 162 layers carry a
+non-zero value. Went further before writing code: also measured mask
+source stability across frames (4/4 Bandit, 17/17 SketchBone masked
+containers have DIFFERENT geometry across sampled frames - see the note
+above), and the stroke-exclusion carve-out's actual frequency (16 of 180
+mask source shapes, 9%) - both findings changed the design from what this
+plan originally sketched.
 
-- [ ] **Step 2: Write the failing assertion**
+- [x] **Step 2: Write the failing assertion**
 
-Add `--require-masks` to `tools/check_lottie_geometry.py`: it fails when the
-source document has a container with `group_mask == 2` but the emitted file
-contains no layer with `hasMask` true.
+`--require-masks` already existed in `tools/check_lottie_geometry.py`
+(written ahead of time during Task 4). Ran against the Task 5 gradient
+output (no masking yet): FAILED as expected on `Bandit.mohoproj`.
 
-Run: `python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 25 --require-masks`
-Expected: FAIL.
+- [x] **Step 3: Emit `masksProperties`**
 
-- [ ] **Step 3: Emit `masksProperties`**
+Implemented as `Exporter._mask_sources_bezier`/`_mask_source_shapes_bezier`
+(new, additive siblings in `moho2svg.py`) plus `LottieExporter._finalize_mask`
+(new) and an extended `_build_layers` that now consumes `"enter"`/`"exit"`
+events with a per-frame `mask_stack` - see the two notes above for why this
+differs from the plan's original single-function, static-placement sketch.
 
-```python
-    def _mask_properties(self, mask_sources):
-        """Moho's mask, as per-layer Lottie masks.  `mask_sources` is the
-        CURRENT enclosing "enter" scope's own value (see the stack note
-        above) - the caller has already checked the mesh item is not exempt.
+A layer with `masking in (1, 2)` is exempt and gets no mask, exactly as the
+SVG writer treats it - implemented via `not item.exempt` gating whether
+`mask_stack[-1]` is recorded for that mesh item, unchanged from the
+original plan.
 
-        A Lottie track matte applies to exactly one layer, so masking a group
-        of siblings the way Moho does would need a precomposition per group.
-        Per-layer masks avoid that entirely: the geometry is already baked
-        into canvas pixels and every layer transform is identity, so the mask
-        paths are the same coordinates the SVG <mask> uses, with no
-        adjustment at all.
+- [x] **Step 4: Re-run every check**
 
-        The cost is duplication - N masked siblings each carry a copy - which
-        is small next to the shape geometry itself.  If these ever render
-        wrongly, the documented fallback is a track matte plus a
-        precomposition; see docs/moho-to-lottie-design.md section 6.1.
-        """
-        out = []
-        for bezier, alpha in mask_sources:
-            out.append({"inv": False, "mode": "a", "pt": {"a": 0, "k": bezier},
-                         "o": {"a": 0, "k": alpha * 100}, "x": {"a": 0, "k": 0}})
-        return out
-```
+Ran against `Bandit.mohoproj` (frames 25/40/60/87/127, `--require-masks`):
+`OK`. Also ran `WhatIsBone.animeproj` (frames 1/60/120/180/240,
+`--require-masks --require-gradients` together): `OK`.
 
-In `_build_layers`, maintain `mask_stack = []`: push `item.mask_sources` on
-every `"enter"` whose `mask_sources` is non-empty (push `None` otherwise, as
-a placeholder so `"exit"` always has something to pop), pop on `"exit"`. For
-a `"mesh"` item, the active mask is `next((m for m in reversed(mask_stack) if
-m is not None), None)` — but re-check against `emit`'s own scoping first:
-only the DIRECTLY enclosing container's mask ever applies to a child, never
-a grandparent's (see `moho2svg.py`'s `member_clip` — it is computed fresh
-per scope, not accumulated), so in practice only `mask_stack[-1]` matters,
-never an outer entry. Apply it only when `not item.exempt`.
+Went further than the plan's own two checks:
+- Inspected structure directly: `Bandit.mohoproj` emits 10 masked layers;
+  a sample mask (`Eye_Upper`, 7 masksProperties entries) has a fully
+  keyframed `pt` (103 keyframes, matching the document's 103-frame range) -
+  confirming the keyframed-mask fix actually engages.
+- Ran a full-corpus smoke export: 18 of 19 documents succeed (the same
+  expected `SketchBone.animeproj` SwitchLayer exception from Tasks 4-5, not
+  a new failure).
+- `mask_stroke_exclusion` fires correctly and specifically - 32 occurrences
+  on `Bandit.mohoproj` (a per-RECIPIENT-LAYER count: several masked
+  siblings can share one mask scope, so this is a different, larger number
+  than the 16-shapes-total corpus measurement from Step 1, and both are
+  correct - they count different things).
+- `make gen` (byte-identical) and `check_bezier_roundtrip.py` (all 19
+  documents) re-run clean: the new `moho2svg.py` methods are additive
+  siblings of the existing SVG-only mask code, never touching it.
 
-`Exporter._mask_sources` currently returns SVG path strings. Change it to
-return the traced geometry alongside, or add a sibling that returns
-`build_path_bezier` output for the same sources — do **not** parse the `d`
-string back. Whichever is chosen, `export_document` must keep producing
-byte-identical SVG.
-
-A layer with `masking in (1, 2)` is exempt and gets no mask, exactly as the SVG
-writer treats it.
-
-- [ ] **Step 4: Re-run every check**
-
-Run:
-```bash
-python3 moho2lottie.py moho/Bandit.mohoproj --out /tmp/bandit.json
-python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 25 40 --require-masks
-make gen && git diff --stat -- svg/
-```
-Expected: `OK`, and an empty `git diff`.
-
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add moho2lottie.py moho2svg.py tools/check_lottie_geometry.py
