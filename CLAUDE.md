@@ -46,7 +46,10 @@ Repository layout:
   (`moho-rigging-and-deformation.md` — bones, Smart Warp, mesh-level
   constraints), and the export pipeline (`moho-export-pipeline.md`), all for
   humans; read these before the module docstring if you want a shorter
-  orientation first.
+  orientation first. Two further docs cover a *planned* second exporter and
+  describe nothing that exists yet: `lottie-and-thorvg.md` (the Lottie format,
+  read out of the schema in `lottie/`) and `moho-to-lottie-design.md` (the
+  design for `moho2lottie.py`).
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
   used for development/regression-checking.
 - `svg/` — the corresponding exported SVGs, tracked as reference output
