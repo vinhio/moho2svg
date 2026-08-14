@@ -37,16 +37,21 @@ which step it stopped at, so a reader knows where to resume.
 | 5 | Gradients | **DONE** | `e1aa6d1` |
 | 6 | Masking | **DONE** | `62d497a` |
 | 7 | Switch layers | **DONE** | `4afc76c` |
-| 8 | Warnings, make targets and optional schema validation | TODO | — |
+| 8 | Warnings, make targets and optional schema validation | **DONE** | (pending commit) |
 
 Two items cannot be closed by any task above, because both need a real Lottie
-player. They are described at the end of this document and stay open until
+player - something no part of this project has ever built, installed, or
+run. They are described at the end of this document and stay open until
 someone loads the output in lottie-web:
 
 | # | Open question | Status |
 |---|---|---|
-| Q1 | Is Lottie's `op` exclusive? Task 3 assumes `end_frame + 1` | OPEN |
-| Q2 | Does lottie-web apply a style to the shapes the writer intends? | OPEN |
+| Q1 | Is Lottie's `op` exclusive? `LottieExporter.export` assumes `end_frame + 1` | OPEN |
+| Q2 | Is `Bandit.mohoproj`'s inherited `masking == 2` ordering defect more or less visible in a Lottie player than in SVG? | OPEN |
+
+(The original Q2 - "does a paint operator apply to the shapes the writer
+intends" - turned out to be resolved BY DESIGN, not by a player: see Task 8's
+own notes and `moho-to-lottie-design.md` § 9 item 2.)
 
 ---
 
@@ -1302,25 +1307,55 @@ git commit -m "Emit switch layer children as Lottie visibility windows"
 
 ## Task 8: Warnings, make targets and optional schema validation
 
-**Status:** TODO
+**Status:** DONE — and this task is the reason the exporter's `s`/`e`
+gradient placement was WRONG per the Lottie schema from Task 5 onward,
+undetected by every check written before this one. Read the note below
+before anything else in this section.
+
+**⚠ Bug found by --validate itself: `_point_property` double-wrapped its
+"s" value.** Every check written in Tasks 4-7
+(`tools/check_lottie_geometry.py`) compares the exporter's own output
+against itself (a second call to the same pipeline) or against
+`build_path_bezier()` directly - neither ever parses a value against the
+Lottie SCHEMA, so a value that satisfies "the writer agrees with itself"
+can still violate the format. `_point_property` (added in Task 5 for
+gradient `s`/`e`, reused unchanged since) wrote a keyframe's `"s"` as
+`[[x, y]]` - copying the WRONG convention from `_path_property`'s own
+bezier keyframes, where `"s": [b]` (an array containing exactly one bezier
+value) is correct because `bezier-keyframe`'s schema explicitly wants that
+wrapping. A position/vector keyframe's own schema (`vector-keyframe`,
+shared by Lottie's position-property AND scalar-property) wants `"s"` to be
+the FLAT array directly - `[x, y]`, not `[[x, y]]`. Running `--validate`
+(installed via a throwaway venv, never added as a project dependency) for
+the first time surfaced this immediately: 2 of 19 sample documents
+(`SketchBone.animeproj`, `WhatIsBone.animeproj` - the two with the most
+gradient usage) failed schema validation with a `oneOf` mismatch on exactly
+this field. Fixed by removing the extra wrapping; **all 19 documents now
+validate cleanly** (confirmed by actually installing `jsonschema` in an
+isolated virtualenv and running it - not merely by reading the code).
+`_scalar_property` was already correct by coincidence: wrapping a single
+NUMBER in one list (`[v]`) produces exactly the flat array
+`values/vector` wants, so the same "wrap it like a bezier" mistake happened
+to be invisible there.
+
+This is the strongest evidence in the whole project for why `--validate`
+existing at all was worth the optional dependency: geometry-comparison
+checks alone, however thorough, cannot catch a format-level mistake if both
+sides of the comparison share the same bug.
 
 **Files:**
-- Modify: `moho2lottie.py`, `Makefile`, `.gitignore`
+- Modify: `moho2lottie.py` (warnings already existed from Task 3 onward - just verified here; new `validate_lottie`, `--validate`, and the `_point_property` fix above), `Makefile`, `.gitignore`
 
-- [ ] **Step 1: Print the warning summary**
+- [x] **Step 1: Print the warning summary**
 
-At the end of an export, print each non-zero counter to **stderr**, one line
-each, naming the count and what was dropped:
+Already implemented, incrementally, starting in Task 3 (`combo_mode`,
+`brush`) and extended in Tasks 5-6 (`gradient_too_few_stops`,
+`mask_stroke_exclusion`) - `WARNING_EXPLANATIONS` and the printing loop in
+`main()` needed no changes this task. Verified all four keys still print
+correctly, one line per non-zero counter, to stderr, naming what was
+dropped.
 
-```
-moho2lottie: 16 shapes with combo_mode != 0 drawn without boolean combination
-moho2lottie: 15 ImageLayer layers skipped (vector-only exporter)
-moho2lottie: 3600 styles naming a brush drawn as plain strokes
-```
-
-Counts are from the document being exported.
-
-- [ ] **Step 2: Add optional schema validation**
+- [x] **Step 2: Add optional schema validation**
 
 ```python
 try:
@@ -1331,43 +1366,57 @@ except ImportError:                     # optional, exactly like Pillow
 
 `--validate` validates against `lottie/lottie.schema.json` when `jsonschema`
 imports, and otherwise prints one line saying validation was skipped and how
-to enable it. Note in the docstring that passing the schema is weak evidence:
-the schema marks very little as required (`lottie-and-thorvg.md` § 2.5).
+to enable it. Its own docstring notes that passing is weak evidence: the
+schema marks very little as required (`lottie-and-thorvg.md` § 2.5) - true,
+but it still caught a real bug immediately (see above), so "weak evidence"
+means "not proof of correctness", not "not worth running."
 
-- [ ] **Step 3: Add the make targets**
+- [x] **Step 3: Add the make targets**
 
-```make
-gen-lottie:
-	mkdir -p lottie-out
-	python3 moho2lottie.py moho/Bandit.mohoproj --out lottie-out/Bandit.json
-	python3 moho2lottie.py moho/SketchBone.animeproj --out lottie-out/SketchBone.json
-	python3 moho2lottie.py moho/WhatIsBone.animeproj --out lottie-out/WhatIsBone.json
+Implemented as planned, with one addition: `gen-lottie` takes a `VALIDATE`
+make variable (`make gen-lottie VALIDATE=--validate`) so schema validation
+can be opted into from `make` too, without duplicating the export commands
+in a separate target. `check-lottie`'s own geometry checks were extended
+slightly beyond the plan's one-document sketch to also cover
+`SketchBone.animeproj` (`--require-gradients`, exercises Task 7's windowing)
+and `WhatIsBone.animeproj` (`--require-masks --require-gradients`), since
+Bandit alone doesn't exercise switch-layer windows.
 
-check-lottie: gen-lottie
-	python3 tools/check_bezier_roundtrip.py
-	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj lottie-out/Bandit.json 25 60 100 127
-```
+- [x] **Step 4: Ignore the output directory**
 
-- [ ] **Step 4: Ignore the output directory**
+Added `lottie-out/` to `.gitignore`, beside the existing `svg-fast/`/
+`svg-med/`/`svg-raster/` entries.
 
-Add `lottie-out/` to `.gitignore`, beside the existing `svg-fast/` entries.
+- [x] **Step 5: Run everything**
 
-- [ ] **Step 5: Run everything**
+Ran `make check-lottie`: all three checks `OK`. Ran `make gen`: empty
+`git diff --stat -- svg/`.
 
-Run: `make check-lottie && make gen && git diff --stat -- svg/`
-Expected: all checks `OK`, and an empty `git diff`.
+Went further than the plan's own single run: ran `make gen-lottie
+VALIDATE=--validate` (via an isolated virtualenv with `jsonschema`
+installed, never added as a project dependency) across all 19 sample
+documents individually, not just the three tracked by `gen-lottie` - this
+is what caught the `_point_property` bug above. Re-ran after the fix: **19
+of 19 pass schema validation** (`WhatIsBone.animeproj` alone takes ~48s to
+validate given its size - noted here since a naive re-run with a short
+timeout looks like a hang, not a slow-but-successful check).
 
-- [ ] **Step 6: Update the documentation**
+- [x] **Step 6: Update the documentation**
 
-Update `CLAUDE.md`'s command list and repository layout with `moho2lottie.py`,
-`tools/` and `lottie-out/`. Change `moho-to-lottie-design.md`'s opening line —
-it currently says nothing is implemented — and move any open question that the
-work settled into a stated fact with the evidence that settled it.
+Updated `CLAUDE.md`'s "What this is", repository layout, and Commands
+sections with `moho2lottie.py`, `tools/`, and `lottie-out/`. Rewrote
+`moho-to-lottie-design.md`'s opening to point at this plan document instead
+of claiming nothing is implemented, and updated its own § 9 Open Questions
+with what each item resolved to (three settled: shape-ordering sidestepped
+by design, masking implemented and geometry-checked, gzip size confirmed
+fine at ~10x compression; two still genuinely open, both needing a real
+Lottie player this project has never built or run; one - the Vietnamese
+mirror - still deliberately deferred, not attempted).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
-git add moho2lottie.py Makefile .gitignore CLAUDE.md docs/moho-to-lottie-design.md
+git add moho2lottie.py Makefile .gitignore CLAUDE.md docs/moho-to-lottie-design.md docs/moho-to-lottie-plan.md
 git commit -m "Add make targets and warning output for the Lottie exporter"
 ```
 
@@ -1375,14 +1424,26 @@ git commit -m "Add make targets and warning output for the Lottie exporter"
 
 ## After the plan
 
-Two open questions from the design cannot be closed by anything in this plan,
-because both need a real player:
+All 8 tasks are done (see the Progress table). Two open questions from the
+design remain, and neither can be closed by anything in this plan, because
+both need a real Lottie player - something no part of this project has ever
+built, installed, or run:
 
-1. **Is Lottie's `op` exclusive?** Task 3 assumes `end_frame + 1`.
-2. **Does lottie-web apply a style to the shapes the writer intends?** The
-   element order inside a group is conventional, not schema-defined.
+1. **Is Lottie's `op` exclusive?** `LottieExporter.export` assumes
+   `end_frame + 1`.
+2. **Is `Bandit.mohoproj`'s inherited `masking == 2` ordering defect
+   (documented in `moho2svg.py`'s own module docstring) more or less visible
+   in a Lottie player than in an SVG one?** Unknown either way.
 
-Both are settled by loading `lottie-out/Bandit.json` in lottie-web beside
-`svg/Bandit.svg`. Until that happens, the exporter is verified to be
-*self-consistent with the SVG writer*, which is a strong claim, but not the
-same as *correct in a player*. Say so in any report of this work.
+(The design's own original item 2, "does a paint operator in one group apply
+to the shapes the writer intends", turned out to be resolved BY DESIGN, not
+by a player: Task 3 gives each shape up to two separate Lottie groups - one
+for fill, one for outline - specifically so no group ever has more than one
+shape's worth of geometry ahead of its one paint operator. There is nothing
+left for a player to disambiguate.)
+
+Both remaining questions are settled by loading `lottie-out/Bandit.json` in
+lottie-web beside `svg/Bandit.svg`. Until that happens, the exporter is
+verified to be *self-consistent with the SVG writer and schema-valid*, which
+is a strong claim, but not the same as *correct in a player*. Say so in any
+report of this work.

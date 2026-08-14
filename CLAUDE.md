@@ -30,6 +30,17 @@ system or package manifest, and no automated test suite — verification means
 running an export against a real project file and comparing against a
 reference SVG (see below).
 
+**`moho2lottie.py`** is a second exporter, sharing `moho2svg.py`'s document
+model and geometry pipeline (`walk_render_tree`, `build_path_bezier`), that
+writes a Moho document to a Lottie JSON animation instead of SVG. Every
+deformation is baked into canvas-pixel vertex positions, so every Lottie
+layer keeps an identity transform. See
+[`docs/moho-to-lottie-plan.md`](docs/moho-to-lottie-plan.md) for what is
+implemented (all 8 planned tasks, verified against all 19 sample documents)
+and what is deliberately out of scope (brush textures, `combo_mode` boolean
+combination, `ImageLayer`, Smart Warp — each produces a counted warning on
+stderr rather than a silent gap).
+
 The script has no *required* third-party dependencies — only the stdlib
 (`argparse`, `base64`, `io`, `json`, `math`, `os`, `random`, `re`, `struct`,
 `sys`, `zipfile`, `dataclasses`, `enum`, `typing`). **Pillow is an optional
@@ -39,23 +50,36 @@ note below.
 
 Repository layout:
 
-- `moho2svg.py` — the tool itself.
+- `moho2svg.py` — the SVG exporter.
+- `moho2lottie.py` — the Lottie exporter (see above); reuses `moho2svg.py`
+  as a library, adds no new third-party dependency (`jsonschema` is optional,
+  used only by its own `--validate` flag).
+- `tools/` — verification scripts for `moho2lottie.py`:
+  `check_bezier_roundtrip.py` (the Lottie path builder agrees with the SVG
+  one) and `check_lottie_geometry.py` (an emitted Lottie file agrees with
+  what the pipeline computes directly, at any given frame — also accepts
+  `--require-gradients`/`--require-masks` to assert a feature was actually
+  exercised, not just silently skipped). Neither needs a Lottie player or a
+  third-party package.
 - `docs/` — usage guide (`moho-exporting-svg.md`), file-format reference
   (`moho-project-file-format.md`), the animation/transform model
   (`moho-animation-and-transform.md`), the rigging and deformation reference
   (`moho-rigging-and-deformation.md` — bones, Smart Warp, mesh-level
   constraints), and the export pipeline (`moho-export-pipeline.md`), all for
   humans; read these before the module docstring if you want a shorter
-  orientation first. Two further docs cover a *planned* second exporter and
-  describe nothing that exists yet: `lottie-and-thorvg.md` (the Lottie format,
-  read out of the schema in `lottie/`) and `moho-to-lottie-design.md` (the
-  design for `moho2lottie.py`).
+  orientation first. Three further docs cover the Lottie exporter:
+  `lottie-and-thorvg.md` (the Lottie format, read out of the schema in
+  `lottie/`), `moho-to-lottie-design.md` (the design), and
+  `moho-to-lottie-plan.md` (the implementation plan and its own progress
+  table — read this one for what is actually done versus still open).
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
   used for development/regression-checking.
 - `svg/` — the corresponding exported SVGs, tracked as reference output
   (`make gen` regenerates them from `moho/`).
 - `svg-fast/` — gitignored, brush-free previews of the same projects
   (`make gen-fast`) — see the performance note below.
+- `lottie-out/` — gitignored Lottie export output (`make gen-lottie` /
+  `check-lottie`), not tracked reference output.
 - `styles/Brushes/` — gitignored symlink to Moho's own installed brush
   textures (`make styles.brushes` creates it), used to approximate textured
   brush line styles — see `docs/moho-exporting-svg.md` § Brush textures.
@@ -148,6 +172,17 @@ as a mask container when `group_mask` doesn't already cover it), `--stroke-mul`
 (default 2.0; see STROKE WIDTH below), `--brush-dir` (default `styles/Brushes`;
 see BRUSH STROKES below and `docs/moho-exporting-svg.md`). Full flag reference:
 `docs/moho-exporting-svg.md`.
+
+```bash
+python3 moho2lottie.py Project.mohoproj --out Project.json           # full [start_frame, end_frame] range
+python3 moho2lottie.py Project.mohoproj --out Project.json --frame 0 # a single still frame instead
+python3 moho2lottie.py Project.mohoproj --out Project.json --validate # + schema-validate the output (needs `pip install jsonschema`)
+```
+
+`make gen-lottie` / `make check-lottie` run the same exporter against the
+tracked sample projects and the two scripts under `tools/` — see
+`docs/moho-to-lottie-plan.md` Task 8 for what `check-lottie` actually
+asserts.
 
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and

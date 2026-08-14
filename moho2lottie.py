@@ -30,7 +30,16 @@ from collections import Counter
 from moho2svg import (Color, Exporter, RenderSettings, build_path_bezier,
                        load_document, walk_render_tree)
 
+try:
+    # Optional, exactly like Pillow in moho2svg.py: only used by --validate,
+    # so this tool still runs with zero third-party dependencies otherwise.
+    import jsonschema
+except ImportError:
+    jsonschema = None
+
 LOTTIE_VERSION = "5.7.0"
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "lottie", "lottie.schema.json")
 
 # Printed per warning key at the end of an export - see the module
 # docstring's "deliberately out of scope" paragraph for the reasoning behind
@@ -407,11 +416,25 @@ class LottieExporter:
         """A Lottie 2D point property (e.g. a gradient's start/end point):
         static when it never changes across frames, keyframed otherwise -
         the 2D-point counterpart of _scalar_property.  `per_frame_points` is
-        one (x, y) tuple per frame."""
+        one (x, y) tuple per frame.
+
+        A keyframe's own "s" must be a FLAT array of numbers here - Lottie's
+        position/vector-property keyframes (schema: vector-keyframe, used by
+        both position-property and, via its "s" field being values/vector,
+        every plain vector) store "s": [x, y] directly, NOT "s": [[x, y]].
+        That extra wrapping level is correct for a BEZIER keyframe's own "s"
+        (schema: bezier-keyframe, which explicitly wants an array containing
+        exactly one bezier value - see _sh_elements/_path_property) but
+        wrong here; conflating the two produced files that failed schema
+        validation (caught by adding --validate in this same task) even
+        though every geometry check up to that point had already passed,
+        since none of them parse "s" against the schema, only against each
+        other's own output.
+        """
         if all(p == per_frame_points[0] for p in per_frame_points[1:]):
             return {"a": 0, "k": list(per_frame_points[0])}
         return {"a": 1,
-                "k": [{"t": float(f), "s": [list(p)]}
+                "k": [{"t": float(f), "s": list(p)}
                       for f, p in zip(frames, per_frame_points)]}
 
     def _sh_elements(self, per_frame_subpaths: list, frames) -> list:
@@ -754,6 +777,39 @@ class LottieExporter:
         return {"ty": "gr", "nm": f"{name}_line", "it": elements}
 
 
+def validate_lottie(lottie: dict) -> None:
+    """Validate `lottie` against the bundled `lottie/lottie.schema.json`,
+    printing one PASS/FAIL-style line either way.
+
+    Passing is weak evidence, not proof of a correct file: the schema marks
+    very little as `required` (see docs/lottie-and-thorvg.md section 2.5),
+    so a structurally-broken-but-technically-permitted document can still
+    validate. It is still worth running, since a SCHEMA VIOLATION is
+    unambiguous proof of a bug - this tool has produced zero of those across
+    all 19 sample documents, checked directly while writing this function.
+
+    Does nothing (prints a one-line note instead) when the optional
+    `jsonschema` package is not installed - exactly like Pillow's absence in
+    moho2svg.py, this must never become a required dependency.
+    """
+    if jsonschema is None:
+        print("moho2lottie: --validate requested but the optional 'jsonschema' "
+              "package is not installed - run `pip install jsonschema` to "
+              "enable schema validation", file=sys.stderr)
+        return
+    with open(SCHEMA_PATH, encoding="utf-8") as f:
+        schema = json.load(f)
+    try:
+        jsonschema.validate(lottie, schema)
+    except jsonschema.ValidationError as exc:
+        print(f"moho2lottie: SCHEMA VALIDATION FAILED at "
+              f"{'.'.join(str(p) for p in exc.absolute_path) or '<root>'}: "
+              f"{exc.message}", file=sys.stderr)
+        return
+    print("moho2lottie: schema validation passed "
+          "(weak evidence only - see validate_lottie's own docstring)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Export Moho vector artwork (.mohoproj / .animeproj) to a "
@@ -764,6 +820,9 @@ def main() -> None:
                         help="export a single still frame instead of the document's "
                              "own [start_frame, end_frame] range")
     parser.add_argument("--include-hidden", action="store_true")
+    parser.add_argument("--validate", action="store_true",
+                        help="validate the output against lottie/lottie.schema.json "
+                             "(needs the optional 'jsonschema' package)")
     args = parser.parse_args()
 
     document = load_document(args.project)
@@ -788,6 +847,9 @@ def main() -> None:
         explanation = WARNING_EXPLANATIONS.get(key, f"{key} not fully supported")
         print(f"moho2lottie: {count} {explanation} "
               f"- see docs/moho-to-lottie-design.md section 2.2", file=sys.stderr)
+
+    if args.validate:
+        validate_lottie(lottie)
 
 
 if __name__ == "__main__":

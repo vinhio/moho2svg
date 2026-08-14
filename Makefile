@@ -56,6 +56,28 @@ svg/png/%.png: svg/%.svg
 styles.brushes:
 	ln -s /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/Brushes
 
+# Lottie export of the same tracked projects as `gen` (minus AddBone/
+# ReparentBone, to keep this quick) - output goes to lottie-out/, gitignored,
+# not tracked reference output. Pass VALIDATE=--validate to also
+# schema-validate each file against lottie/lottie.schema.json (needs the
+# optional 'jsonschema' package - see moho2lottie.py's own --validate).
+# See docs/moho-to-lottie-plan.md.
+VALIDATE ?=
+gen-lottie:
+	mkdir -p lottie-out
+	python3 moho2lottie.py moho/Bandit.mohoproj --out lottie-out/Bandit.json $(VALIDATE)
+	python3 moho2lottie.py moho/SketchBone.animeproj --out lottie-out/SketchBone.json $(VALIDATE)
+	python3 moho2lottie.py moho/WhatIsBone.animeproj --out lottie-out/WhatIsBone.json $(VALIDATE)
+
+# Runs both check scripts under tools/ against gen-lottie's own output - see
+# their own docstrings for what each actually checks and why neither needs a
+# Lottie player or a third-party package.
+check-lottie: gen-lottie
+	python3 tools/check_bezier_roundtrip.py
+	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj lottie-out/Bandit.json 25 60 100 127 --require-masks
+	python3 tools/check_lottie_geometry.py moho/SketchBone.animeproj lottie-out/SketchBone.json 1 77 86 120 --require-gradients
+	python3 tools/check_lottie_geometry.py moho/WhatIsBone.animeproj lottie-out/WhatIsBone.json 1 120 240 --require-masks --require-gradients
+
 format:
 	jq . moho/AddBone.animeproj > moho/AddBone.pretty.json
 	jq . moho/Bandit.mohoproj > moho/Bandit.pretty.json

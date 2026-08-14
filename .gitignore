@@ -24,5 +24,8 @@ svg-med/
 svg-fast/
 svg-raster/
 
+# Lottie export output (make gen-lottie / check-lottie) - not tracked reference output
+lottie-out/
+
 # Scratch analysis notes
 tmp/

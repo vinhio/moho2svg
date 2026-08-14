@@ -4,13 +4,28 @@ Design for `moho2lottie.py`, a second exporter that writes a Moho document to
 a Lottie JSON animation, reusing the geometry pipeline that already powers
 `moho2svg.py`.
 
-This document is a **plan, not a record of working code**. Nothing described
-here is implemented yet. Where a statement is a measurement, it says so and
-gives the sample size; where it is a decision, it says what was decided and
-why; where it is unverified, it is listed in [§ 9](#9-open-questions).
+**This design is now implemented.** All 8 tasks in
+[`moho-to-lottie-plan.md`](moho-to-lottie-plan.md) are done, and
+`moho2lottie.py` exports every one of this repository's 19 sample documents
+successfully (verified: schema-valid, geometry-checked against the SVG
+pipeline at multiple frames per document, byte-identical SVG output
+unaffected). This document is kept as the ORIGINAL design record, not
+updated line-by-line to match the final implementation in every
+detail — where the two differ, the plan document's own per-task notes
+explain what changed and why (several real bugs and a few wrong
+measurements were found only once code existed to test against real
+documents). Read the plan for current, verified facts; read this document
+for the reasoning that shaped the design before any of it was built. Where
+a statement below is a measurement, it says so and gives the sample size;
+where it is a decision, it says what was decided and why; where it was
+unverified at design time, it is listed in [§ 9](#9-open-questions) — most
+of those are now settled, and the plan document says how.
 
 Companion documents:
 
+- [`moho-to-lottie-plan.md`](moho-to-lottie-plan.md) — the implementation
+  plan, its own progress table, and what actually happened task by task
+  (including corrections to this document's own design).
 - [`lottie-and-thorvg.md`](lottie-and-thorvg.md) — the Lottie format itself,
   read out of the JSON Schema stored in `lottie/`.
 - [`moho-export-pipeline.md`](moho-export-pipeline.md) — how `moho2svg.py`
@@ -388,26 +403,56 @@ The vendored player is gitignored, like `styles/Brushes/`.
 
 ## 9. Open questions
 
-Ordered by how much they could change the work.
+Ordered by how much they could change the work. Status added post-
+implementation; see `moho-to-lottie-plan.md` for the task that settled each
+one, where one exists.
 
 1. **Is Lottie's `op` exclusive?** [§ 5.1](#51-the-root-object) assumes
    `end_frame + 1`. If it is inclusive, every export is one frame long. Cheap
-   to settle against a player, and cheap to fix.
+   to settle against a player, and cheap to fix. **Still open** — no Lottie
+   player has been used anywhere in this project; `moho2lottie.py`'s own
+   `end_frame + 1` choice is unverified. Listed as open in the plan's own
+   "After the plan" section too.
 2. **Shape element ordering inside a group.** "A style applies to neighbouring
    shapes" is not a machine-checkable rule and is not in the schema. The order
    in [§ 5.3](#53-shapes) is the conventional one, unverified here.
+   **Sidestepped, not settled**: Task 3 gives each shape up to two SEPARATE
+   Lottie groups (one for fill, one for outline) instead of one group mixing
+   both paint operators, specifically so this ambiguity cannot affect the
+   result either way. Still open for anyone building a writer that needs
+   fewer, more complex groups.
 3. **Do per-layer `masksProperties` reproduce Moho's masking?** The fallback
    (track matte plus precomposition) is designed but not detailed.
+   **Implemented per-layer, geometry-checked, visual correctness still
+   open**: Task 6 built it (with mask geometry keyframed per frame, a real
+   gap this design did not anticipate - masks move as much as any other
+   shape) and confirmed the emitted geometry matches the pipeline directly;
+   whether it clips correctly in an actual Lottie player is unverified,
+   same root cause as item 1. One deliberate, counted simplification: the
+   SVG side's stroke-exclusion carve-out (a mask source's own outline stays
+   visible on top of what it clips) is not reproduced - Lottie's mask model
+   has no "stroke as mask" primitive, and it is a narrow effect (16 of 180
+   mask source shapes, 9%, measured directly).
 4. **Is `Bandit.mohoproj`'s `masking == 2` defect worse in Lottie than in
    SVG?** The SVG writer's known-wrong ordering is inherited deliberately; how
-   visible it is in a Lottie player is unknown.
+   visible it is in a Lottie player is unknown. **Still open** — same root
+   cause as item 1.
 5. **Gzipped size of the largest output.** `WhatIsBone.animeproj` at ~21.6 MB
    raw is the worst case measured. If gzip does not bring it into an
    acceptable range for web delivery, the transform-preserving optimisation
    from [§ 4](#4-the-flat-bake-decision) moves from "later" to "required".
+   **Settled: gzip is enough, no further work needed.** The finished
+   exporter's actual output for `WhatIsBone.animeproj` is 23.9 MB raw (higher
+   than this estimate, since it includes working masking and gradients this
+   estimate did not model) but only **2.4 MB gzipped** (~10x) — comfortably
+   web-deliverable. The transform-preserving optimisation remains a possible
+   LATER improvement, not a required one.
 6. **A Vietnamese mirror of this document** under `docs/localization/` is not
    written yet. It is deliberately deferred: this is a design that will change
    during implementation, and translating a moving target twice is waste.
+   **Still deferred.** The design is no longer a moving target now that
+   implementation is done, so this could be picked up, but doing so was out
+   of scope for the implementation work itself and was not requested.
 
 ---
 
