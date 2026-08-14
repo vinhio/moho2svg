@@ -106,9 +106,18 @@ def path_property_at(ks: dict, frame: float) -> dict:
 
 def emitted_layers(lottie: dict, frame: float):
     """Every Lottie layer's actual shape geometry at `frame`, in emitted
-    (already Lottie-ordered) order - the counterpart of expected_layers()."""
+    (already Lottie-ordered) order - the counterpart of expected_layers().
+
+    Skips a layer whose own `ip`/`op` window excludes `frame` entirely: a
+    SwitchLayer child only exists for its own visibility window (see
+    moho2lottie.LottieExporter._windows), so it legitimately has no
+    keyframe at a frame outside that window - that is not a mismatch to
+    report, it is the layer correctly not being there.
+    """
     out = []
     for layer in lottie["layers"]:
+        if not (layer["ip"] <= frame < layer["op"]):
+            continue
         shapes = []
         for grp in layer["shapes"]:
             beziers = [path_property_at(e["ks"], frame) for e in grp["it"] if e["ty"] == "sh"]

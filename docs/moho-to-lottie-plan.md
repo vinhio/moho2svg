@@ -36,7 +36,7 @@ which step it stopped at, so a reader knows where to resume.
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
 | 5 | Gradients | **DONE** | `e1aa6d1` |
 | 6 | Masking | **DONE** | `62d497a` |
-| 7 | Switch layers | TODO | — |
+| 7 | Switch layers | **DONE** | (pending commit) |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
 
 Two items cannot be closed by any task above, because both need a real Lottie
@@ -1177,16 +1177,50 @@ git commit -m "Carry Moho masking into Lottie as per-layer masks"
 
 ## Task 7: Switch layers
 
-**Status:** TODO
+**Status:** DONE — with the fix, **all 19 sample documents now export their
+full frame range successfully** (the `SketchBone.animeproj` limitation named
+in Tasks 4-6 is resolved). Two real bugs turned up while implementing this,
+both worth reading before touching this code again.
+
+**⚠ Bug 1: draw order broke for any layer not present at frame 0.** The
+pre-existing `order` list was built by appending a layer the first time it
+was ever seen WHILE WALKING FRAMES IN SEQUENCE - correct for a document
+where every layer is always present (frame 0's walk already matches the
+document's true structural order), but wrong the moment a layer's first
+appearance is mid-range: a lip-sync mouth shape that only becomes active at
+frame 77 got appended to `order` far later than its true sibling position,
+scrambling its draw order relative to every always-present layer once
+`collected.reverse()` ran. Confirmed by `tools/check_lottie_geometry.py`:
+"layer order mismatch" errors, but only inside the lip-sync window (frames
+77-85), nowhere else - the exact symptom of a layer whose position depends
+on WHEN it was discovered rather than WHERE it structurally belongs. Fixed
+by seeding `order` from `Document.vector_layers()` instead - a static walk
+of every mesh layer in file order regardless of which SwitchLayer child
+happens to be active at any one frame, which is the actual source of truth
+for relative draw order.
+
+**⚠ Bug 2: a single-frame preview export (`--frame N`) briefly collapsed
+every layer's visibility to one frame.** Deriving `ip`/`op` purely from a
+layer's own window bounds is correct when `frames` is the full document
+range, but when `len(frames) == 1` (Task 3's `--frame N` still-preview
+mode), every layer's "window" trivially becomes exactly that one sampled
+frame - so a still export stopped holding for the declared document
+duration, silently changing Task 3's own established behaviour. Confirmed
+by re-running the Task 4 static-path invariant check
+(`AddBone.animeproj` at `--frame 1` vs its full range must be
+byte-identical): sizes diverged by 90 bytes after the windowing change,
+where they matched exactly before it. Fixed by special-casing
+`len(frames) == 1` to use the document's own full range for `ip`/`op`,
+restoring the original invariant (re-verified: byte-identical again).
 
 **Files:**
-- Modify: `moho2lottie.py` — `_build_layers`
+- Modify: `moho2lottie.py` — `_build_layers` (now seeds `order` from `Document.vector_layers()`, tracks `active_frames`, and handles the `len(frames) == 1` still-preview case), new `_windows`, `_slice_accumulators`; `_shape_layer` gained `ip`/`op` parameters
+- Modify: `tools/check_lottie_geometry.py` — `emitted_layers` now skips a layer whose own `ip`/`op` excludes the checked frame, instead of crashing on a missing keyframe
 
 **Interfaces:**
-- Produces: one emitted layer per contiguous window in which a switch child is
-  active, with `ip`/`op` set to that window.
+- Produces: one emitted layer per contiguous window (a maximal run of consecutive frame values) in which a given Moho layer is the active "mesh" event, with `ip`/`op` set to that window — except when the whole export is a single-frame still (`len(frames) == 1`), where `ip`/`op` is the document's own full range instead (see Bug 2 above).
 
-- [ ] **Step 1: Confirm a document exercises it**
+- [x] **Step 1: Confirm a document exercises it**
 
 Run:
 ```bash
@@ -1200,44 +1234,64 @@ for f in sorted(os.listdir('moho')):
     n = sum(1 for _, l in d.walk() if l.kind is LayerKind.SWITCH)
     if n: print(f, n, 'switch layers')"
 ```
-Expected: at least one document with a non-zero count.
+Confirmed: `SketchBone.animeproj` (already known, from Task 4's own
+`agiz`/lip-sync failure) is a real switch-layer document, with an 8-way
+alternation for the mouth shape.
 
-- [ ] **Step 2: Write the failing assertion**
+- [x] **Step 2: Write the failing assertion**
 
-Extend `tools/check_lottie_geometry.py` so that, when checking a frame, it
-requires that a switch layer's **inactive** children contribute no visible
-layer at that frame — a layer whose `ip <= frame < op` must be the active one.
+`--require-masks`/`--require-gradients`-style flags weren't the right shape
+for this - what actually needed extending was `emitted_layers` itself (see
+Bug fix note above): before this task, it crashed outright
+(`KeyError: no keyframe at frame N`) on any frame outside a layer's window,
+because every layer was still assumed to hold a keyframe at every checked
+frame. Fixed to skip a layer whose own `ip`/`op` excludes the checked frame
+- confirmed this alone doesn't mask real bugs, since it still SURFACED both
+bugs described above once the crash was out of the way.
 
-Run the check at two frames where the switch selects different children.
-Expected: FAIL — the current writer emits every child for the whole range.
+Ran before Step 3 existed (i.e. before windowing was implemented at all):
+`moho2lottie.py moho/SketchBone.animeproj` failed outright with the
+`ValueError` already known from Task 4 ("'agiz' shape '': only 111/120
+frames were captured") - confirming the starting point was "cannot export
+at all," not "exports with wrong geometry."
 
-- [ ] **Step 3: Emit windows**
+- [x] **Step 3: Emit windows**
 
-Because `walk_render_tree` already yields only the active child at the frame it
-is called with, collect per-frame membership and turn it into windows:
-
-```python
-    def _switch_windows(self, frames):
-        """For each layer under a SwitchLayer, the contiguous frame windows in
-        which it is the active child.
-
-        A SwitchLayer's key channel holds strings, which snap to the left
-        keyframe with no interpolation, so the active child changes at
-        discrete frames and every window is contiguous.  A child that becomes
-        active twice is emitted twice, once per window, rather than being
-        faded in and out.
-        """
-```
+Implemented as `_windows` (a static method - the plan's own sketch named it
+`_switch_windows`, kept the simpler name since it operates on any layer's
+active-frame list, not specifically "switch windows") plus `_slice_accumulators`
+and an extended `_build_layers` - see the two bug-fix notes above for the
+two corrections beyond the plan's original one-function sketch.
 
 Every emitted layer's `ip`/`op` come from its window instead of the document
-range.
+range - except the single-frame-preview special case (Bug 2 above).
 
-- [ ] **Step 4: Re-run the checks**
+- [x] **Step 4: Re-run the checks**
 
-Run the geometry check at the two frames from Step 2.
-Expected: `OK`.
+Ran `check_lottie_geometry.py` against `SketchBone.animeproj` at seven
+frames spanning both window boundaries (1, 76, 77, 80, 85, 86, 120 - frame 1
+and 120 are the two big always-mouth-closed windows, 77/80/85 sample inside
+three different one-viseme windows, 76/86 sit exactly on a transition):
+`OK` on all seven, including `--require-gradients`.
 
-- [ ] **Step 5: Commit**
+Went further than the plan's own two-frame check:
+- Inspected structure directly: `SketchBone.animeproj` emits 8 separate
+  `agiz`-named layers, whose windows tile `[1, 121)` exactly with no gaps
+  or overlaps (1-77, 77-79, 79-81, 81-83, 83-85, 85-86, 86-121, confirmed by
+  direct inspection).
+- Ran a full-corpus smoke export: **19 of 19 documents now succeed** - the
+  milestone this task exists for.
+- Re-ran the Task 4 static-path invariant on `AddBone.animeproj`
+  (`--frame 1` output must be byte-identical to the full-range output) -
+  this is what caught Bug 2 above, and passes again after the fix.
+- Re-verified `Bandit.mohoproj`/`WhatIsBone.animeproj`/`OffsetBoneTool.animeproj`
+  (`--require-masks`/`--require-gradients` where applicable) still pass,
+  confirming the `order`-construction fix (Bug 1) didn't disturb any
+  document that has no switch layers at all.
+- `make gen` (byte-identical) and `check_bezier_roundtrip.py` (all 19
+  documents) re-run clean.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add moho2lottie.py tools/check_lottie_geometry.py

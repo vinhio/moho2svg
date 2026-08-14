@@ -132,14 +132,17 @@ class LottieExporter:
         hundreds of pixels, not a rounding-sized discrepancy.
 
         A mesh layer's SET of shapes and their has_fill/has_outline/
-        combo_mode never varies by frame (only their geometry does), so
-        which layers/shapes exist at all is decided from frame[0]'s walk
-        alone; a layer present there but missing from a later frame's walk
-        would mean its visibility itself is animated - not something any
-        document in this repository's sample corpus does, and not yet
-        handled here (a SwitchLayer's active child changing across the
-        range is Task 7's job specifically). Raises rather than guessing if
-        that assumption ever breaks.
+        combo_mode never varies by frame (only their geometry does) - but
+        the layer's own PRESENCE can: a SwitchLayer's active child changes
+        across the range, so a child is only a "mesh" event on the frames
+        it is actually the active one. `active_frames` tracks exactly which
+        frame values each layer was seen on; `_windows` groups those into
+        maximal CONTIGUOUS runs, and each run becomes its own emitted Lottie
+        layer with its own `ip`/`op` (a child active twice, non-
+        consecutively, is emitted twice - see `_windows`'s own docstring).
+        A layer present for the whole range simply gets one window equal to
+        the whole range, so this subsumes the pre-Task-7 behaviour rather
+        than special-casing it.
 
         Moho draws its layer list back to front, which is the order
         walk_render_tree yields "mesh" events in.  Lottie draws the FIRST
@@ -159,9 +162,23 @@ class LottieExporter:
         masked containers in SketchBone.animeproj alone), so it is collected
         per frame here, exactly like shape geometry, not evaluated once.
         """
-        order: list = []                      # Layer objects, frame[0]'s draw order
+        # The CANONICAL draw order comes from the document's own static
+        # structure, not from "the order layers were first seen while
+        # walking frames" - a SwitchLayer child that only becomes active
+        # partway through the range (e.g. a lip-sync mouth shape) would
+        # otherwise be appended to `order` far later than its structural
+        # sibling position, scrambling its draw order relative to every
+        # ALWAYS-present layer once collected.reverse() runs. vector_layers()
+        # walks every mesh layer in file order regardless of which
+        # SwitchLayer child happens to be active at any one frame, so it
+        # is the right source of truth for relative order; a layer that
+        # turns out to never actually be active in ANY frame (e.g. a
+        # SwitchLayer alternative nothing ever selects) is dropped later,
+        # once it is clear no accumulator was ever built for it.
+        order: list = [layer for _ancestors, layer in self.document.vector_layers()]
         accumulators: dict = {}               # id(layer) -> list of per-shape accumulators
         mask_data: dict = {}                  # id(layer) -> {"has_mask": bool|None, "per_frame": [...]}
+        active_frames: dict = {}              # id(layer) -> frame VALUES it was a "mesh" event on
         for frame in frames:
             mask_stack: list = []
             for item in walk_render_tree(self.exporter, frame, include_hidden):
@@ -180,9 +197,10 @@ class LottieExporter:
                 lid = id(item.layer)
                 first_time = lid not in accumulators
                 if first_time:
-                    order.append(item.layer)
                     accumulators[lid] = []
                     mask_data[lid] = {"has_mask": None, "per_frame": []}
+                    active_frames[lid] = []
+                active_frames[lid].append(frame)
                 self._accumulate_frame(item, frame, accumulators[lid], first_time)
 
                 active_mask = mask_stack[-1] if mask_stack else None
@@ -201,30 +219,97 @@ class LottieExporter:
 
         collected = []
         for layer in order:
-            shapes = self._finalize_shapes(layer, accumulators[id(layer)], frames)
-            if not shapes:
+            lid = id(layer)
+            if lid not in active_frames:
+                # In vector_layers()'s structural order but never actually
+                # the active child of its SwitchLayer (or otherwise never
+                # visible) in any sampled frame - nothing to draw, ever.
                 continue
-            info = mask_data[id(layer)]
-            mask_properties = (self._finalize_mask(layer, info["per_frame"], frames)
-                                if info["has_mask"] else None)
-            collected.append(self._shape_layer(layer.name, shapes, mask_properties))
+            layer_frames = active_frames[lid]
+            info = mask_data[lid]
+            for start, end in self._windows(layer_frames):
+                window_frames = layer_frames[start:end]
+                window_accs = self._slice_accumulators(accumulators[lid], start, end)
+                shapes = self._finalize_shapes(layer, window_accs, window_frames)
+                if not shapes:
+                    continue
+                mask_properties = None
+                if info["has_mask"]:
+                    mask_properties = self._finalize_mask(
+                        layer, info["per_frame"][start:end], window_frames)
+                # A single-frame preview export (`--frame N`, len(frames) ==
+                # 1) is a still, not a window: it should hold for the whole
+                # document range, exactly like Task 3's original behaviour,
+                # not collapse to a one-frame-long span just because only
+                # one frame was ever sampled. Real windowing (from a
+                # SwitchLayer's active child changing) only means something
+                # when the full frame range was actually walked.
+                if len(frames) == 1:
+                    ip, op = self.document.start_frame, self.document.end_frame + 1
+                else:
+                    ip, op = window_frames[0], window_frames[-1] + 1
+                collected.append(self._shape_layer(layer.name, shapes, ip, op, mask_properties))
         collected.reverse()                  # Moho back-to-front -> Lottie front-to-back
         for index, layer in enumerate(collected, start=1):
             layer["ind"] = index
         return collected
 
-    def _shape_layer(self, name: str, shapes: list, mask_properties: list = None) -> dict:
+    @staticmethod
+    def _windows(active_frames: list) -> list:
+        """Split `active_frames` (the frame VALUES one layer was seen on, in
+        ascending order - not necessarily every frame in the document, and
+        not necessarily contiguous) into (start_index, end_index) slices,
+        one per maximal run of CONSECUTIVE integer frames.
+
+        A layer present for the whole document range gets exactly one
+        window spanning it. A SwitchLayer child active in two separate
+        stretches of time (Moho's key channels snap to the left keyframe
+        with no interpolation, so "active" is discrete, and a run of
+        consecutive frames is unambiguous) gets two windows - each becomes
+        its own emitted Lottie layer with its own `ip`/`op`, since Lottie
+        has no way to give one layer two disjoint visibility spans.
+        """
+        windows = []
+        start = 0
+        for i in range(1, len(active_frames) + 1):
+            if i == len(active_frames) or active_frames[i] != active_frames[i - 1] + 1:
+                windows.append((start, i))
+                start = i
+        return windows
+
+    @staticmethod
+    def _slice_accumulators(accs: list, start: int, end: int) -> list:
+        """A copy of `accs` (one layer's per-shape accumulators) with every
+        per-frame list cut down to `[start:end]` - the frame-invariant
+        fields (name, colours, outline_kind, ...) are shared, not copied,
+        since _finalize_shapes/_finalize_outline_group never mutate them."""
+        sliced = []
+        for acc in accs:
+            copy = dict(acc)
+            copy["fill_per_frame"] = acc["fill_per_frame"][start:end]
+            copy["outline_per_frame"] = acc["outline_per_frame"][start:end]
+            copy["outline_width_per_frame"] = acc["outline_width_per_frame"][start:end]
+            sliced.append(copy)
+        return sliced
+
+    def _shape_layer(self, name: str, shapes: list, ip: float, op: float,
+                      mask_properties: list = None) -> dict:
         """A Lottie shape layer with an identity transform.
 
         Identity is correct because the geometry is already baked into
         canvas pixels, which is also Lottie's own coordinate system: pixels,
         y down, origin at the top left - no conversion needed.
+
+        `ip`/`op` are the layer's OWN visibility window - the whole document
+        range for an always-present layer, a narrower one for a SwitchLayer
+        child (see _windows) - not necessarily `self.document.start_frame`/
+        `end_frame + 1`.
         """
         layer = {
             "ty": 4, "nm": name, "ks": identity_transform(),
             "ao": 0, "shapes": shapes,
-            "ip": float(self.document.start_frame),
-            "op": float(self.document.end_frame + 1),
+            "ip": float(ip),
+            "op": float(op),
             "st": 0.0,
         }
         if mask_properties:
