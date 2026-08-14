@@ -36,7 +36,7 @@ which step it stopped at, so a reader knows where to resume.
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
 | 5 | Gradients | **DONE** | `e1aa6d1` |
 | 6 | Masking | **DONE** | `62d497a` |
-| 7 | Switch layers | **DONE** | (pending commit) |
+| 7 | Switch layers | **DONE** | `4afc76c` |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
 
 Two items cannot be closed by any task above, because both need a real Lottie
