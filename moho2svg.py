@@ -1352,7 +1352,11 @@ class CurvePoint:
     Bezier handles either side of it - see BezierReconstructor and the module
     docstring's BEZIER CURVES section.  `point_index` indexes into the owning
     Mesh's `points` list (a curve does not store its own coordinates - point
-    *position* is shared with every curve/shape that references it)."""
+    *position* is shared with every curve/shape that references it).
+
+    In the older `1021` format generation a curve point carries only
+    `point`, `smoothness` and `segments_on`; the four weight/offset fields do
+    not exist at all - see _build for how they are defaulted."""
     point_index: int
     smoothness: Any
     weight_in: Any
@@ -1361,15 +1365,34 @@ class CurvePoint:
     offset_out: Any
     segments_on: bool
 
+    # Neutral handle shape, used when the `1021` format omits these fields.
+    # weight 1.0 makes handle_length collapse to distance * smoothness, and
+    # offset 0.0 leaves the handle direction unrotated (see
+    # BezierReconstructor.handle).  Both are also the single most common
+    # stored value in the documents that DO carry the fields: 1.0 on 23.4% of
+    # 52,722 weight values, 0.0 on 26.5% of 52,738 offset values, each the
+    # clear mode of its distribution.  See docs/moho-project-file-format.md
+    # § 7.3 - this is a reasoned default, NOT a value confirmed against a Moho
+    # export of a `1021` document.
+    DEFAULT_WEIGHT = 1.0
+    DEFAULT_OFFSET = 0.0
+
     @staticmethod
     def _build(raw: dict) -> "CurvePoint":
+        """Build one curve point, tolerating the `1021` format's shorter form.
+
+        `weight_in`/`weight_out`/`offset_in`/`offset_out` are read with
+        .get(): every `1038`/`1045` curve point has all seven fields, but
+        every `1021` one has exactly three, and plain indexing turned that
+        into a hard KeyError that made such a document impossible to load.
+        """
         return CurvePoint(
             point_index=raw["point"],
             smoothness=raw["smoothness"],
-            weight_in=raw["weight_in"],
-            weight_out=raw["weight_out"],
-            offset_in=raw["offset_in"],
-            offset_out=raw["offset_out"],
+            weight_in=raw.get("weight_in", CurvePoint.DEFAULT_WEIGHT),
+            weight_out=raw.get("weight_out", CurvePoint.DEFAULT_WEIGHT),
+            offset_in=raw.get("offset_in", CurvePoint.DEFAULT_OFFSET),
+            offset_out=raw.get("offset_out", CurvePoint.DEFAULT_OFFSET),
             segments_on=bool(raw["segments_on"]),
         )
 

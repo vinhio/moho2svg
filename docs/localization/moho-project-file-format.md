@@ -626,18 +626,35 @@ Các trường curve point — cả bảy, tất cả được dùng:
 | `segments_on` | bool | `false` trên 583 của 53.027 curve points (tổng 19-file). `false` nghĩa là segment rời khỏi điểm này **không được vẽ** — path tách thành một subpath mới. |
 
 **Trong thế hệ định dạng `1021`, `weight_in`/`weight_out`/`offset_in`/
-`offset_out` vắng hoàn toàn — (phát hiện từ 19 file), và điều này hiện làm
-CRASH `moho2svg.py`.** Mỗi curve point trong toàn bộ 95 curve point của
-`Rabbit.animeproj` có đúng `{point, smoothness, segments_on}` và không gì
-khác, trong khi mỗi curve point `1038`/`1045` có đủ bảy trường (12.500 curve
-points đã kiểm). Đây có lẽ là một biểu diễn curve đơn giản hơn, chỉ-tay-nắm-
-đối-xứng, có trước tính năng weight/offset bất đối xứng. **Đã xác nhận bằng
-chạy trực tiếp:** `CurvePoint._build` đọc bốn trường này bằng chỉ mục dict
-thường (`raw["weight_in"]`, không phải `.get(...)`), nên việc tải
-`Rabbit.animeproj` ném `KeyError: 'weight_in'` và công cụ không thể xuất bất
-kỳ layer nào từ nó cả — đây không phải một khoảng trống độ chính xác render
-như đa số mục trong tài liệu này, nó là một lỗi cứng khi tải. Đã xác nhận
-bằng cách chạy `python3 moho2svg.py moho/Rabbit.animeproj --list`.
+`offset_out` vắng hoàn toàn** (phát hiện từ 19 file). Mỗi curve point trong
+toàn bộ 305 curve point của `Rabbit.animeproj` có đúng
+`{point, smoothness, segments_on}` và không gì khác, trong khi mỗi curve point
+`1038`/`1045` có đủ bảy trường (12.500 curve points đã kiểm). Đây có lẽ là một
+biểu diễn curve đơn giản hơn, chỉ-tay-nắm-đối-xứng, có trước tính năng
+weight/offset bất đối xứng.
+
+Trước đây đây là một **lỗi cứng khi tải**: `CurvePoint._build` đọc bốn trường
+này bằng chỉ mục dict thường, nên `Rabbit.animeproj` ném
+`KeyError: 'weight_in'` và không layer nào của nó xuất được cả.
+`CurvePoint._build` bây giờ đọc chúng bằng `.get()` và lùi về
+`CurvePoint.DEFAULT_WEIGHT` (`1.0`) và `CurvePoint.DEFAULT_OFFSET` (`0.0`).
+Hai giá trị mặc định đó được chọn dựa trên hai căn cứ:
+
+- Chúng **trung tính** trong `BezierReconstructor.handle`: weight `1.0` rút
+  độ dài tay nắm về `distance * smoothness`, và offset `0.0` để hướng tay nắm
+  không bị xoay. Nên một điểm `1021` hành xử đúng như curve tay-nắm-đối-xứng
+  mà nó có vẻ là.
+- Chúng là **giá trị phổ biến nhất trong dữ liệu** ở các tài liệu có mang các
+  trường này: `1.0` trên 23,4% của 52.722 giá trị weight và `0.0` trên 26,5%
+  của 52.738 giá trị offset, mỗi cái đều là giá trị hay gặp nhất với khoảng
+  cách rõ rệt.
+
+**Chưa xác nhận đối chiếu với một bản xuất Moho của tài liệu `1021`** — không
+có SVG tham chiếu cho `Rabbit.animeproj` trong `svg/`, nên hình dạng tay nắm
+sinh ra là suy luận, không phải đo đạc. Chỉ xác nhận được rằng tài liệu bây
+giờ tải và xuất được mọi layer
+(`python3 moho2svg.py moho/Rabbit.animeproj --list`), và rằng việc tạo lại năm
+SVG tham chiếu được theo dõi cho ra file giống hệt từng byte.
 
 ### 7.4 Shapes và `edges`
 
@@ -1346,11 +1363,14 @@ thay đổi đầu ra tham chiếu hiện tại trong `svg/`.
 
 Xếp hạng theo mức độ thấy được của khác biệt:
 
-1. **`Rabbit.animeproj` (thế hệ định dạng `1021`) không tải được gì cả —
-   `KeyError: 'weight_in'` trên mỗi curve point.** ([§ 7.3](#73-curves-và-curve-points))
-   Đây là một lỗi cứng, không phải một khoảng trống độ chính xác render; nó
-   được xếp đầu vì nó nghiêm trọng hơn hẳn mọi thứ khác trong danh sách này.
-   **(Phát hiện từ 19 file.)**
+1. `Rabbit.animeproj` (thế hệ định dạng `1021`) không có
+   `weight_in`/`weight_out`/`offset_in`/`offset_out` trên bất kỳ curve point
+   nào, nên mọi tay nắm được tái dựng từ giá trị mặc định trung tính thay vì
+   giá trị lưu trong file. ([§ 7.3](#73-curves-và-curve-points)) Tài liệu tải
+   và xuất được; thứ chưa kiểm chứng là *hình dạng* tay nắm, vì không có SVG
+   tham chiếu cho nó. **(Phát hiện từ 19 file.)** *(Trước khi thêm phần lùi về
+   mặc định bằng `.get()`, đây là một lỗi cứng khi tải —
+   `KeyError: 'weight_in'` — không phải một khoảng trống độ chính xác render.)*
 2. `layer_effects.alpha` — 9 layers đáng lẽ 60% đặc. ([§ 6.3](#63-các-trường-chung-ảnh-hưởng-render-và-không-được-dùng))
 3. `blend_mode: 1` — 16 layers hòa trộn không bình thường. ([§ 6.3](#63-các-trường-chung-ảnh-hưởng-render-và-không-được-dùng))
 4. `ImageLayer` — 15 layers (một tài liệu) âm thầm mất toàn bộ artwork raster

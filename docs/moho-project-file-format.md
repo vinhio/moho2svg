@@ -620,18 +620,34 @@ Curve point fields — all seven, all used:
 | `segments_on` | bool | `false` on 583 of 53,027 curve points (19-file totals). `false` means the segment leaving this point is **not drawn** — the path breaks into a fresh subpath. |
 
 **In the `1021` format generation, `weight_in`/`weight_out`/`offset_in`/
-`offset_out` are absent entirely — (19-file finding), and this currently
-CRASHES `moho2svg.py`.** Every one of `Rabbit.animeproj`'s 95 curve points has
-exactly `{point, smoothness, segments_on}` and nothing else, while every
-`1038`/`1045` curve point has all seven fields (12,500 curve points checked).
-This is presumably a simpler, symmetric-handle-only curve representation
-predating the asymmetric weight/offset feature. **Confirmed by direct run:**
-`CurvePoint._build` reads these four fields with plain dict indexing
-(`raw["weight_in"]`, not `.get(...)`), so loading `Rabbit.animeproj` raises
-`KeyError: 'weight_in'` and the tool cannot export any layer from it at all —
-this is not a rendering-accuracy gap like most items in this document, it is
-a hard failure to load. Confirmed by running
-`python3 moho2svg.py moho/Rabbit.animeproj --list`.
+`offset_out` are absent entirely** (19-file finding). Every one of
+`Rabbit.animeproj`'s 305 curve points has exactly
+`{point, smoothness, segments_on}` and nothing else, while every `1038`/`1045`
+curve point has all seven fields (12,500 curve points checked). This is
+presumably a simpler, symmetric-handle-only curve representation predating the
+asymmetric weight/offset feature.
+
+This used to be a **hard failure to load**: `CurvePoint._build` read the four
+fields with plain dict indexing, so `Rabbit.animeproj` raised
+`KeyError: 'weight_in'` and no layer of it could be exported at all.
+`CurvePoint._build` now reads them with `.get()` and falls back to
+`CurvePoint.DEFAULT_WEIGHT` (`1.0`) and `CurvePoint.DEFAULT_OFFSET` (`0.0`).
+Those two defaults are chosen on two grounds:
+
+- They are **neutral** in `BezierReconstructor.handle`: weight `1.0` reduces
+  the handle length to `distance * smoothness`, and offset `0.0` leaves the
+  handle direction unrotated. So a `1021` point behaves exactly like the
+  symmetric-handle curve it appears to be.
+- They are the **mode of the stored data** in the documents that do carry the
+  fields: `1.0` on 23.4% of 52,722 weight values and `0.0` on 26.5% of 52,738
+  offset values, each the single most common value by a wide margin.
+
+**Not confirmed against a Moho export of a `1021` document** — there is no
+reference SVG for `Rabbit.animeproj` in `svg/`, so the handle shape this
+produces is reasoned, not measured. Confirmed only that the document now
+loads and exports every layer
+(`python3 moho2svg.py moho/Rabbit.animeproj --list`), and that regenerating
+the five tracked reference SVGs leaves them byte-identical.
 
 ### 7.4 Shapes and `edges`
 
@@ -1345,11 +1361,14 @@ current reference output in `svg/`.
 
 Ranked by how visible the difference should be:
 
-1. **`Rabbit.animeproj` (the `1021` format generation) does not load at all —
-   `KeyError: 'weight_in'` on every curve point.** ([§ 7.3](#73-curves-and-curve-points))
-   This is a hard failure, not a rendering-accuracy gap; it is listed first
-   because it is strictly worse than everything else on this list. **(19-file
-   finding.)**
+1. `Rabbit.animeproj` (the `1021` format generation) has no
+   `weight_in`/`weight_out`/`offset_in`/`offset_out` on any curve point, so
+   every handle is reconstructed from neutral defaults rather than stored
+   values. ([§ 7.3](#73-curves-and-curve-points)) The document loads and
+   exports; what is unverified is the handle *shape*, since no reference SVG
+   exists for it. **(19-file finding.)** *(Until the `.get()` defaulting was
+   added this was a hard failure to load — `KeyError: 'weight_in'` — not a
+   rendering-accuracy gap.)*
 2. `layer_effects.alpha` — 9 layers should be 60% opaque. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
 3. `blend_mode: 1` — 16 layers blend non-normally. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
 4. `ImageLayer` — 15 layers (one document) silently drop their raster
