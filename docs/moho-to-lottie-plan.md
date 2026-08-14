@@ -37,7 +37,7 @@ which step it stopped at, so a reader knows where to resume.
 | 5 | Gradients | **DONE** | `e1aa6d1` |
 | 6 | Masking | **DONE** | `62d497a` |
 | 7 | Switch layers | **DONE** | `4afc76c` |
-| 8 | Warnings, make targets and optional schema validation | **DONE** | (pending commit) |
+| 8 | Warnings, make targets and optional schema validation | **DONE** | `4d8b1be` |
 
 Two items cannot be closed by any task above, because both need a real Lottie
 player - something no part of this project has ever built, installed, or
