@@ -1064,6 +1064,23 @@ nó chia làm ba vòng đời:
 bản port Go. Điều này được ghi trong docstring của class và là một ràng buộc
 thật, không phải một gợi ý.
 
+Còn một mảnh trạng thái thay đổi được nữa, và nó **không** nằm trên
+`Exporter`: `Channel._cache`, một dict cấp module ghi nhớ `Channel.of(raw)`
+với khóa là `id(raw)`. Mọi class trong document model giữ tham chiếu trực tiếp
+vào JSON đã parse thay vì sao chép, nên trong cùng một `Document`, một channel
+về mặt logic luôn là cùng một đối tượng dict và khóa đó ổn định.
+
+Giữa các document thì khóa đó **không** ổn định. `id()` chỉ duy nhất giữa các
+đối tượng còn sống cùng lúc, nên khi một `Document` được giải phóng, CPython
+cấp lại đúng các id đó cho dict của document kế tiếp và cache bắt đầu trả về
+channel của document trước. Nó lộ ra thành giá trị sai hoặc một `TypeError`
+nằm sâu trong code hình học, chứ không phải một lỗi rõ ràng. Vì vậy
+`Document.from_raw` gọi `Channel.reset_cache()` trước khi parse. Đã đo: tải cả
+19 tài liệu mẫu trong một process thì hỏng 14 tài liệu nếu không có lời gọi
+đó, và hỏng 0 nếu có. **Nếu bạn thêm một điểm vào khác cũng parse tài liệu,
+hãy giữ lại lời gọi reset.** Một bản port Go dùng con trỏ làm khóa cho cache
+kiểu này gặp đúng rủi ro đó mỗi khi bộ thu gom rác tái dùng một địa chỉ.
+
 Một điều tinh tế về `<defs>`: `<mask>` và `<filter>` không bao giờ tự sơn,
 nhưng một `<image>` trần thì có. Nên các ảnh cọ đã nhuộm sẵn **phải** được bọc
 trong `<defs>`, nếu không mỗi ảnh tự sơn một lần tại `(x, y)` cục bộ của nó

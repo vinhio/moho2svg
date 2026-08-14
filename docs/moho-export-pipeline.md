@@ -1062,6 +1062,24 @@ splits into three lifetimes:
 This is stated in the class docstring and is a real constraint, not a
 suggestion.
 
+There is one more piece of mutable state, and it is **not** on `Exporter`:
+`Channel._cache`, a module-level dict that memoises `Channel.of(raw)` keyed by
+`id(raw)`. Every document-model class holds direct references into the parsed
+JSON instead of copying it, so within one `Document` the same logical channel
+is always the same dict object and the key is stable.
+
+Across documents the key is **not** stable. `id()` is only unique among
+objects that are alive at the same moment, so once a `Document` is released
+CPython hands the same ids to the next document's dicts and the cache starts
+answering with a previous document's channels. That surfaces as wrong values
+or a `TypeError` deep inside geometry code, not as a clear error.
+`Document.from_raw` therefore calls `Channel.reset_cache()` before parsing.
+Measured: loading all 19 sample documents in one process fails on 14 of them
+without that call and on 0 with it. **If you add another entry point that
+parses a document, keep the reset.** A Go port that keys such a cache by
+pointer identity has the same hazard whenever the garbage collector reuses an
+address.
+
 One subtlety about `<defs>`: `<mask>` and `<filter>` never paint on their own,
 but a bare `<image>` does. So the pre-tinted brush images **must** be wrapped
 in `<defs>`, or each one paints itself once at its own local `(x, y)` on top of

@@ -992,6 +992,17 @@ class Channel:
         self.actions = actions
 
     @staticmethod
+    def reset_cache() -> None:
+        """Drop every cached Channel.
+
+        Called by Document.from_raw before a document is parsed, because the
+        cache key (see `of`) is only valid while the raw dicts it was built
+        from are still alive.  Safe to call at any time: the cache is a pure
+        performance aid and refills on demand.
+        """
+        Channel._cache.clear()
+
+    @staticmethod
     def of(raw: Any) -> "Channel":
         """Build (or reuse) a Channel for `raw`.
 
@@ -999,12 +1010,18 @@ class Channel:
         ...) stores its channel fields as direct references into the parsed
         JSON, never copies - so the same logical channel is always the same
         Python dict object across every call, for the life of one Document.
-        Caching by id() is therefore safe (not just "probably fine"): it
-        cannot conflate two different channels, and the cached Channel is
-        immutable. This turns repeated evaluation of the same channel (every
-        curve point's smoothness/weight/offset gets looked at more than once
-        per frame) from rebuilding a small object tree each time into a dict
+        Caching by id() is therefore safe *within* one Document: it cannot
+        conflate two of its channels, and the cached Channel is immutable.
+        This turns repeated evaluation of the same channel (every curve
+        point's smoothness/weight/offset gets looked at more than once per
+        frame) from rebuilding a small object tree each time into a dict
         lookup - purely a performance detail, with no effect on behaviour.
+
+        ACROSS documents it is not safe on its own: id() is only unique among
+        objects alive at the same moment, so a dropped document's ids come
+        back for the next one's dicts.  Document.from_raw calls reset_cache()
+        for exactly that reason - keep that call if you add another entry
+        point that parses a document.
         """
         if isinstance(raw, dict) and "when" in raw and "val" in raw:
             key = id(raw)
@@ -1689,6 +1706,16 @@ class Document:
 
     @classmethod
     def from_raw(cls, raw: dict) -> "Document":
+        # Channel._cache is keyed by id() of the raw channel dict, which is
+        # only unique among dicts that are alive at the same time.  Once a
+        # Document is dropped, CPython reuses those ids for the next parsed
+        # document, so a process that loads more than one document in turn
+        # (a batch export, a comparison harness) would read a previous
+        # document's cached Channel for an unrelated field - producing wrong
+        # values or a TypeError, not an obvious failure.  Dropping the cache
+        # at every load makes that impossible; entries for a document that is
+        # still alive simply get rebuilt on next use.
+        Channel.reset_cache()
         styles = StyleTable.build(raw.get("styles") or [])
         layers = [Layer._build(item, styles) for item in raw["layers"]]
         pd = raw["project_data"]
