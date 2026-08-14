@@ -382,7 +382,7 @@ does not attempt to express:
   possible output space (see § 3's permissive-enum design decision above).
 
 For all of this, use `docs/moho-project-file-format.md` (structure +
-semantics + evidence) and `docs/export-pipeline.md` (how `moho2svg.py`
+semantics + evidence) and `docs/moho-export-pipeline.md` (how `moho2svg.py`
 actually consumes each field, in what order). This schema is the fast,
 automatable check that a file's *shape* matches expectations — a first line
 of defense, not a substitute for reading the prose.

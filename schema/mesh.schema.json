@@ -133,7 +133,7 @@
         "inherited_style2_uuid": { "type": "string" },
         "inherited_style2_name": { "type": "string" },
         "effect_scale": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient scale (fill_style placement), default 1.0." },
-        "effect_rotation": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient rotation in radians, default 0.0. Only affects a LINEAR gradient - a radial gradient ignores rotation entirely (see docs/export-pipeline.md §7.4)." },
+        "effect_rotation": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient rotation in radians, default 0.0. Only affects a LINEAR gradient - a radial gradient ignores rotation entirely (see docs/moho-export-pipeline.md §7.4)." },
         "effect_offset": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "A gradient centre offset. The formula supports it but nothing observed supplies a non-zero value." },
         "fill_allowed": { "type": "boolean", "description": "Presumably \"this shape may be filled at all\", distinct from has_fill. Interaction with has_fill is undecoded." },
         "combo_blend_anim": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Presumably animates a soft boolean-combination blend. Observed only in newer-generation documents, always 0.0." },

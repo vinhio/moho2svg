@@ -6,6 +6,15 @@ __pycache__/
 # Moho project files
 moho/
 
+# Lottie - sample documents and the split schema tree stay local. Only the
+# bundled schema is tracked: docs/lottie-and-thorvg.md is written against it,
+# and it is the form to use for validation (see that document's section 2.4).
+# Note: `lottie/*`, not `lottie/`, so the negation below can take effect -
+# git does not descend into an excluded directory.
+lottie/*
+!lottie/lottie.schema.json
+!lottie/schema
+
 # Symlink to the Moho app's installed brush textures (make styles.brushes)
 styles/Brushes
 svg/png/

@@ -19,7 +19,7 @@ match real Moho output.
 This document describes **what is in the file**. For **how these fields are
 consumed at export time** — the processing order, the relationships between
 layers, transforms, bones, masking and styles, and which stage reads which
-field — see `docs/export-pipeline.md`.
+field — see `docs/moho-export-pipeline.md`.
 
 ---
 
@@ -937,7 +937,7 @@ own size) instead of a plain uniform-width line.
 
 Moho's own per-dab randomisation is not recoverable from the saved document,
 so this tool seeds its jitter deterministically per shape instead. See the
-module docstring's BRUSH STROKES section, and `docs/exporting-svg.md` § 7 for
+module docstring's BRUSH STROKES section, and `docs/moho-exporting-svg.md` § 7 for
 the three render paths and their performance.
 
 ### 8.6 Resolving a `brush_name` to a file

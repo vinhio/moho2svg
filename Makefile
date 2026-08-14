@@ -22,7 +22,7 @@ gen-med:
 
 # Fast preview export: brush stamping disabled entirely (--brush-dir ""), so
 # a heavily brush-styled document (e.g. SketchBone) stays quick to open in a
-# browser/SVG viewer - see docs/exporting-svg.md § Brush textures. Output
+# browser/SVG viewer - see docs/moho-exporting-svg.md § Brush textures. Output
 # goes to svg-fast/, NOT svg/, so it never clobbers the tracked reference
 # SVGs (which are meant to include brush texture).
 gen-fast:
@@ -38,7 +38,7 @@ gen-fast:
 # of one <use>/dab per stamp - biggest size/speed win of all the brush
 # options, at the cost of that stroke no longer being vector (not rescalable/
 # editable as a path afterwards), and a visible softening of fine/wispy
-# textures under heavy dab overlap (see docs/exporting-svg.md § 7 for the
+# textures under heavy dab overlap (see docs/moho-exporting-svg.md § 7 for the
 # "golge" example). Requires Pillow. Output goes to svg-raster/, NOT svg/.
 gen-raster:
 	mkdir -p svg-raster

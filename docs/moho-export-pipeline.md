@@ -750,7 +750,7 @@ Chosen inside `_flush()`, per shape:
 | Pillow **not** available | `_brush_mask_refs` | `<mask>` + `<filter>` per dab — the slow fallback |
 
 The fallback is slow to *view*, not merely to write: `<mask>` and `<filter>`
-each force an offscreen buffer per element. See `docs/exporting-svg.md` § 7 for
+each force an offscreen buffer per element. See `docs/moho-exporting-svg.md` § 7 for
 the measured numbers.
 
 ### 7.6 `PatchLayer` suppresses its outline, not just its transform

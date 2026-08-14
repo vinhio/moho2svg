@@ -1,0 +1,23 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "integer",
+    "title": "Gradient Type",
+    "description": "Whether a Gradient is a linear, radial, or conic.",
+    "oneOf": [
+        {
+            "title": "Linear",
+            "description": "Colors transition in a single linear direction.",
+            "const": 1
+        },
+        {
+            "title": "Radial",
+            "description": "Colors transition outward from a center point.",
+            "const": 2
+        },
+        {
+            "title": "Conic",
+            "description": "Colors radiate clockwise around a center point.",
+            "const": 3
+        }
+    ]
+}

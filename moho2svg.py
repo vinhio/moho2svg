@@ -409,7 +409,7 @@ knob existed); passing `--brush-dir ""` (or `make gen-fast`) disables brush
 stamping entirely, which is nearly free for any viewer on any of the three
 render paths since it falls back to the exact same plain-stroke/
 TaperedStrokeOutliner path used when no brush asset resolves at all.  See
-docs/exporting-svg.md § 7 for the full write-up.
+docs/moho-exporting-svg.md § 7 for the full write-up.
 
 --------------------------------------------------------------------------------
 BOOLEAN SHAPE COMBINATIONS (combo_mode)
@@ -2892,13 +2892,13 @@ class Exporter:
         Confirmed to measurably reduce (not eliminate) the fine-texture
         softening noted in the module docstring's BRUSH STROKES section for
         a very fine, sparse, high-contrast stroke like "golge" - see
-        docs/exporting-svg.md § 7.2 for a visual comparison and the file-size
+        docs/moho-exporting-svg.md § 7.2 for a visual comparison and the file-size
         cost (roughly proportional to supersample^2).
 
         This is the most aggressive of this tool's brush-performance options:
         it collapses however many dabs a stroke has into exactly one image
         per shape, at the cost of that stroke no longer being editable/
-        rescalable as vector geometry - see docs/exporting-svg.md § 7 for the
+        rescalable as vector geometry - see docs/moho-exporting-svg.md § 7 for the
         trade-off against --brush-spacing-mul and the default per-dab
         <use> path.
         """
@@ -3618,7 +3618,7 @@ def main() -> None:
                              "brush folder; see the module docstring's BRUSH STROKES section; "
                              "a style whose brush resolves to nothing here falls back to a "
                              "plain stroke. Pass \"\" to disable brush stamping entirely "
-                             "(fast/preview export - see docs/exporting-svg.md)")
+                             "(fast/preview export - see docs/moho-exporting-svg.md)")
     parser.add_argument("--brush-spacing-mul", type=float, default=1.0, metavar="N",
                         help="multiply brush dab spacing by N (default 1.0 = exact document "
                              "value). A document whose linework is heavily brush-styled can "
@@ -3626,7 +3626,7 @@ def main() -> None:
                              "SVG viewer to render (not this tool - export itself stays fast); "
                              "raise this (e.g. 3-4) to thin out dab density and speed up "
                              "viewing, at the cost of a coarser-looking texture - see "
-                             "docs/exporting-svg.md")
+                             "docs/moho-exporting-svg.md")
     parser.add_argument("--brush-raster", action="store_true",
                         help="composite each brush-styled shape's entire stroke into ONE "
                              "raster <image> instead of one <use>/dab - the most aggressive "
@@ -3634,7 +3634,7 @@ def main() -> None:
                              "vector (not rescalable/editable as a path). Requires Pillow; "
                              "falls back to the normal per-dab path (with a warning) if Pillow "
                              "is unavailable, or per-shape (silently) if that shape's stroke "
-                             "would need an unreasonably large canvas - see docs/exporting-svg.md")
+                             "would need an unreasonably large canvas - see docs/moho-exporting-svg.md")
     parser.add_argument("--brush-raster-supersample", type=float, default=2.0, metavar="N",
                         help="with --brush-raster, composite at N times the shape's own pixel "
                              "size (default 2.0) before declaring it at the normal 1x size in "

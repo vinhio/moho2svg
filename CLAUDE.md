@@ -13,6 +13,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - @.claude/ai/coding.md — Coding workflow: clarify → plan → implement → verify → report.
 - @.claude/ai/communication.md — Communication style: tone, response format, and confidence tagging.
 
+**Language Rule narrowing (closed list)** — the English-only rule in
+`.claude/ai/AGENTS.md` is narrowed for exactly these files, and no others:
+
+- `docs/localization/**` — Vietnamese translations of the developer docs
+  under `docs/`, mirroring the same filenames and structure. Their content is
+  intentionally Vietnamese; every other file in this repository stays
+  English.
+
 
 ## What this is
 
@@ -32,11 +40,11 @@ note below.
 Repository layout:
 
 - `moho2svg.py` — the tool itself.
-- `docs/` — usage guide (`exporting-svg.md`), file-format reference
+- `docs/` — usage guide (`moho-exporting-svg.md`), file-format reference
   (`moho-project-file-format.md`), the animation/transform model
   (`moho-animation-and-transform.md`), the rigging and deformation reference
   (`moho-rigging-and-deformation.md` — bones, Smart Warp, mesh-level
-  constraints), and the export pipeline (`export-pipeline.md`), all for
+  constraints), and the export pipeline (`moho-export-pipeline.md`), all for
   humans; read these before the module docstring if you want a shorter
   orientation first.
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
@@ -47,7 +55,7 @@ Repository layout:
   (`make gen-fast`) — see the performance note below.
 - `styles/Brushes/` — gitignored symlink to Moho's own installed brush
   textures (`make styles.brushes` creates it), used to approximate textured
-  brush line styles — see `docs/exporting-svg.md` § Brush textures.
+  brush line styles — see `docs/moho-exporting-svg.md` § Brush textures.
 
 **A heavily brush-styled document can be very slow (or fail) to open in a
 browser/SVG viewer if Pillow is not installed** — not because of file size,
@@ -59,7 +67,7 @@ render (each forces an offscreen-buffer render per element). Confirmed on
 coloured `<image>`, baked once per (brush, frame, colour, alpha) combo at
 export time via `Exporter._bake_tinted_frame` - no per-dab mask/filter cost
 at all). Confirmed 3x-6.5x faster across every brush-heavy rig tested; see
-`docs/exporting-svg.md` § 7 for the full table, including the one caveat
+`docs/moho-exporting-svg.md` § 7 for the full table, including the one caveat
 (the Pillow path can produce a LARGER file - not just a faster one - for a
 document with many distinct colours sourced from a large native texture,
 e.g. AddBone/WhatIsBone: more MB, still much faster to render).
@@ -135,8 +143,8 @@ coords at canvas scale), `--flat` (with `--combined`, skip nested `<g>` per
 layer), `--include-hidden`, `--mask-container NAME` (force a named layer to act
 as a mask container when `group_mask` doesn't already cover it), `--stroke-mul`
 (default 2.0; see STROKE WIDTH below), `--brush-dir` (default `styles/Brushes`;
-see BRUSH STROKES below and `docs/exporting-svg.md`). Full flag reference:
-`docs/exporting-svg.md`.
+see BRUSH STROKES below and `docs/moho-exporting-svg.md`). Full flag reference:
+`docs/moho-exporting-svg.md`.
 
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and
@@ -172,7 +180,7 @@ approximations, and the `PatchLayer` heuristic below).
 
 For the full data flow, the decision order inside the tree walk, the two
 separate transform traversals, and a field-to-stage cross-reference table, see
-`docs/export-pipeline.md`. The summary below is the short version.
+`docs/moho-export-pipeline.md`. The summary below is the short version.
 
 1. **`load_document`** reads the JSON file into `Document.from_raw`.
 2. **Document model** (`Document`, `Layer`, `Mesh`, `Shape`, `Curve`,

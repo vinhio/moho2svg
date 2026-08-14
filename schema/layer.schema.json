@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://moho2svg.local/schema/layer.schema.json",
   "title": "Moho layer tree",
-  "description": "See docs/moho-project-file-format.md §6 and docs/export-pipeline.md §2-3 for the full field-by-field evidence and the render-time decision order. Draw order (back to front) is simply the order layers appear in a `layers` array - nothing in the document is a z-order index.",
+  "description": "See docs/moho-project-file-format.md §6 and docs/moho-export-pipeline.md §2-3 for the full field-by-field evidence and the render-time decision order. Draw order (back to front) is simply the order layers appear in a `layers` array - nothing in the document is a z-order index.",
   "$defs": {
 
     "FileRef": {

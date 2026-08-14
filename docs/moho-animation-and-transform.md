@@ -15,8 +15,8 @@ Companion documents:
 - `moho-rigging-and-deformation.md` — the bone system in depth (constraints,
   control bones, IK, dynamics), Smart Warp, and the mesh-level fields that
   constrain deformation.
-- `export-pipeline.md` — how `moho2svg.py` walks a document and emits SVG.
-- `exporting-svg.md` — command-line usage.
+- `moho-export-pipeline.md` — how `moho2svg.py` walks a document and emits SVG.
+- `moho-exporting-svg.md` — command-line usage.
 
 This document does not repeat those. It focuses only on time and transforms,
 and it adds decoding work that the other documents mark as unknown.
@@ -395,7 +395,7 @@ pixel space
 So a mesh nested several groups deep inside a `BoneLayer` is deformed *after*
 the local transforms between it and the bone layer, and *before* the bone
 layer's own transform. `build_deform_chain` in `moho2svg.py` produces exactly
-this ordered list of steps; `export-pipeline.md` § 4.2 has the implementation
+this ordered list of steps; `moho-export-pipeline.md` § 4.2 has the implementation
 detail.
 
 One deliberate inconsistency is worth knowing about: **stroke width uses a

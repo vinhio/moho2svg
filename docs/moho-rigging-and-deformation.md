@@ -22,7 +22,7 @@ Companion documents:
   long version.
 - [`moho-animation-and-transform.md`](moho-animation-and-transform.md) — how
   channels store motion, and how the transform stack composes.
-- [`export-pipeline.md`](export-pipeline.md) — how `moho2svg.py` walks a
+- [`moho-export-pipeline.md`](moho-export-pipeline.md) — how `moho2svg.py` walks a
   document and emits SVG.
 
 This document does not repeat those. It goes deeper on the rig itself, and it

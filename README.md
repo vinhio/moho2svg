@@ -32,7 +32,7 @@ the full reasoning and evidence behind every formula and constant, and
 - **Pillow, optional but recommended** (`pip install Pillow`) — without it,
   a document with textured brush styles still exports correctly, but the
   result can be very slow (or fail) to open in a browser/SVG viewer. See
-  [`docs/exporting-svg.md` § 7](docs/exporting-svg.md#7-brush-textures).
+  [`docs/moho-exporting-svg.md` § 7](docs/moho-exporting-svg.md#7-brush-textures).
 
 ## Quick start
 
@@ -50,14 +50,14 @@ python3 moho2svg.py Project.mohoproj --all --outdir svg/
 python3 moho2svg.py Project.mohoproj --combined Character.svg
 ```
 
-See [`docs/exporting-svg.md`](docs/exporting-svg.md) for the full flag
+See [`docs/moho-exporting-svg.md`](docs/moho-exporting-svg.md) for the full flag
 reference, typical workflows, and the brush-texture render options
 (`--brush-dir`, `--brush-spacing-mul`, `--brush-raster`,
 `--brush-raster-supersample`).
 
 ## Documentation
 
-- [`docs/exporting-svg.md`](docs/exporting-svg.md) — usage guide: every CLI
+- [`docs/moho-exporting-svg.md`](docs/moho-exporting-svg.md) — usage guide: every CLI
   flag, typical workflows, masking quirks, and the brush-texture
   performance/quality trade-offs.
 - [`docs/moho-project-file-format.md`](docs/moho-project-file-format.md) —
@@ -82,7 +82,7 @@ reference, typical workflows, and the brush-texture render options
 - `Makefile` — `make gen` regenerates the tracked reference SVGs in `svg/`
   from the project files in `moho/`; `make gen-fast`/`gen-med`/`gen-raster`
   produce alternative brush-performance previews (see
-  [`docs/exporting-svg.md` § 7](docs/exporting-svg.md#7-brush-textures));
+  [`docs/moho-exporting-svg.md` § 7](docs/moho-exporting-svg.md#7-brush-textures));
   `make styles.brushes` symlinks `styles/Brushes/` to Moho's own installed
   brush textures.
 - `moho/`, `styles/Brushes/`, `svg-fast/`, `svg-med/`, `svg-raster/`,
