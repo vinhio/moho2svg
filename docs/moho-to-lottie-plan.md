@@ -35,7 +35,7 @@ which step it stopped at, so a reader knows where to resume.
 | 3 | A Lottie file with one static frame | **DONE** | `4189275` |
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
 | 5 | Gradients | **DONE** | `e1aa6d1` |
-| 6 | Masking | **DONE** | (pending commit) |
+| 6 | Masking | **DONE** | `62d497a` |
 | 7 | Switch layers | TODO | — |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
 
