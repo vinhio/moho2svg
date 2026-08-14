@@ -2015,6 +2015,84 @@ def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
     return " ".join(d)
 
 
+def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
+                       to_px: Callable[[Vec2], Vec2],
+                       visible_only: bool = False) -> list[dict]:
+    """Build one shape's outline as Lottie bezier dicts - the Lottie
+    counterpart of build_path_d().
+
+    Returns ONE dict per subpath, because Lottie's "sh" shape element holds
+    exactly one bezier: a shape whose outline falls into two disconnected
+    runs becomes two "sh" elements in the same group.  build_path_d() writes
+    the same break as a second "M" inside one `d` string.
+
+    Each dict has the shape Lottie expects for a bezier value:
+    {"v": [[x, y], ...], "i": [[dx, dy], ...], "o": [[dx, dy], ...], "c": bool}.
+    Lottie's `i`/`o` are the in/out tangents *relative to their own vertex*,
+    unlike build_path_d()'s absolute SVG control points - so a segment
+    leaving vertex k contributes `o[k] = c1 - p0`, and the vertex it arrives
+    at gets `i[k+1] = c2 - p1`.  A vertex shared by two segments therefore
+    takes its `o` from the outgoing segment and its `i` from the incoming
+    one.
+
+    `visible_only` mirrors build_path_d(): it skips any segment currently
+    hidden (CurvePoint.segments_on / SegmentGeometry.on) and starts a fresh
+    subpath after each such gap.
+
+    Coordinates are rounded to 3 decimals, matching build_path_d()'s
+    f"{x:.3f}", so the two builders describe the same curve to the same
+    precision.
+    """
+    traced = PathTracer.trace(geometries, edges)
+    out: list[dict] = []
+    current: Optional[dict] = None
+    first: Optional[Vec2] = None
+    last: Optional[Vec2] = None
+
+    def close_current() -> None:
+        """Finish the subpath being built, marking it closed when it returns
+        to its own start.
+
+        A closed Lottie bezier does not repeat the first vertex, so the
+        duplicate endpoint is dropped - but its incoming tangent is the
+        wrap-around segment's control point and must be carried onto the
+        surviving first vertex before the drop, or the last curve of a
+        closed shape flattens into a straight line.
+        """
+        nonlocal current
+        if current is None:
+            return
+        if len(current["v"]) > 1 and first is not None and last is not None \
+                and last.distance_to(first) < 1e-9:
+            current["c"] = True
+            current["i"][0] = current["i"][-1]     # carry the wrap-around tangent
+            current["v"].pop()
+            current["i"].pop()
+            current["o"].pop()
+        out.append(current)
+        current = None
+
+    for seg in traced:
+        if visible_only and not geometries[seg.curve].segments[seg.segment].on:
+            close_current()
+            last = None
+            continue
+        if current is None or last is None or last.distance_to(seg.p0) > 1e-9:
+            close_current()
+            m = to_px(seg.p0)
+            current = {"v": [[round(m.x, 3), round(m.y, 3)]],
+                       "i": [[0.0, 0.0]], "o": [[0.0, 0.0]], "c": False}
+            first = seg.p0
+        p0, c1, c2, p1 = to_px(seg.p0), to_px(seg.c1), to_px(seg.c2), to_px(seg.p1)
+        current["o"][-1] = [round(c1.x - p0.x, 3), round(c1.y - p0.y, 3)]
+        current["v"].append([round(p1.x, 3), round(p1.y, 3)])
+        current["i"].append([round(c2.x - p1.x, 3), round(c2.y - p1.y, 3)])
+        current["o"].append([0.0, 0.0])
+        last = seg.p1
+    close_current()
+    return out
+
+
 class TaperedStrokeOutliner:
     """Builds the *filled outline* of a stroke whose width varies along its
     length, since SVG's own <path stroke-width> cannot - see the module

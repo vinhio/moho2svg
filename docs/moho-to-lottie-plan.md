@@ -30,8 +30,8 @@ which step it stopped at, so a reader knows where to resume.
 | P3 | Fix: reset the `Channel` cache when a document is parsed | **DONE** | `5c4b8c3` |
 | P4 | Design document | **DONE** | `87abe40` |
 | P5 | This plan | **DONE** | `496f35c` |
-| 1 | A Bezier path builder beside the SVG one | TODO | — |
-| 2 | One shared tree walk | TODO | — |
+| 1 | A Bezier path builder beside the SVG one | **DONE** | (pending commit) |
+| 2 | One shared tree walk | IN PROGRESS | — |
 | 3 | A Lottie file with one static frame | TODO | — |
 | 4 | Path keyframes across the frame range | TODO | — |
 | 5 | Gradients | TODO | — |
@@ -78,7 +78,7 @@ someone loads the output in lottie-web:
 
 ## Task 1: A Bezier path builder beside the SVG one
 
-**Status:** TODO
+**Status:** DONE — `check_bezier_roundtrip.py` passes on all 19 sample documents; `make gen` leaves the five reference SVGs byte-identical.
 
 **Files:**
 - Modify: `moho2svg.py` — add `build_path_bezier()` directly after `build_path_d()`
@@ -88,7 +88,7 @@ someone loads the output in lottie-web:
 - Consumes: `PathTracer.trace(geometries, edges) -> list[TracedSegment]`, where `TracedSegment` has `p0, c1, c2, p1, is_new_subpath, reversed, curve, segment`; `Vec2` has `.x`, `.y`, `.distance_to(other)`.
 - Produces: `build_path_bezier(geometries, edges, to_px, visible_only=False) -> list[dict]` — **one dict per subpath**, each `{"v": [[x, y], ...], "i": [[dx, dy], ...], "o": [[dx, dy], ...], "c": bool}`. A shape with two disconnected outlines returns two dicts, and the writer emits one Lottie `sh` element per dict.
 
-- [ ] **Step 1: Write the failing check script**
+- [x] **Step 1: Write the failing check script**
 
 Create `tools/check_bezier_roundtrip.py`:
 
@@ -209,12 +209,12 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `python3 tools/check_bezier_roundtrip.py moho/Bandit.mohoproj`
 Expected: FAIL with `ImportError: cannot import name 'build_path_bezier' from 'moho2svg'`
 
-- [ ] **Step 3: Implement `build_path_bezier()`**
+- [x] **Step 3: Implement `build_path_bezier()`**
 
 Add to `moho2svg.py` directly after `build_path_d()`:
 
@@ -295,7 +295,7 @@ in the whole function. Dropping the repeated final vertex without it makes the
 last curve of every closed shape render as a straight line — a defect that is
 easy to miss on a rounded shape and obvious on a circle.
 
-- [ ] **Step 4: Run the check to verify it passes**
+- [x] **Step 4: Run the check to verify it passes**
 
 Run: `python3 tools/check_bezier_roundtrip.py`
 Expected: `OK: both path builders agree on every shape in 19 document(s)`
@@ -304,12 +304,12 @@ If a closed shape fails on its first or last segment, the wrap-around tangent
 carry in `close_current` is wrong — that is the only place the two builders
 can legitimately disagree.
 
-- [ ] **Step 5: Verify the SVG output did not move**
+- [x] **Step 5: Verify the SVG output did not move**
 
 Run: `make gen && git diff --stat -- svg/`
 Expected: empty output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add moho2svg.py tools/check_bezier_roundtrip.py
