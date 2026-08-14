@@ -34,7 +34,7 @@ which step it stopped at, so a reader knows where to resume.
 | 2 | One shared tree walk | **DONE** | `a81a6cb` |
 | 3 | A Lottie file with one static frame | **DONE** | `4189275` |
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
-| 5 | Gradients | **DONE** | (pending commit) |
+| 5 | Gradients | **DONE** | `e1aa6d1` |
 | 6 | Masking | TODO | — |
 | 7 | Switch layers | TODO | — |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
