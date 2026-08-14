@@ -32,7 +32,7 @@ which step it stopped at, so a reader knows where to resume.
 | P5 | This plan | **DONE** | `496f35c` |
 | 1 | A Bezier path builder beside the SVG one | **DONE** | `a91df9f` |
 | 2 | One shared tree walk | **DONE** | `a81a6cb` |
-| 3 | A Lottie file with one static frame | **DONE** | (pending commit) |
+| 3 | A Lottie file with one static frame | **DONE** | `4189275` |
 | 4 | Path keyframes across the frame range | TODO | — |
 | 5 | Gradients | TODO | — |
 | 6 | Masking | TODO | — |
