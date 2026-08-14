@@ -267,10 +267,44 @@ relies on the default (`t = 0`) curve, whose exact shape is **not decoded**.
 
 ### 3.6 What `moho2svg.py` does instead
 
-`Channel.eval_raw` ignores `interp` completely and interpolates **linearly**
-between the two bracketing keyframes, clamped at both ends:
+**Smart Bone poses are applied as an OFFSET, not a replacement** (added in
+`Channel.eval` / `_pose_offset`). A pose contributes
+`pose(action_frame) - pose(first_action_keyframe)` on top of the channel's own
+main-timeline value. This only shows on a channel animated on the main
+timeline *and* registered in an action, and `SketchBone.animeproj` has exactly
+that: its `govde-don` dial stores a flat `[160.7, 160.7]` pose on bone `B16`,
+equal to that bone's rest angle, while `B16` itself swings 126.3 -> 222.4
+degrees. Replacing froze the whole `kol-sag-ust` arm at 160.7 degrees for the
+entire animation; offsetting makes a flat pose the no-op it clearly is.
+Verified against Moho's own arms-only render (`moho/SketchBone/hand/`): arm
+mask IoU over 120 frames 11.5% -> 16.1%, whole-frame pixel difference -6.4%.
+Frame 0 is unchanged (dials sit at rest, so the offset is zero), so the
+tracked reference SVGs stay byte-identical. Only numeric and `{x,y,z}` vector
+channels are offset; colour/bool/string poses still replace.
 
-- numbers → linear interpolation;
+`Channel.eval_raw` ignores `interp` completely and interpolates with a
+**monotone cubic** between the two bracketing keyframes, clamped at both ends.
+(An earlier revision interpolated **linearly**; that is no longer true — see
+`Channel._segment`.) Moho's own easing curve is not recoverable from the file
+(`interp.t` is 0 on 602,784 of 604,139 entries with an undecoded enum), so the
+shape was inferred by scoring rendered output against Moho's own arms-only
+render of `SketchBone.animeproj` (`moho/SketchBone/hand/`, 120 frames):
+
+| interpolation | all frames IoU | frames 44–54 IoU |
+|---|---|---|
+| linear | 84.55% | 60.88% |
+| smoothstep ease | 79.50% | 65.67% |
+| Catmull-Rom | 82.20% | 78.59% |
+| **monotone cubic** | **85.76%** | **81.84%** |
+
+Frames 44–54 are the discriminating window: they lie *between* that rig's arm
+keyframes (43, 49, 55), where linear scored ~89% **at** each keyframe but
+collapsed to 45–65% between them — right poses, wrong curve. Over the whole
+animation this cut the full-frame pixel difference by **43.3%**. It remains an
+inferred curve, not a decoded one. Frame 0 is untouched, so the tracked
+reference SVGs stay byte-identical.
+
+- numbers → monotone-cubic interpolation;
 - `{x,y}`, `{x,y,z}`, `{r,g,b,a}` → linear per component;
 - strings and booleans → snap to the left keyframe (no interpolation), which is
   the only correct choice for a switch-layer name or a visibility flag.

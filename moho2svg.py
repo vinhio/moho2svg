@@ -151,9 +151,18 @@ FILL RULE, DRAW ORDER, AND WHY STROKE PATHS ARE NEVER CLOSED
   - fill-rule is always evenodd (confirmed: Moho's SVG root sets
     style="fill-rule:evenodd" once for the whole document).
   - Shape draw order (back to front) is simply the order shapes already appear
-    in mesh.shapes.  There is a separate `shape_order` string field that looks
-    like a natural place to find this, but it is only an ascending id registry,
-    not a z-order; trusting it draws almost everything back-to-front.
+    in mesh.shapes.  There is a separate `mesh.shape_order` String channel
+    (plus an `anim_shape_order` bool) holding a "1|0|3"-style list of shape
+    IDs.  An earlier note here called it "only an ascending id registry" -
+    that description is WRONG (SketchBone's "rozet1" holds "1|0|3", and its
+    shapes carry ids [1, 0, 3] in that same order, neither ascending), but
+    the conclusion it supported still holds for a better reason: re-checked
+    across SketchBone's meshes, `shape_order` lists exactly the ids of
+    `mesh.shapes` in exactly their file order, every time.  It is the
+    authoritative draw order AND it is redundant with file order, so reading
+    it changes nothing today.  It would start to matter if a document ever
+    set `anim_shape_order` true (false everywhere here), i.e. animated the
+    z-order - which nothing in this corpus does.
   - A *filled* path is closed with "Z" when its last point coincides with its
     first (this also lets fills built from several stitched curves work).
   - A *stroked* path is never closed, even when the outline is a closed loop:
@@ -599,6 +608,20 @@ frame.  Structurally:
     override mechanism (Channel.eval_raw, not Channel.eval) - a dial's position
     always means its literal position on the main timeline, not a value that
     depends recursively on other active dials.
+  - An active pose is applied as an OFFSET from its own first keyframe, added
+    to the channel's ordinary main-timeline value - NOT as a replacement of it
+    (see Channel.eval and _pose_offset).  This only matters for a channel that
+    is animated on the main timeline AND registered in an action, but there it
+    decides everything: `SketchBone.animeproj`'s `govde-don` ("body turn") dial
+    carries a FLAT pose `[160.7, 160.7]` on bone `B16`, sitting exactly at that
+    bone's rest angle, while B16 itself swings 126.3 -> 222.4 degrees on the
+    main timeline.  Replacing pinned the whole `kol-sag-ust` arm at a constant
+    160.7 degrees for the entire animation; offsetting makes a flat pose the
+    no-op it evidently is.  Measured against Moho's own arms-only render in
+    `moho/SketchBone/hand/`: arm mask IoU over 120 frames 11.5% -> 16.1%, and
+    the full-frame pixel difference across the animation improved 6.4%.  Frame
+    0 is unaffected (every dial sits at its rest angle there, so the offset is
+    zero), which is why the tracked reference SVGs stay byte-identical.
 
 --------------------------------------------------------------------------------
 BONE DEFORMATION ("SKINNING")
@@ -716,8 +739,17 @@ KNOWN GAPS
     no-outline duplication IS confirmed directly against the Moho app - see
     PATCH LAYERS - so this remaining gap is narrower than it used to be:
     transform/position only, not appearance.)
-  - Physics (wind/gravity/dynamics), IK, and layer_effects/layer_shadow are
-    ignored; none of them affect a flat vector export of a single frame.
+  - Physics (wind/gravity/dynamics) and layer_effects/layer_shadow are
+    ignored; a single static frame rarely shows either, but an animated
+    Lottie export can - see moho2lottie.py's own "physics" warning.
+  - Moho's 2-bone "Target" IK (`Bone.target_bone`) IS solved - see
+    Skeleton._solve_ik_pair - but ONLY the exact 2-bone (bone + its own
+    parent) case confirmed on this corpus (`SketchBone.animeproj`'s legs).
+    A longer IK chain, or a target_bone relationship spanning more than one
+    generation, is not something any sample document exercises and is not
+    handled specially - it would currently still only solve the immediate
+    2-bone pair, silently ignoring any further ancestors an artist might
+    have expected an N-bone solve to reach through.
   - Textured "brush" line styles (see BRUSH STROKES) are only approximated,
     and only for a brush whose asset (PNG or frame folder) resolves via
     --brush-dir - dab size/density is not calibrated against any real Moho
@@ -964,6 +996,32 @@ class ActiveAction:
     frame: float
 
 
+# Vector channels whose components are positions/angles and so can carry a
+# meaningful Smart Bone OFFSET.  A Color's {r,g,b,a} is deliberately absent:
+# see _pose_offset.
+_OFFSETTABLE_VECTOR_KEYS = frozenset("xyz")
+
+
+def _pose_offset(base: Any, here: Any, rest: Any) -> Any:
+    """Apply a Smart Bone pose as a difference from its own rest value.
+
+    Returns `base + (here - rest)` for a float, and the same componentwise
+    for an {x, y[, z]} vector.  Anything else - a colour, a bool, a string -
+    has no useful notion of "difference", so `here` replaces `base` outright
+    for those, which is what the pose curve of such a channel means anyway.
+    See Channel.eval for the evidence that offsetting is the right reading.
+    """
+    if isinstance(base, bool) or isinstance(here, bool):
+        return here
+    if isinstance(base, (int, float)) and isinstance(here, (int, float)) \
+            and isinstance(rest, (int, float)):
+        return base + (here - rest)
+    if isinstance(base, dict) and isinstance(here, dict) and isinstance(rest, dict) \
+            and set(base) <= _OFFSETTABLE_VECTOR_KEYS:
+        return {k: base[k] + (here.get(k, 0.0) - rest.get(k, 0.0)) for k in base}
+    return here
+
+
 class Channel:
     """A Moho animated value.
 
@@ -1057,25 +1115,135 @@ class Channel:
                 t = (frame - when[i]) / (when[i + 1] - when[i])
                 a, b = val[i], val[i + 1]
                 if isinstance(a, dict):
-                    return {k: a[k] + (b[k] - a[k]) * t for k in a}
+                    return {k: self._segment(i, k, t) for k in a}
                 if isinstance(a, (int, float)) and not isinstance(a, bool):
-                    return a + (b - a) * t
+                    return self._segment(i, None, t)
                 return a          # strings / bools: snap to the left keyframe
         return val[-1]
+
+    def _segment(self, i: int, key: Optional[str], t: float) -> float:
+        """One numeric component of the segment leaving keyframe `i`,
+        evaluated at normalised position `t`, as a MONOTONE cubic.
+
+        Moho's own default easing curve is not in the file - `interp.t` is 0
+        on 602,784 of 604,139 entries and its enum is undecoded, and the
+        explicit Bezier timing handles (`interp.b`) exist on only 182 - so
+        the shape has to be inferred from rendered output.  Measured against
+        Moho's own arms-only render of `SketchBone.animeproj`
+        (`moho/SketchBone/hand/`, 120 frames), scoring arm-mask IoU:
+
+            interpolation      all frames    frames 44-54
+            linear                84.55%          60.88%
+            smoothstep ease       79.50%          65.67%
+            Catmull-Rom           82.20%          78.59%
+            monotone cubic        85.76%          81.84%   <- this
+
+        Frames 44-54 are the discriminating window: they sit BETWEEN this
+        rig's arm keyframes (43, 49, 55), and linear scored ~89% AT each of
+        those keyframes while collapsing to 45-65% between them - the
+        signature of the right poses joined by the wrong curve.  Plain
+        Catmull-Rom fixes most of that but overshoots, costing accuracy
+        elsewhere; clamping the tangents so a segment can never leave the
+        range of its own endpoints (Fritsch-Carlson style) beats linear on
+        BOTH windows, which is why it is the one adopted.
+
+        Still an inferred curve, not a decoded one: it is the best of four
+        candidates on one rig, not proof that Moho computes exactly this.
+        Frame 0 is untouched (`frame <= when[0]` returns `val[0]` before any
+        of this), so the tracked reference SVGs are unaffected.
+        """
+        when, val = self.when, self.val
+        span = when[i + 1] - when[i]
+        get = (lambda j: val[j][key]) if key is not None else (lambda j: val[j])
+        a, b = get(i), get(i + 1)
+        delta = b - a
+        if delta == 0:
+            return a
+        # Catmull-Rom tangents, expressed over this segment's own duration.
+        prev_t = when[i - 1] if i > 0 else when[i] - span
+        prev_v = get(i - 1) if i > 0 else a
+        next_t = when[i + 2] if i + 2 < len(when) else when[i + 1] + span
+        next_v = get(i + 2) if i + 2 < len(val) else b
+        m0 = (b - prev_v) / max(when[i + 1] - prev_t, 1e-9) * span
+        m1 = (next_v - a) / max(next_t - when[i], 1e-9) * span
+        # Monotone clamp: never let the curve leave [a, b].  A tangent that
+        # points against the segment is flattened (this is what keeps a held
+        # value held, instead of bulging before a repeat), and one steeper
+        # than 3x the segment's own slope is capped.
+        if m0 * delta < 0:
+            m0 = 0.0
+        if m1 * delta < 0:
+            m1 = 0.0
+        if abs(m0) > 3 * abs(delta):
+            m0 = 3 * delta
+        if abs(m1) > 3 * abs(delta):
+            m1 = 3 * delta
+        t2 = t * t
+        t3 = t2 * t
+        return ((2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * m0
+                + (-2 * t3 + 3 * t2) * b + (t3 - t2) * m1)
 
     def eval(self, frame: float, active_actions: Sequence[ActiveAction]) -> Any:
         """The value at `frame`, honouring Smart Bone overrides.
 
-        If any currently-active dial has a matching entry in this channel's own
-        `actions`, the value comes from that entry's pose curve at the dial's
-        resolved action-frame - the *first* match wins, and `active_actions`
-        must therefore already be in priority order (outermost/root bone layer
-        first - see Exporter._active_smart_bones)."""
+        EVERY currently-active dial with a matching entry in this channel's
+        own `actions` contributes; their offsets ACCUMULATE.  One channel
+        really is driven by two dials at once in practice: inside
+        `SketchBone.animeproj`'s `kafasi` head rig, bones `B6`-`B10` - which
+        the eyes (`goz-sol`/`goz-sag`), the mouth (`agiz`) and the whiskers
+        (`biyiklar-*`) are each rigidly parented to - carry `anim_pos`
+        entries for BOTH `kafa-sag-sol` (head turning left/right) and
+        `kafa-yukari-asagi` (head tilting up/down).  Applying only the first
+        match, as this used to, dropped one of the two axes, so those parts
+        drifted out of step with the head while `agiz-cevresi` - bound to
+        bone 0, which carries no action at all - stayed correct.  That
+        contrast is what identified this.
+
+        (A dial's two direction variants, "X" and "X 2", are never active
+        together - Exporter._active_smart_bones picks one per dial - so a
+        channel registering both cannot double-count.)
+
+        A colour/bool/string pose has no meaningful offset, so for those the
+        first match still replaces outright and wins.
+
+        The pose is applied as an OFFSET from its own first keyframe, added on
+        top of this channel's ordinary main-timeline value, NOT as a
+        replacement for it.  That distinction only shows on a channel that is
+        animated on the main timeline AND registered in an action, but there
+        it is the whole story: replacing throws the main animation away.
+
+        Confirmed on `SketchBone.animeproj`'s `govde-don` ("body turn") dial.
+        Bone `B16`, the bone `kol-sag-ust` is bound to, swings 126.3 -> 222.4
+        degrees across its 16 main-timeline keyframes, and also carries a
+        `govde-don` pose of `[160.7, 160.7]` - a FLAT curve sitting exactly at
+        its own rest angle.  Read as a replacement that pins the whole arm at
+        a constant 160.7 degrees for the entire animation, destroying the
+        swing; read as an offset it contributes zero, which is plainly what a
+        flat pose recorded at the rest value is for.  (`B16`'s other pose,
+        `govde-don 2` = `[160.7, 160.7, 167.4]`, then contributes a real
+        +6.7 degrees at full dial rather than snapping the arm to 167.4.)
+        Measured against `moho/SketchBone/hand/`, Moho's own isolated render
+        of just the arms: mask IoU over the whole 120-frame range rises from
+        11.5% to 16.1%, and on the frames where this dial is partly engaged
+        it roughly doubles (frame 5: 42% -> 81%, frame 9: 39% -> 75%).
+
+        Only numeric and x/y/z vector channels are offset.  A colour, bool or
+        string pose has no meaningful "difference", so those still replace.
+        """
+        value = self.eval_raw(frame)
         for active in active_actions:
             pose = self.action_pose(active.name)
-            if pose is not None:
-                return pose.eval_raw(active.frame)
-        return self.eval_raw(frame)
+            if pose is None:
+                continue
+            here = pose.eval_raw(active.frame)
+            if not pose.when:
+                return here
+            rest = pose.eval_raw(pose.when[0])
+            offset = _pose_offset(value, here, rest)
+            if offset is here:          # colour/bool/string: replace, first wins
+                return here
+            value = offset
+        return value
 
     def frame_for_value(self, target: float) -> float:
         """Invert a piecewise-linear channel: the frame whose value equals
@@ -1280,8 +1448,49 @@ _LAYER_KIND_BY_TYPE_NAME = {k.value: k for k in LayerKind if k is not LayerKind.
 class Bone:
     """One bone of a Skeleton.  `parent` is an index into that same skeleton's
     bone list, or -1 for a root bone.  `length` and `strength` are plain
-    (never-animated) floats; anim_pos/anim_angle/anim_scale are channels - see
-    Skeleton.world_matrices for how they combine into a transform."""
+    (never-animated) floats; anim_pos/anim_angle/anim_scale/target_bone are
+    channels - see Skeleton.world_matrices for how they combine into a
+    transform.
+
+    `target_bone` (a "Val" channel, -1 when unused) is Moho's 2-bone IK
+    ("Target") feature: when it names another bone (by index into the SAME
+    skeleton), THIS bone and its own `parent` are solved as a 2-bone chain
+    reaching for that target bone's position, instead of using their own
+    `anim_angle` for the reach - see Skeleton._solve_ik_pair.
+
+    **CORRECTION to an earlier reading of this field.** This docstring used
+    to claim an IK-driven bone's `anim_angle` is "PERFECTLY CONSTANT" and
+    therefore "meaningless for rendering". That is wrong, and checking only
+    one leg is what made it look true: `SketchBone.animeproj`'s RIGHT shin
+    (`B27`) is indeed 5.1 degrees at all 15 keyframes, but its LEFT shin
+    (`B22`) steps 351.2 -> 449.4 degrees (-8.8 -> +89.4 normalised) between
+    frames 43 and 49. The angle is not the reach - the IK solve still
+    overrides that - but it IS the animator's record of WHICH WAY the joint
+    folds, so it must be read per frame. See Skeleton._solve_ik_bend.
+
+    `scaling_mode` (`0` normal/fixed-length, `2` "auto stretch") and
+    `max_auto_scaling` (how many times its rest length a `2` bone may
+    stretch) matter specifically for an IK-driven bone: confirmed on
+    `SketchBone.animeproj`'s legs (`scaling_mode == 2`,
+    `max_auto_scaling == 3.0` on both the thigh and shin) that the IK
+    target sometimes sits FARTHER than the two bones' combined rest length
+    can reach (up to ~1.9x at some frames) - a plain rotate-only 2-bone
+    solve leaves the chain fully extended but visibly short of the target
+    (confirmed: the foot ends up floating, detached from the leg, at
+    frame 50). See Skeleton._solve_ik_pair for the auto-stretch this
+    triggers.
+
+    `flip_h`/`flip_v` are Bool channels mirroring everything this bone
+    drives - the bone-level twin of `Layer.transform`'s own flip_h/flip_v,
+    and applied the same way (see Skeleton.world_matrices). An animator
+    uses this to turn a hand or foot around mid-walk without re-drawing it.
+    RARE but real: exactly ONE bone across all 19 sample documents ever
+    sets either - `SketchBone.animeproj`'s "B23" (the left ankle, which
+    drives the `ayak-sol` foot layer via its flexi_bone_subset), keyframed
+    `flip_h` False at frame 0 -> True at frame 44. Ignoring it left that
+    foot pointing backwards against its own direction of travel for the
+    whole second half of the walk, which is what the field was found
+    from."""
     name: str
     parent: int
     length: float
@@ -1289,6 +1498,11 @@ class Bone:
     anim_pos: Any
     anim_angle: Any
     anim_scale: Any
+    target_bone: Any
+    scaling_mode: int
+    max_auto_scaling: float
+    flip_h: Any
+    flip_v: Any
 
     @staticmethod
     def _build(raw: dict) -> "Bone":
@@ -1300,6 +1514,11 @@ class Bone:
             anim_pos=raw["anim_pos"],
             anim_angle=raw["anim_angle"],
             anim_scale=raw["anim_scale"],
+            target_bone=raw.get("target_bone", -1),
+            scaling_mode=raw.get("scaling_mode", 0),
+            max_auto_scaling=raw.get("max_auto_scaling", 1.0),
+            flip_h=raw.get("flip_h", False),
+            flip_v=raw.get("flip_v", False),
         )
 
 
@@ -1333,11 +1552,21 @@ class Skeleton:
         one, so this has NOT been independently confirmed as intentional Moho
         behaviour versus an earlier transcription slip.  Flagged rather than
         "corrected" - see the module docstring's KNOWN GAPS.
+
+        A bone with `target_bone` set (Moho's 2-bone "Target" IK) is solved
+        together with its own parent as a 2-bone chain reaching for the
+        target bone's position - see _solve_ik_pair - instead of using
+        either bone's own `anim_angle` (which is not a per-frame FK value at
+        all for such a bone; see Bone's own docstring). The topological
+        order (`add`) is extended so a target bone always resolves before
+        the bone1/bone2 pair that depends on it, exactly the way a normal
+        parent already does.
         """
         n = len(self.bones)
         out: list[Optional[Mat2D]] = [None] * n
         seen: set[int] = set()
         order: list[int] = []
+        ik_pairs = self._ik_pairs(frame, exporter)   # bone1 index -> (bone2 index, target index)
 
         def add(i: int) -> None:
             if i in seen:
@@ -1346,21 +1575,247 @@ class Skeleton:
             parent = self.bones[i].parent
             if parent >= 0:
                 add(parent)
+            pair = ik_pairs.get(i)
+            if pair is not None:
+                add(pair[1])          # the IK target must resolve before bone1 does
             order.append(i)
 
         for i in range(n):
             add(i)
 
         for i in order:
+            if out[i] is not None:
+                continue              # already solved below, as the bone2 half of a pair
             bone = self.bones[i]
             pos = Vec2.of(exporter.eval(bone.anim_pos, frame))
-            angle = exporter.eval(bone.anim_angle, frame)
             scale = exporter.eval(bone.anim_scale, frame)
-            c, s = math.cos(angle), math.sin(angle)
-            local = Mat2D(c * scale, s * scale, -s, c, pos.x, pos.y)
             parent = bone.parent
-            out[i] = out[parent].compose(local) if parent >= 0 else local
+            parent_matrix = out[parent] if parent >= 0 else None
+            solved = self._solve_ik_pair(i, ik_pairs, out, pos, scale, parent_matrix, frame, exporter)
+            if solved is not None:
+                out[i], (bone2_index, bone2_matrix) = solved
+                out[bone2_index] = bone2_matrix
+                continue
+            angle = exporter.eval(bone.anim_angle, frame)
+            c, s = math.cos(angle), math.sin(angle)
+            # flip_h/flip_v negate one column each, exactly as
+            # Layer.local_matrix does for a layer's own flips - column 1 is
+            # the bone's own direction axis (the one anim_scale already
+            # scales), column 2 the perpendicular.  See Bone's docstring for
+            # the single real occurrence this was derived from.
+            fh = -1.0 if exporter.eval(bone.flip_h, frame) else 1.0
+            fv = -1.0 if exporter.eval(bone.flip_v, frame) else 1.0
+            local = Mat2D(c * scale * fh, s * scale * fh, -s * fv, c * fv, pos.x, pos.y)
+            out[i] = parent_matrix.compose(local) if parent_matrix is not None else local
         return out  # type: ignore[return-value]
+
+    def _ik_pairs(self, frame: float, exporter: "Exporter") -> dict[int, tuple[int, int]]:
+        """bone1 index -> (bone2 index, target index) for every bone2 whose
+        `target_bone` currently names another bone in this same skeleton -
+        bone1 is bone2's own parent, the other half of Moho's 2-bone chain.
+        A bone2 with no parent (nothing to bend alongside it) or a
+        self-referencing/out-of-range target is skipped rather than raising,
+        since a stray/legacy `target_bone` value should degrade to plain FK,
+        not break the export."""
+        n = len(self.bones)
+        pairs: dict[int, tuple[int, int]] = {}
+        for bone2_index, bone2 in enumerate(self.bones):
+            target = int(exporter.eval(bone2.target_bone, frame))
+            if not (0 <= target < n) or target == bone2_index:
+                continue
+            bone1_index = bone2.parent
+            if bone1_index < 0:
+                continue
+            pairs[bone1_index] = (bone2_index, target)
+        return pairs
+
+    @staticmethod
+    def _solve_ik_bend(bend_reference: float, p0: Vec2, length1: float,
+                        length2: float, target: Vec2) -> Optional[tuple[float, float]]:
+        """Solve this 2-bone IK pair, picking whichever of the two
+        mirror-image elbow/knee solutions bends toward `bend_reference` -
+        returns (bone1's world angle, bone2's local angle), or None if
+        neither candidate reaches (a degenerate chain; see
+        _solve_two_bone_ik).
+
+        `bend_reference` is bone2's OWN stored angle evaluated AT THE
+        CURRENT FRAME (not at frame 0 - see below). Solves for both
+        `sign = +1` and `sign = -1`, then keeps whichever gives bone2's LOCAL
+        angle (relative to bone1) closest to it: the animator records which
+        way the joint should fold, and the solve follows that side.
+
+        **`bend_reference` must be per-frame.** An earlier version used
+        `Channel.of(bone2.anim_angle).val[0]` - the frame-0 keyframe - on the
+        stated assumption that an IK-driven bone's own `anim_angle` is frozen
+        and therefore meaningless except as a rest-pose hint. **That
+        assumption was wrong**, and only half the corpus looked like it held:
+        `SketchBone.animeproj`'s RIGHT shin (`B27`) really is constant at
+        5.1 degrees across all 15 of its keyframes, but its LEFT shin (`B22`)
+        steps from 351.2 to 449.4 degrees (i.e. -8.8 -> +89.4 once
+        normalised - a SIGN CHANGE, so a bend-side change) between its
+        keyframes at frames 43 and 49, alongside that leg's ankle bone
+        flipping on the same frame (`B23.flip_h`, see Bone's docstring).
+        Interpolated, that reference crosses zero between frames 43 and 44,
+        so the chosen side switches exactly there and then holds for the
+        rest of the walk - confirmed by measuring the solved knee angle on
+        all 120 frames (one clean A->B transition at 43->44; the only other
+        sign changes are 0.008-0.16 degree noise on an auto-stretched, i.e.
+        perfectly straight, leg around frames 18-20). The switch only
+        becomes VISIBLE around frames 46-47, once the knee has folded far
+        enough to see (0 degrees at 44, 36 degrees by 46). Pinning the
+        reference to frame 0 instead kept that knee folding the original
+        standing-still way for the whole second half of the walk.
+
+        Comparing the SOLVED local angle (rather than using the sign of
+        `bend_reference` directly as the law-of-cosines `sign` parameter,
+        tried first and found wrong) is also required: the naive version
+        picked the WRONG side for both legs at frame 7 (an exact keyframe,
+        so not an interpolation artifact) - both thighs swung 50-56 degrees
+        TOWARD the centre line before the knee bent back out to the correct
+        foot position, crossing the legs into a pretzel instead of the
+        reference's plain outward stance. The sign of a bone's own local
+        angle and the sign of the `sign` parameter that reproduces it are
+        related but NOT identical; solving both and comparing outcomes
+        sidesteps deriving that relationship algebraically."""
+        rest_angle2 = ((bend_reference + math.pi) % (2.0 * math.pi)) - math.pi
+        candidates = [s for s in (_solve_two_bone_ik(p0, length1, length2, target, sign)
+                                   for sign in (1.0, -1.0)) if s is not None]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda s: abs(((s[1] - rest_angle2 + math.pi)
+                                                    % (2.0 * math.pi)) - math.pi))
+
+    def _solve_ik_pair(self, bone1_index: int, ik_pairs: dict[int, tuple[int, int]],
+                        out: list[Optional[Mat2D]], pos1: Vec2, scale1: float,
+                        parent_matrix: Optional[Mat2D], frame: float,
+                        exporter: "Exporter") -> Optional[tuple[Mat2D, tuple[int, Mat2D]]]:
+        """If `bone1_index` is the base of a 2-bone IK pair, return
+        (bone1's world matrix, (bone2 index, bone2's world matrix));
+        otherwise None (the caller falls back to plain FK for this bone).
+        Needs `out[target_index]` already resolved - guaranteed by `add`'s
+        extended topological order."""
+        pair = ik_pairs.get(bone1_index)
+        if pair is None or parent_matrix is None:
+            return None
+        bone1 = self.bones[bone1_index]
+        bone2_index, target_index = pair
+        bone2 = self.bones[bone2_index]
+        pos2 = Vec2.of(exporter.eval(bone2.anim_pos, frame))
+        scale2 = exporter.eval(bone2.anim_scale, frame)
+        p0 = parent_matrix.apply(pos1)
+        target = out[target_index].apply(Vec2(0.0, 0.0))
+        # The law-of-cosines solve needs how far bone2's origin ACTUALLY sits
+        # from bone1's - bone2.anim_pos's own magnitude, NOT bone1.length.
+        # Confirmed these two differ for real bones (SketchBone.animeproj's
+        # right leg: bone1.length == 0.162607, but bone2.anim_pos.length()
+        # == 0.183273 - a ~13% gap that briefly looked negligible but, once
+        # multiplied by an auto-stretch factor of ~1.86x, threw bone2's tip
+        # roughly a third of a unit away from the IK target it was meant to
+        # reach - confirmed by comparing this solve's own elbow position
+        # against bone1_matrix.compose(...)'s ACTUAL resulting origin below;
+        # they only coincide once this uses pos2's real length.
+        base_length1 = pos2.length() * scale1
+        base_length2 = bone2.length * scale2
+        stretch = self._ik_auto_stretch(bone1, bone2, base_length1, base_length2,
+                                         p0.distance_to(target))
+        length1 = base_length1 * stretch
+        length2 = base_length2 * stretch
+        # Evaluated at THIS frame, not frame 0 - see _solve_ik_bend's docstring
+        # for the confirmed case where the two differ and frame 0 is wrong.
+        bend_reference = exporter.eval(bone2.anim_angle, frame)
+        solved = self._solve_ik_bend(bend_reference, p0, length1, length2, target)
+        if solved is None:
+            return None
+        world_angle1, local_angle2 = solved
+        parent_origin = parent_matrix.apply(Vec2(0.0, 0.0))
+        parent_x_axis = parent_matrix.apply(Vec2(1.0, 0.0)).minus(parent_origin)
+        local_angle1 = world_angle1 - math.atan2(parent_x_axis.y, parent_x_axis.x)
+        c1, s1 = math.cos(local_angle1), math.sin(local_angle1)
+        bone1_matrix = parent_matrix.compose(
+            Mat2D(c1 * scale1 * stretch, s1 * scale1 * stretch, -s1, c1, pos1.x, pos1.y))
+        # bone2_matrix is built directly in WORLD space (elbow + world_angle2)
+        # rather than via bone1_matrix.compose(...) - composing a ROTATED
+        # child through bone1_matrix's own ANISOTROPIC scale (see the module
+        # docstring's NOTE ON SCALE - only the first column is stretched)
+        # shears the result: confirmed directly on this same leg at frame 49
+        # - bone2's tip came out 0.569 units from the elbow instead of the
+        # 0.324 the law-of-cosines solve above actually calls for (a factor
+        # of ~3.08, not the intended ~1.76x stretch), because compose() mixes
+        # bone1's two differently-scaled columns in proportion to bone2's OWN
+        # local angle. World-space construction sidesteps that entirely:
+        # nothing downstream depends on bone2_matrix being reachable by
+        # composing FROM bone1_matrix, only on what `out[]` holds.
+        elbow = p0.plus(Vec2(math.cos(world_angle1), math.sin(world_angle1)).scaled(length1))
+        world_angle2 = world_angle1 + local_angle2
+        c2, s2 = math.cos(world_angle2), math.sin(world_angle2)
+        bone2_matrix = Mat2D(c2 * scale2 * stretch, s2 * scale2 * stretch, -s2, c2,
+                              elbow.x, elbow.y)
+        return bone1_matrix, (bone2_index, bone2_matrix)
+
+    @staticmethod
+    def _ik_auto_stretch(bone1: "Bone", bone2: "Bone", length1: float, length2: float,
+                          distance: float) -> float:
+        """How much to stretch BOTH bones of a 2-bone IK pair (a uniform
+        factor applied to each) so the chain can reach a `distance` beyond
+        its combined rest length `length1 + length2` - Moho's "auto stretch"
+        (`Bone.scaling_mode == 2`, capped by `Bone.max_auto_scaling`).
+
+        Returns 1.0 (no stretch) whenever the target is already in reach, or
+        when NEITHER bone has auto-stretch enabled (a scaling_mode != 2 bone
+        keeps its fixed length even if that leaves the chain short of the
+        target - matching a non-stretchy limb).  When only one of the two
+        bones is stretchy, that one bone alone cannot generally reach an
+        arbitrary target angle on its own without also changing bone1's
+        world angle - i.e. the two bones stretch TOGETHER (a real,
+        confirmed 2-bone gap, not a rare edge case: `SketchBone.animeproj`'s
+        leg bones both carry `scaling_mode == 2` with the SAME
+        `max_auto_scaling`, and a stretched kicking pose - the target
+        sitting up to ~1.9x the chain's rest reach - could not otherwise be
+        reached at all, leaving the foot visibly detached from the leg."""
+        reach = length1 + length2
+        if distance <= reach or reach <= 1e-9:
+            return 1.0
+        max1 = bone1.max_auto_scaling if bone1.scaling_mode == 2 else 1.0
+        max2 = bone2.max_auto_scaling if bone2.scaling_mode == 2 else 1.0
+        return min(distance / reach, max1, max2)
+
+
+def _solve_two_bone_ik(p0: Vec2, length1: float, length2: float, target: Vec2,
+                        sign: float) -> Optional[tuple[float, float]]:
+    """Analytic 2-bone IK (law of cosines): given bone1 originates at `p0`
+    (world space) with length `length1`, followed by bone2 with length
+    `length2`, return (bone1's WORLD-space angle, bone2's LOCAL angle
+    relative to bone1) so that bone2's tip reaches `target`.
+
+    `sign` (+1.0/-1.0) picks which of the two mirror-image elbow positions
+    to use - the other root of the same law-of-cosines equation would bend
+    the joint the wrong way. Returns None for a degenerate chain (a
+    near-zero length, or `target` coinciding with `p0`), letting the caller
+    fall back to plain FK rather than divide by zero.
+
+    An unreachable target (too far or, with unequal lengths, too close) is
+    clamped to the nearest reachable distance, matching the usual behaviour
+    of a 2-bone IK rig (the limb fully extends/folds rather than the solve
+    failing outright).
+    """
+    if length1 <= 1e-9 or length2 <= 1e-9:
+        return None
+    delta = target.minus(p0)
+    distance = delta.length()
+    if distance <= 1e-9:
+        return None
+    reach_min = abs(length1 - length2) + 1e-9
+    reach_max = length1 + length2 - 1e-9
+    distance = max(reach_min, min(distance, reach_max))
+    base_angle = math.atan2(delta.y, delta.x)
+    cos_beta = (length1 * length1 + distance * distance - length2 * length2) \
+        / (2.0 * length1 * distance)
+    beta = math.acos(max(-1.0, min(1.0, cos_beta)))
+    world_angle1 = base_angle + sign * beta
+    elbow = p0.plus(Vec2(math.cos(world_angle1), math.sin(world_angle1)).scaled(length1))
+    to_target = target.minus(elbow)
+    world_angle2 = math.atan2(to_target.y, to_target.x)
+    return world_angle1, world_angle2 - world_angle1
 
 
 @dataclass(frozen=True)
@@ -1436,13 +1891,27 @@ class Curve:
 class MeshPoint:
     """One point of a Mesh.  `position` is a Vec2 channel; `width` is a float
     channel, normally 1.0 - see the module docstring's STROKE WIDTH and TAPERED
-    STROKES sections for what a non-1.0 or varying width means."""
+    STROKES sections for what a non-1.0 or varying width means.
+
+    `parent` is Moho's per-POINT bone binding ("link points to bone"): a bone
+    index this single point follows rigidly, overriding whatever binding its
+    LAYER has.  `-2` means "no per-point binding, use the layer's" and is by
+    far the common case (7,365 of ~12,400 points across the 19 sample
+    documents); `-1` also occurs (551 points) and is treated the same way.
+    A real bone index appears on roughly 4,000 points spread over 119
+    meshes, so this is a mainstream feature rather than a curiosity -
+    `Bandit.mohoproj`'s `Leg_F` pins 9 of its 28 points to bone 11, and its
+    `Ears` pins all 20 across five different bones.  See
+    Exporter._deformed_point_mapper.
+    """
     position: Any
     width: Any
+    parent: int = -2
 
     @staticmethod
     def _build(raw: dict) -> "MeshPoint":
-        return MeshPoint(position=raw["position"], width=raw["width"])
+        return MeshPoint(position=raw["position"], width=raw["width"],
+                          parent=raw.get("parent", -2))
 
 
 @dataclass(frozen=True)
@@ -1500,10 +1969,66 @@ class Mesh:
     those points, and shapes built from curve segments.  See the module
     docstring for how curves/shapes relate."""
 
-    def __init__(self, points: list[MeshPoint], curves: list[Curve], shapes: list[Shape]):
+    def __init__(self, points: list[MeshPoint], curves: list[Curve], shapes: list[Shape],
+                 shape_order: Any = None):
         self.points = points
         self.curves = curves
         self.shapes = shapes
+        # Raw `mesh.shape_order` channel (a String of "|"-separated shape IDs)
+        # or None when the field is absent - see draw_order().
+        self.shape_order = shape_order
+        self._has_point_bones: Optional[bool] = None   # see has_point_bones
+
+    @property
+    def has_point_bones(self) -> bool:
+        """True when at least one point carries its own bone binding
+        (`MeshPoint.parent >= 0`).
+
+        This gates which geometry order the exporter uses, so it decides
+        whether a mesh's output can move at all - see
+        Exporter._geometry_and_mapper.
+        """
+        if self._has_point_bones is None:
+            self._has_point_bones = any(p.parent >= 0 for p in self.points)
+        return self._has_point_bones
+
+    def draw_order(self) -> list[Shape]:
+        """`shapes` in Moho's own back-to-front draw order.
+
+        Moho stores that order twice: implicitly as the order of `shapes`,
+        and explicitly in the `shape_order` channel, a "|"-separated list of
+        shape IDs. They agree on 565 of the 614 meshes in this repository's
+        19 sample documents, and where they agree this returns `shapes`
+        unchanged.
+
+        Where they DISAGREE (49 meshes across 6 documents), `shape_order` is
+        NOT the authority and is deliberately ignored, on three independent
+        pieces of evidence:
+
+        1. In **47 of those 49** the ID list is strictly ASCENDING while the
+           file order is not - the signature of an ID registry, not of an
+           artist-chosen z-order. `Bandit.mohoproj`'s `Arm_B` stores
+           "1|6|7|9|10" while its shapes sit in file order 10, 9, 6, 1, 7,
+           close to the exact reverse. (The 2 exceptions are Bandit's
+           `Leg_F`/`Leg_F 2`, both "0|1|4|2|3|7" - still near-ascending,
+           differing only in where id 7 sits.)
+        2. Reordering the shapes by it **breaks `combo_mode` grouping**,
+           which ShapeGroupRenderer builds from ADJACENCY in file order: a
+           boolean-combination run stops being contiguous, and rendering
+           Bandit that way aborts outright rather than producing a picture.
+        3. It reproduces the conclusion an earlier note in this module's
+           docstring already recorded from its own experiment - that
+           trusting the field "draws almost everything back-to-front".
+
+        So file order wins, always, and this method changes no output. It
+        exists to put that rule in one named place, because the field looks
+        authoritative enough that it has now been investigated twice.
+
+        NOT handled: a mesh with `anim_shape_order` true, i.e. a z-order the
+        animator ANIMATED. It is false on all 614 meshes here, so nothing
+        exercises it and no guess is made about which frame's order to use.
+        """
+        return self.shapes
 
     @staticmethod
     def _build(raw: dict, styles: StyleTable) -> "Mesh":
@@ -1511,6 +2036,7 @@ class Mesh:
             points=[MeshPoint._build(p) for p in raw["points"]],
             curves=[Curve._build(c) for c in raw["curves"]],
             shapes=[Shape._build(s, styles) for s in raw["shapes"]],
+            shape_order=raw.get("shape_order"),
         )
 
 
@@ -1629,6 +2155,42 @@ class Layer:
         """Only meaningful when kind is SWITCH: an animated string channel
         naming the currently-active child."""
         return self._raw.get("switch_keys")
+
+    @property
+    def physics_dynamic(self) -> bool:
+        """True when Moho moves this BoneLayer's whole rig with its own
+        rigid-body physics simulation (wind/gravity) rather than any
+        keyframed channel this tool can read - see the module docstring's
+        KNOWN GAPS entry on physics. A layer where this is true can only
+        ever render at its rest pose here, however many frames are sampled,
+        since neither this module nor moho2lottie.py runs a physics
+        simulation.
+
+        `physics.enabled` and `.static` alone are NOT enough to tell this
+        apart from an ordinary keyframed rig: every layer in every one of
+        this repository's 19 sample documents carries `physics.enabled ==
+        true, physics.static == false` (902 layers checked directly) - it is
+        a per-layer default Moho always writes, not a sign that anything is
+        actually being simulated. The real, specific signal is a non-zero
+        `wind`/`gravity` *strength* on the owning `BoneLayer` (only that
+        layer kind carries either field): checked across the same corpus,
+        exactly one `BoneLayer` - `Bandit.mohoproj`'s top-level "Bandit" -
+        combines `physics.enabled` with a non-zero force (`wind.strength ==
+        100.0`), and it is exactly the layer whose keyframed bone channels
+        (all ending by frame 41-90) do not account for the screen-spanning
+        motion Moho's own render shows across the document's full 25-127
+        frame range."""
+        if self.skeleton is None:
+            return False
+        physics = self._raw.get("physics") or {}
+        if not physics.get("enabled") or physics.get("static", False):
+            return False
+
+        def _any_nonzero(field: str) -> bool:
+            vals = (self._raw.get(field) or {}).get("strength", {}).get("val") or []
+            return any(v != 0 for v in vals)
+
+        return _any_nonzero("wind") or _any_nonzero("gravity")
 
     def local_matrix(self, frame: float, exporter: "Exporter") -> Mat2D:
         """This layer's own transform, mapping a point in ITS OWN local
@@ -2571,7 +3133,22 @@ class Skinner:
 
     @staticmethod
     def build(skeleton: Skeleton, frame: float, exporter: "Exporter") -> "Skinner":
-        rest = skeleton.world_matrices(0.0, exporter)
+        # The BIND pose must be the rig as modelled - frame 0 with NO Smart
+        # Bone dial applied.  world_matrices() evaluates through
+        # exporter.eval(), which honours exporter._active_actions, so without
+        # clearing them first the "rest" matrices come back as frame 0 PLUS
+        # whatever pose the current frame's dials are driving, and
+        # rest_to_pose then silently cancels part of the very deformation it
+        # is meant to express.  Harmless on this corpus only because every
+        # active pose here is flat (see Channel.eval), i.e. contributes a
+        # zero offset - a non-flat pose would corrupt every bone downstream
+        # of it, since each bone's world matrix composes its parents'.
+        saved = exporter._active_actions
+        exporter._active_actions = []
+        try:
+            rest = skeleton.world_matrices(0.0, exporter)
+        finally:
+            exporter._active_actions = saved
         pose = skeleton.world_matrices(frame, exporter)
         bones = []
         for i, bone in enumerate(skeleton.bones):
@@ -2620,14 +3197,17 @@ class SkinStep:
     """One step of a DeformChain: cross into `bone_layer`'s own coordinate
     space, deforming the point by its skeleton.
 
-    `bound_bone_index` >= 0 means the layer ultimately being rendered is
-    *rigidly* bound to that one bone (Layer.parent_bone); -1 means flexible
-    ("region") binding, blended across every bone (or the layer's own
-    flexi_bone_subset, if narrower) - see Exporter._deformed_pixel_mapper,
-    which is where that distinction is actually consumed.
+    `bound_bone_index` >= 0 means whatever is bound into this skeleton
+    (the render target itself, or - for a BoneLayer nested inside another
+    BoneLayer - the whole inner BoneLayer, see below) is *rigidly* bound to
+    that one bone (Layer.parent_bone); -1 means flexible ("region") binding,
+    blended across every bone in `subset` (every bone in the skeleton if
+    `subset` is empty) - see Exporter._deformed_pixel_mapper, which is where
+    that distinction is actually consumed.
     """
     bone_layer: Layer
     bound_bone_index: int
+    subset: tuple[int, ...] = ()
 
 
 DeformStep = Union[MatrixStep, SkinStep]
@@ -2646,23 +3226,46 @@ def build_deform_chain(ancestors: Sequence[Layer], target: Layer, frame: float,
     coordinate space - i.e. after the local transforms of everything between
     it and the bone layer, but before the bone layer's own transform - because
     that is the space its skeleton's rest/pose matrices are expressed in.
+
+    A BoneLayer nested inside another BoneLayer (e.g. a hand rig's own
+    skeleton, nested inside the whole character's skeleton) closes out TWO
+    SkinSteps, not one: the inner one binds `target` into the nested
+    BoneLayer's own skeleton, exactly as for a plain (non-nested) mesh; the
+    outer one must bind the *nested BoneLayer itself* into the outer
+    skeleton, using THAT layer's own `parent_bone`/`flexi_bone_subset` -
+    NOT the target's, and NOT left unbound. `bound_bone`/`bound_subset`
+    below are captured from whichever layer was most recently walked (reset
+    to that layer's own binding immediately after any SkinStep it closes),
+    so this generalises to any nesting depth without special-casing two
+    levels specifically. Confirmed as a real, previously-uncaught bug: with
+    `bound` always reset to -1 (unbound) across an outer skin step and never
+    re-derived from the inner BoneLayer's own fields, every child of a
+    nested BoneLayer fell back to a fully flexible blend across the WRONG
+    subset of the OUTER skeleton's bones (the target's own, unrelated,
+    flexi_bone_subset indices, reinterpreted against the outer skeleton) -
+    invisible at frame 0 (every bone's rest_to_pose is identity there
+    regardless of which bones are blended) but visibly wrong at any other
+    frame, confirmed on `SketchBone.animeproj`'s "el-sol" hand rig.
     """
     steps: list[DeformStep] = []
     pending = IDENTITY_MATRIX          # matrix steps not yet flushed, composed outer-most-last
     chain = list(ancestors) + [target]
-    bound = -1
+    bound_bone = -1
+    bound_subset: tuple[int, ...] = ()
     for layer in reversed(chain):
         is_deforming_bone_layer = (layer is not target and layer.skeleton is not None
                                     and layer.kind is LayerKind.BONE)
         if is_deforming_bone_layer:
             steps.append(MatrixStep(pending))
-            steps.append(SkinStep(layer, bound))
+            steps.append(SkinStep(layer, bound_bone, bound_subset))
             pending = layer.local_matrix(frame, exporter)
-            bound = -1
+            bound_bone, bound_subset = -1, ()
         else:
-            if layer.parent_bone >= 0:
-                bound = layer.parent_bone
             pending = layer.local_matrix(frame, exporter).compose(pending)
+        if layer.parent_bone >= 0:
+            bound_bone, bound_subset = layer.parent_bone, ()
+        elif layer.flexi_bone_subset:
+            bound_subset = tuple(layer.flexi_bone_subset)
     steps.append(MatrixStep(pending))
     return steps
 
@@ -2720,6 +3323,8 @@ class RenderSettings:
     stroke_width_scale: float = 2.0          # --stroke-mul; Exporter._stroke_width_px
     tangent_bias: float = 0.19                 # BezierReconstructor
     bone_weight_falloff: str = "inv_d2"          # key into BONE_WEIGHT_FALLOFFS
+    smooth_bone_joints: bool = False    # --smooth-joints; Exporter._effective_subset
+    point_bone_binding: bool = False    # --point-bones; Exporter._geometry_and_mapper
     forced_mask_containers: frozenset[str] = field(default_factory=frozenset)  # --mask-container
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0
@@ -2888,8 +3493,38 @@ class Exporter:
 
     # -- curve geometry --------------------------------------------------------
 
-    def _curve_geometries(self, mesh: Mesh, frame: float) -> list[CurveGeometry]:
+    def _curve_geometries(self, mesh: Mesh, frame: float,
+                           deform: Optional[Callable[[Vec2, int], Vec2]] = None
+                           ) -> list[CurveGeometry]:
+        """Every curve of `mesh`, evaluated at `frame`.
+
+        When `deform` is given, each mesh POINT is pushed through it - along
+        with that point's own `MeshPoint.parent` bone - BEFORE any Bezier
+        handle is reconstructed, so the returned geometry already sits in
+        document space and its caller's `to_px` is only the pixel
+        projection.
+
+        Deforming points first, rather than deforming each finished control
+        point afterwards, is what makes per-point bone binding expressible
+        at all: a Bezier handle is derived from its neighbours and does not
+        correspond to any single mesh point, so it has no bone of its own to
+        follow.  It also matches how Moho describes the operation - bones
+        move points, the curve follows the points.
+
+        For a rigid or purely affine deformation the two orders are
+        mathematically identical (an affine map carries Bezier control
+        points to the Bezier of the mapped curve), so this is not a
+        behaviour change for most layers.  In particular EVERY bone's
+        rest_to_pose is the identity at frame 0 - `Skinner.build` derives it
+        from `world_matrices(0)` against `world_matrices(frame)` - which is
+        why the tracked reference SVGs, all rendered at frame 0, are
+        unaffected.  The orders diverge only where the blend is genuinely
+        non-affine, i.e. exactly where a point straddles two bones.
+        """
         positions = [Vec2.of(self.eval(p.position, frame)) for p in mesh.points]
+        if deform is not None:
+            positions = [deform(pos, mesh.points[i].parent)
+                          for i, pos in enumerate(positions)]
         out = []
         for curve in mesh.curves:
             widths = [self.eval(mesh.points[cp.point_index].width, frame) for cp in curve.points]
@@ -2906,6 +3541,56 @@ class Exporter:
             self._skin_cache[key] = cached
         return cached
 
+    def _effective_subset(self, step: "SkinStep") -> tuple[int, ...]:
+        """The bone indices a flexible SkinStep should actually blend over.
+
+        Normally exactly `step.subset` (the layer's own
+        `flexi_bone_subset`).  With `RenderSettings.smooth_bone_joints` on,
+        a subset naming exactly ONE bone is widened to include that bone's
+        parent and its direct children - Moho's "Smooth Joint for Bone Pair"
+        approximated with machinery already here.
+
+        Why one bone is the case worth widening: `Skinner.deform` normalises
+        by the total weight, so a single-bone subset makes the falloff
+        cancel out completely and the layer becomes RIGID.  Two halves of a
+        limb bound that way rotate about different pivots and tear apart at
+        the joint - measured on `SketchBone.animeproj`, whose
+        `kol-sol-ust`/`kol-sol-alt` (bones 13/14) pull 40 px apart from
+        frame 56, exactly tracking bone 14's own 41.5 degree swing, while
+        its LEGS - bound to TWO bones each (`bacak-sol` = "20|21") - never
+        tear at all.  That contrast is the evidence for the shape of this
+        fix: give the arm the same two-bone neighbourhood the leg already
+        has, and let the existing inverse-square falloff do the blending.
+        It needs no new formula, and it degrades correctly - 1/d^2 is steep,
+        so a point out at the wrist is ~99% its own bone, while a point at
+        the joint itself sits equidistant and blends about half and half.
+
+        HEURISTIC, and off by default.  No field in any of the 19 sample
+        documents records whether Moho's smooth-joint option is on (audited:
+        `flexi_bone_elbow` is false everywhere, `binding_mode` is constant,
+        no bone carries a control parent), so which layers Moho actually
+        smooths cannot be read from the file - only that this rig plainly
+        does not tear the way an unsmoothed rigid bind must.  Widening a
+        subset also cannot be right for a layer deliberately pinned to one
+        bone, which is why it is opt-in rather than assumed.
+        """
+        subset = step.subset
+        if not self.settings.smooth_bone_joints or len(subset) != 1:
+            return subset
+        skeleton = step.bone_layer.skeleton
+        if skeleton is None:
+            return subset
+        bones = skeleton.bones
+        index = subset[0]
+        if not 0 <= index < len(bones):
+            return subset
+        widened = {index}
+        parent = bones[index].parent
+        if 0 <= parent < len(bones):
+            widened.add(parent)
+        widened.update(j for j, b in enumerate(bones) if b.parent == index)
+        return tuple(sorted(widened))
+
     def _to_pixel(self, p: Vec2) -> Vec2:
         """Moho-space -> pixel-space: 2 units span the canvas height, and y is
         flipped (Moho's +y is up; SVG's is down).  See the module docstring's
@@ -2918,26 +3603,113 @@ class Exporter:
         deformation at all - used for --local exports."""
         return lambda p: self._to_pixel(matrix.apply(p))
 
-    def _deformed_pixel_mapper(self, chain: list[DeformStep], frame: float,
-                                layer: Layer) -> Callable[[Vec2], Vec2]:
+    def _deformed_pixel_mapper(self, chain: list[DeformStep],
+                                frame: float) -> Callable[[Vec2], Vec2]:
         """A point-mapper that walks a full DeformChain (ordinary transforms
-        plus bone skinning) before projecting to pixel space."""
-        subset = layer.flexi_bone_subset
-        weight_fn = BONE_WEIGHT_FALLOFFS[self.settings.bone_weight_falloff]
+        plus bone skinning) before projecting to pixel space.
 
-        def to_px(p: Vec2) -> Vec2:
-            for step in chain:
+        Each SkinStep carries its OWN `subset` (see SkinStep and
+        build_deform_chain) rather than this reading one fixed subset off
+        the render target - required for a BoneLayer nested inside another
+        BoneLayer, where the OUTER SkinStep's subset (if it is flexible at
+        all) belongs to the nested BoneLayer itself, not to whatever mesh
+        is ultimately being rendered."""
+        deform = self._deformed_point_mapper(chain, frame)
+        return lambda p: self._to_pixel(deform(p, -2))
+
+    def _geometry_and_mapper(self, mesh: Mesh, chain: list[DeformStep], frame: float):
+        """(geometries, to_px) for one mesh, picking the geometry order that
+        mesh needs.
+
+        Two orders exist because per-point bone binding cannot be expressed
+        in the original one, and the original one cannot be abandoned
+        wholesale:
+
+        - **Points deformed first** (`MeshPoint.parent` honoured), Bezier
+          handles reconstructed from the deformed points, `to_px` reduced to
+          the pixel projection.  Required whenever any point carries its own
+          bone, since a handle belongs to no single point and so has no bone
+          to follow.
+        - **Control points deformed last** - the original order - for every
+          other mesh.
+
+        The two are NOT interchangeable: handle reconstruction derives
+        lengths from inter-point distances, so it commutes with a similarity
+        transform but not with the non-uniform scale a layer transform or
+        `Skeleton.world_matrices`'s deliberately asymmetric bone scale can
+        carry.  Switching every mesh to the point-first order was measured to
+        move all five tracked reference SVGs (36,119 changed lines in
+        `SketchBone.svg` alone) with nothing to say the new geometry was
+        better, so the order is only ever switched for a mesh that actually
+        uses per-point binding - 119 of them across the 19 sample documents.
+
+        AND EVEN THEN IT IS OFF BY DEFAULT (`--point-bones`), because
+        treating `MeshPoint.parent` as "follow this bone rigidly" measured
+        much WORSE, not better.  On `SketchBone.animeproj`'s two ear meshes,
+        the only ones there that use the field (5 points each, all naming
+        bone 0), error against Moho's own frames rose from 16.0% to 48.4%
+        and from 13.8% to 38.5%, taking the whole-frame difference 78.9% the
+        wrong way.  So the field is real and widely used - roughly 4,000
+        points over those 119 meshes - but this reading of it is wrong.
+        Candidates not yet tested: the index may be into the OUTERMOST bone
+        layer's skeleton rather than the innermost one used here, or a bound
+        point may still blend with its neighbours rather than snapping
+        rigidly.  Left wired up but disabled so the next attempt starts from
+        a measurement instead of a guess.
+        """
+        if mesh.has_point_bones and self.settings.point_bone_binding:
+            return (self._curve_geometries(mesh, frame,
+                                            self._deformed_point_mapper(chain, frame)),
+                     self._to_pixel)
+        return self._curve_geometries(mesh, frame), self._deformed_pixel_mapper(chain, frame)
+
+    def _deformed_point_mapper(self, chain: list[DeformStep],
+                                frame: float) -> Callable[[Vec2, int], Vec2]:
+        """Walk a full DeformChain, returning `f(point, point_bone)` in
+        document space (NOT pixels - the caller projects).
+
+        `point_bone` is that mesh point's own `MeshPoint.parent`: a bone
+        index makes the point follow that ONE bone rigidly, overriding the
+        layer's binding for the INNERMOST skin step only (the bone index is
+        into that bone layer's own skeleton, which is the skeleton the
+        points are bound to).  `-2`/`-1` mean "no per-point binding" and
+        fall through to the layer's own rigid or flexible binding exactly as
+        before.
+
+        Each SkinStep carries its OWN `subset` (see SkinStep and
+        build_deform_chain) rather than this reading one fixed subset off
+        the render target - required for a BoneLayer nested inside another
+        BoneLayer, where the OUTER SkinStep's subset (if it is flexible at
+        all) belongs to the nested BoneLayer itself, not to whatever mesh is
+        ultimately being rendered.
+        """
+        weight_fn = BONE_WEIGHT_FALLOFFS[self.settings.bone_weight_falloff]
+        # Resolved once per step, not once per point - _effective_subset walks
+        # the whole bone list looking for children, and a mesh can be
+        # thousands of points.
+        subsets = [self._effective_subset(s) if isinstance(s, SkinStep) else ()
+                   for s in chain]
+        # The innermost skin step is the one whose skeleton the mesh points
+        # are actually bound to, so it is the only one a per-point bone
+        # index can refer to.
+        innermost = next((i for i, s in enumerate(chain) if isinstance(s, SkinStep)), None)
+
+        def deform(p: Vec2, point_bone: int = -2) -> Vec2:
+            for index, (step, subset) in enumerate(zip(chain, subsets)):
                 if isinstance(step, MatrixStep):
                     p = step.matrix.apply(p)
+                    continue
+                skinner = self._skin_data(step.bone_layer, frame)
+                bone = step.bound_bone_index
+                if index == innermost and point_bone >= 0:
+                    bone = point_bone if point_bone < len(skinner.bones) else bone
+                if bone >= 0:
+                    p = skinner.bones[bone].rest_to_pose.apply(p)
                 else:
-                    skinner = self._skin_data(step.bone_layer, frame)
-                    if step.bound_bone_index >= 0:
-                        p = skinner.bones[step.bound_bone_index].rest_to_pose.apply(p)
-                    else:
-                        p = skinner.deform(p, subset, weight_fn)
-            return self._to_pixel(p)
+                    p = skinner.deform(p, subset, weight_fn)
+            return p
 
-        return to_px
+        return deform
 
     def _full_chain_matrix(self, ancestors: Sequence[Layer], layer: Layer, frame: float) -> Mat2D:
         """The layer's full accumulated transform INCLUDING itself, ignoring
@@ -3333,28 +4105,37 @@ class Exporter:
         BellyTexture: its one masking==2 child ("Body") is precisely the
         shape Moho's own export uses both as BellyTexture's internal
         <clipPath> and (once this recursion is applied) as BellyTexture's
-        contribution to masking its sibling Head_DarkBlue."""
+        contribution to masking its sibling Head_DarkBlue.
+
+        Smart Bone context: set to whatever would be active for `layer` if
+        it were rendered as an ordinary "mesh" item (see
+        Exporter._active_actions_along), NOT left empty - see the fix note
+        on _mask_sources for why this used to be a real bug, confirmed
+        against `SketchBone.mp4`."""
         paths: list[tuple[str, float]] = []
         if layer.mesh is not None:
-            deform = build_deform_chain(ancestors, layer, frame, self)
-            geometries = self._curve_geometries(layer.mesh, frame)
-            to_px = self._deformed_pixel_mapper(deform, frame, layer)
-            for shape in layer.mesh.shapes:
-                d = build_path_d(geometries, shape.edges, to_px)
-                if not d:
-                    continue
-                exclude_width = 0.0
-                if shape.has_outline and not shape.style.brush_name:
-                    point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
-                                     for e in shape.edges}
-                    widths = [self.eval(layer.mesh.points[i].width, frame)
-                             for i in point_indices]
-                    tapered = (max(widths) - min(widths) > 1e-6) if widths else False
-                    if not tapered:
-                        point_width = widths[0] if widths else 1.0
-                        line_width = self.eval(shape.style.line_width, frame)
-                        exclude_width = self._stroke_width_px(line_width, point_width)
-                paths.append((d, exclude_width))
+            self._active_actions = self._active_actions_along(ancestors, frame)
+            try:
+                deform = build_deform_chain(ancestors, layer, frame, self)
+                geometries, to_px = self._geometry_and_mapper(layer.mesh, deform, frame)
+                for shape in layer.mesh.shapes:
+                    d = build_path_d(geometries, shape.edges, to_px)
+                    if not d:
+                        continue
+                    exclude_width = 0.0
+                    if shape.has_outline and not shape.style.brush_name:
+                        point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
+                                         for e in shape.edges}
+                        widths = [self.eval(layer.mesh.points[i].width, frame)
+                                 for i in point_indices]
+                        tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                        if not tapered:
+                            point_width = widths[0] if widths else 1.0
+                            line_width = self.eval(shape.style.line_width, frame)
+                            exclude_width = self._stroke_width_px(line_width, point_width)
+                    paths.append((d, exclude_width))
+            finally:
+                self._active_actions = []
         for child in layer.children:
             if child.masking == 2:
                 paths += self._mask_source_shapes(child, ancestors + (layer,), frame)
@@ -3375,15 +4156,18 @@ class Exporter:
         special-cased (and disabled) top-level masking entirely, and why that
         turned out to be the wrong fix for a different, unrelated bug.
 
-        NOTE: this is always evaluated with an EMPTY Smart Bone context
-        (self._active_actions), never whatever dials are active for the mesh
-        layer(s) being clipped.  That is not a deliberate design choice - it
-        falls out of exactly when export_layer/export_document happen to call
-        this relative to when they set/clear self._active_actions (always
-        *between* two clears, by construction - see both methods) - but it
-        has been carefully preserved rather than "fixed", since there is no
-        reference to confirm what SHOULD happen instead.  See the module
-        docstring's KNOWN GAPS.
+        NOTE ON SMART BONE CONTEXT: `self._active_actions` is empty when this
+        method itself is entered (export_layer/export_document always call it
+        *between* two clears - see both methods), but each mask source's OWN
+        geometry is evaluated under ITS OWN correct Smart Bone context, set
+        inside `_mask_source_shapes` - NOT left empty.  This used to be a
+        real, confirmed bug: `SketchBone.animeproj`'s "goz" (eye) shape is a
+        `masking == 2` source whose own fill correctly closes for a blink
+        (driven by the `goz-sol-ac-kapa`/`goz-sag-ac-kapa` Smart Bone dials),
+        but the mask built from its geometry stayed permanently open-eye-
+        shaped while that context was left empty here - confirmed against
+        `SketchBone.mp4`: the masked "goz-bebegi" (pupil) visibly failed to
+        disappear during a blink, though the eye's own visible fill did.
         """
         if container is None:
             return []
@@ -3400,32 +4184,37 @@ class Exporter:
                                     frame: float) -> list[tuple[list[dict], float]]:
         """Bezier counterpart of _mask_source_shapes(), for a Lottie writer -
         same recursion, same (per-shape geometry, exclude_width) pairing,
-        `build_path_bezier()` in place of `build_path_d()`.  See
-        _mask_source_shapes's own docstring for what `exclude_width` means;
-        a Lottie consumer is not required to use it (a plain per-source
-        union, dropping the exclude-width carve-out, is a documented,
-        counted simplification - see moho2lottie.py's own notes)."""
+        `build_path_bezier()` in place of `build_path_d()`, same per-source
+        Smart Bone context fix (see _mask_source_shapes's own docstring).
+        See _mask_source_shapes's own docstring for what `exclude_width`
+        means; a Lottie consumer is not required to use it (a plain
+        per-source union, dropping the exclude-width carve-out, is a
+        documented, counted simplification - see moho2lottie.py's own
+        notes)."""
         paths: list[tuple[list[dict], float]] = []
         if layer.mesh is not None:
-            deform = build_deform_chain(ancestors, layer, frame, self)
-            geometries = self._curve_geometries(layer.mesh, frame)
-            to_px = self._deformed_pixel_mapper(deform, frame, layer)
-            for shape in layer.mesh.shapes:
-                beziers = build_path_bezier(geometries, shape.edges, to_px)
-                if not beziers:
-                    continue
-                exclude_width = 0.0
-                if shape.has_outline and not shape.style.brush_name:
-                    point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
-                                     for e in shape.edges}
-                    widths = [self.eval(layer.mesh.points[i].width, frame)
-                             for i in point_indices]
-                    tapered = (max(widths) - min(widths) > 1e-6) if widths else False
-                    if not tapered:
-                        point_width = widths[0] if widths else 1.0
-                        line_width = self.eval(shape.style.line_width, frame)
-                        exclude_width = self._stroke_width_px(line_width, point_width)
-                paths.append((beziers, exclude_width))
+            self._active_actions = self._active_actions_along(ancestors, frame)
+            try:
+                deform = build_deform_chain(ancestors, layer, frame, self)
+                geometries, to_px = self._geometry_and_mapper(layer.mesh, deform, frame)
+                for shape in layer.mesh.shapes:
+                    beziers = build_path_bezier(geometries, shape.edges, to_px)
+                    if not beziers:
+                        continue
+                    exclude_width = 0.0
+                    if shape.has_outline and not shape.style.brush_name:
+                        point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
+                                         for e in shape.edges}
+                        widths = [self.eval(layer.mesh.points[i].width, frame)
+                                 for i in point_indices]
+                        tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                        if not tapered:
+                            point_width = widths[0] if widths else 1.0
+                            line_width = self.eval(shape.style.line_width, frame)
+                            exclude_width = self._stroke_width_px(line_width, point_width)
+                    paths.append((beziers, exclude_width))
+            finally:
+                self._active_actions = []
         for child in layer.children:
             if child.masking == 2:
                 paths += self._mask_source_shapes_bezier(child, ancestors + (layer,), frame)
@@ -3435,8 +4224,8 @@ class Exporter:
                               chain_through_container: Sequence[Layer],
                               frame: float) -> list[tuple[list[dict], float]]:
         """Bezier counterpart of _mask_sources(), for a Lottie writer - same
-        group_mask/masking rules, same NOTE about the empty Smart Bone
-        context (see _mask_sources's own docstring), `_mask_source_shapes_bezier`
+        group_mask/masking rules, same per-source Smart Bone context fix
+        (see _mask_sources's own docstring), `_mask_source_shapes_bezier`
         in place of `_mask_source_shapes`."""
         if container is None:
             return []
@@ -3471,8 +4260,11 @@ class Exporter:
     # -- shape rendering / SVG assembly --------------------------------------
 
     def _render_mesh(self, mesh: Mesh, to_px: Callable[[Vec2], Vec2], frame: float,
-                      indent: str, suppress_outline: bool = False) -> tuple[list[str], list[Vec2]]:
-        geometries = self._curve_geometries(mesh, frame)
+                      indent: str, suppress_outline: bool = False,
+                      geometries: Optional[list[CurveGeometry]] = None
+                      ) -> tuple[list[str], list[Vec2]]:
+        if geometries is None:
+            geometries = self._curve_geometries(mesh, frame)
         return ShapeGroupRenderer(self, mesh, geometries, to_px, frame, indent,
                                    suppress_outline).render()
 
@@ -3517,15 +4309,17 @@ class Exporter:
         coordinates straight to canvas scale - the CLI's --local.
         """
         if local:
+            geometries = None
             to_px = self._plain_pixel_mapper(IDENTITY_MATRIX)
         else:
             self._active_actions = self._active_actions_along(ancestors, frame)
             self._layer_scale = self._full_chain_matrix(ancestors, layer, frame).uniform_scale() or 1.0
             chain = build_deform_chain(ancestors, layer, frame, self)
-            to_px = self._deformed_pixel_mapper(chain, frame, layer)
+            geometries, to_px = self._geometry_and_mapper(layer.mesh, chain, frame)
 
         body, pixel_points = self._render_mesh(layer.mesh, to_px, frame, indent="    ",
-                                               suppress_outline=layer.kind is LayerKind.PATCH)
+                                               suppress_outline=layer.kind is LayerKind.PATCH,
+                                               geometries=geometries)
         self._active_actions = []          # see the note in _mask_sources for why this
                                              # ordering (clear, THEN compute the mask) matters
 
@@ -3683,8 +4477,7 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 exporter._active_actions = exporter._active_actions_along(ancestors, frame)
                 exporter._layer_scale = world_here.uniform_scale() or 1.0
                 chain = build_deform_chain(ancestors, layer, frame, exporter)
-                to_px = exporter._deformed_pixel_mapper(chain, frame, layer)
-                geometries = exporter._curve_geometries(layer.mesh, frame)
+                geometries, to_px = exporter._geometry_and_mapper(layer.mesh, chain, frame)
                 yield RenderItem("mesh", layer, ancestors, len(ancestors),
                                   exempt=child_exempt, geometries=geometries, to_px=to_px)
                 exporter._active_actions = []
@@ -3771,7 +4564,7 @@ class ShapeGroupRenderer:
         self._group: list[_GroupMember] = []
 
     def render(self) -> tuple[list[str], list[Vec2]]:
-        for shape in self.mesh.shapes:
+        for shape in self.mesh.draw_order():
             self._render_shape(shape)
         self._flush()
         return self.defs + self.body, self.pixel_points
@@ -4113,6 +4906,19 @@ def main() -> None:
                              "the SVG - the standard \"@2x asset\" trick, noticeably sharper "
                              "for a fine/sparse brush texture at a roughly N^2 file-size cost "
                              "for that image. Pass 1.0 to composite at exact 1:1 size instead")
+    parser.add_argument("--smooth-joints", action="store_true",
+                        help="approximate Moho's \"Smooth Joint for Bone Pair\": a layer bound "
+                             "to exactly ONE bone deforms rigidly and tears away from the next "
+                             "limb segment at a bent joint, so blend it across that bone's "
+                             "parent and children instead - see Exporter._effective_subset. "
+                             "A heuristic (no sample document records whether Moho's own option "
+                             "is on), hence off by default")
+    parser.add_argument("--point-bones", action="store_true",
+                        help="honour Moho's per-POINT bone binding "
+                             "(mesh.points[].parent). Measured MUCH worse than "
+                             "ignoring it - see Exporter._geometry_and_mapper - "
+                             "so it is off by default and kept only for further "
+                             "investigation")
     args = parser.parse_args()
 
     if args.brush_raster and Image is None:
@@ -4124,7 +4930,9 @@ def main() -> None:
                               brush_dir=args.brush_dir,
                               brush_spacing_mul=args.brush_spacing_mul,
                               brush_raster=args.brush_raster,
-                              brush_raster_supersample=args.brush_raster_supersample)
+                              brush_raster_supersample=args.brush_raster_supersample,
+                              smooth_bone_joints=args.smooth_joints,
+                              point_bone_binding=args.point_bones)
     document = load_document(args.project)
     exporter = Exporter(document, settings)
 

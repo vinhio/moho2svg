@@ -17,7 +17,8 @@ Deliberately out of scope for this exporter (see docs/moho-to-lottie-design.md
 section 2.2, and the corresponding counted warnings on stderr at the end of
 an export): brush-textured strokes (drawn as a plain uniform stroke
 instead), boolean shape combination via combo_mode (drawn as a plain,
-unclipped outline), ImageLayer, Smart Warp.
+unclipped outline), ImageLayer, Smart Warp, and layers driven by Moho's own
+rigid-body physics simulation (rendered at their rest pose on every frame).
 """
 
 import argparse
@@ -57,6 +58,10 @@ WARNING_EXPLANATIONS = {
                              "stroke band back out of the mask so it stays "
                              "visible on top; this writer draws a plain "
                              "union mask instead, without that carve-out",
+    "physics": "layer(s) driven by Moho's own rigid-body physics simulation "
+               "(gravity/velocity/forces), which this exporter does not run - "
+               "each renders at its rest pose on every sampled frame instead "
+               "of the simulated motion Moho itself would show",
 }
 
 # Lottie's line-cap constant (shapes/base-stroke.json's "lc"), keyed by the
@@ -64,6 +69,16 @@ WARNING_EXPLANATIONS = {
 # writer's own stroke-linecap - deriving it from that string, not from the
 # raw line_caps int, means the two exporters cannot drift apart.
 LINE_CAPS = {"butt": 1, "round": 2, "square": 3}
+
+# Lottie's `constants/fill-rule` (schema: 1 = "Non Zero", 2 = "Even Odd").
+# Moho is ALWAYS even-odd - confirmed from Moho's own SVG export, which sets
+# style="fill-rule:evenodd" once for the whole document, and reproduced by
+# moho2svg.py writing fill-rule="evenodd" on every shape fill it emits.
+# This writer used to send 1 (non-zero) for shape fills and gradient fills,
+# which silently plugged every hole built from counter-wound subpaths: the
+# skull inside `SketchBone.animeproj`'s "rozet1" badge lost its eye sockets,
+# and any ring-shaped fill would fill in solid the same way.
+FILL_RULE_EVEN_ODD = 2
 
 
 def identity_transform() -> dict:
@@ -96,6 +111,7 @@ class LottieExporter:
         frame produces static paths; several (Task 4) produce path
         keyframes.
         """
+        self._count_physics_layers()
         layers = self._build_layers(frames, include_hidden)
         return {
             "v": LOTTIE_VERSION,
@@ -111,6 +127,23 @@ class LottieExporter:
             "assets": [],
             "layers": layers,
         }
+
+    def _count_physics_layers(self) -> None:
+        """Count every layer Moho would animate via its own rigid-body
+        physics simulation instead of a keyframed channel - see
+        Layer.physics_dynamic.
+
+        Checked once, independent of `frames`: `physics.enabled`/`.static`
+        are plain (never-animated) booleans on the layer itself, so whether
+        a layer is physics-driven cannot change frame to frame the way a
+        SwitchLayer's active child can. `Document.walk()` visits every
+        layer, containers included, since a physics body is as likely to be
+        the `BoneLayer` wrapping a whole rig (as in `Bandit.mohoproj`) as a
+        single mesh layer.
+        """
+        for _ancestors, layer in self.document.walk():
+            if layer.physics_dynamic:
+                self.warnings["physics"] += 1
 
     def _build_layers(self, frames, include_hidden: bool = False) -> list:
         """One Lottie shape layer per Moho mesh layer, in Lottie draw order.
@@ -648,10 +681,34 @@ class LottieExporter:
         Lottie (like Moho/SVG) paints EARLIER shape entries on top - this
         reproduces _render_shape's own paint order (fill drawn first/under,
         the outline drawn after/on top).
+
+        For the SAME reason the whole SHAPE sequence is emitted back to
+        front - `reversed` below - exactly as _build_layers reverses the
+        layer list.  Moho draws mesh.shapes in file order, so shapes[0] is
+        the BACKMOST; under "earlier entries paint on top" it must therefore
+        come LAST.  Emitting them in plain file order (what this method used
+        to do) inverted every multi-shape layer's internal z-order while
+        leaving single-shape layers correct - an inconsistency provable from
+        this writer alone, since it already relies on "earlier = on top"
+        both for outline-over-fill above and for _build_layers' own
+        `collected.reverse()`.  Confirmed against `SketchBone.animeproj`:
+        `kalca` draws a light hip fill (shape 0) then a darker belt band
+        (shape 1) on top of it - moho2svg.py emits them in that order and
+        the reference frames show the belt - while this writer buried the
+        belt under the hip fill, so only one of the two colours was ever
+        visible.  `ara-cizgi`, the one layer nearby with a SINGLE shape,
+        stayed correct throughout, which is the signature of an intra-layer
+        ordering fault rather than a geometry or colour one.
+
+        Only the paint order is reversed; the `nm` suffixes are still
+        allocated in file order, so a group's name keeps matching the shape
+        index moho2svg.py would give it.
         """
         style_names_used: set = set()
-        out = []
+        blocks: list = []
         for acc in accs:
+            out: list = []
+            blocks.append(out)
             # Built unconditionally, even for an outline-only shape, purely
             # as the SVG writer's own "does this shape have any geometry at
             # all" gate - mirrors build_path_d()'s use in _render_shape.
@@ -679,12 +736,12 @@ class LottieExporter:
                     elements.append(self._gradient_fill(acc, frames))
                 else:
                     color = acc["fill_color"]
-                    elements.append({"ty": "fl", "r": 1,
+                    elements.append({"ty": "fl", "r": FILL_RULE_EVEN_ODD,
                                       "c": {"a": 0, "k": [color.r, color.g, color.b]},
                                       "o": {"a": 0, "k": color.a * 100}})
                 elements.append({"ty": "tr", **identity_transform()})
                 out.append({"ty": "gr", "nm": f"{name}_fill", "it": elements})
-        return out
+        return [group for block in reversed(blocks) for group in block]
 
     def _gradient_fill(self, acc: dict, frames) -> dict:
         """A Lottie "gf" gradient fill element from `acc["gradient"]" (the
@@ -709,7 +766,7 @@ class LottieExporter:
                 bbox, grad["lottie_type"], grad["scale"], grad["rotation"])
             starts.append(start)
             ends.append(end)
-        return {"ty": "gf", "r": 1, "t": grad["lottie_type"],
+        return {"ty": "gf", "r": FILL_RULE_EVEN_ODD, "t": grad["lottie_type"],
                 "g": {"p": grad["stop_count"], "k": {"a": 0, "k": grad["stops"]}},
                 "s": self._point_property(starts, frames),
                 "e": self._point_property(ends, frames),
@@ -757,13 +814,14 @@ class LottieExporter:
         color = acc["outline_color"]
         elements = self._sh_elements(acc["outline_per_frame"], frames)
         if acc["outline_kind"] == "taper":
-            # A closed ring comes back as two counter-wound loops (see
-            # TaperedStrokeOutliner.build_bezier) that need an evenodd fill
-            # to leave the hole between them; an open "capsule" polygon is
-            # a single loop and needs the ordinary nonzero rule.  Subpath
-            # count is asserted stable above, so checking frame 0 suffices.
-            fill_rule = 2 if len(acc["outline_per_frame"][0]) > 1 else 1
-            elements.append({"ty": "fl", "r": fill_rule,
+            # Even-odd unconditionally, matching the SVG writer, which puts
+            # fill-rule="evenodd" on a tapered outline whether it came back
+            # as two counter-wound loops (a closed ring, needing the rule to
+            # leave its hole) or one loop (an open "capsule").  This used to
+            # pick non-zero for the single-loop case on the grounds that the
+            # two rules agree there - true only while the loop does not
+            # cross itself, which an offset curve round a tight bend can do.
+            elements.append({"ty": "fl", "r": FILL_RULE_EVEN_ODD,
                               "c": {"a": 0, "k": [color.r, color.g, color.b]},
                               "o": {"a": 0, "k": color.a * 100}})
         else:
@@ -820,6 +878,12 @@ def main() -> None:
                         help="export a single still frame instead of the document's "
                              "own [start_frame, end_frame] range")
     parser.add_argument("--include-hidden", action="store_true")
+    parser.add_argument("--smooth-joints", action="store_true",
+                        help="approximate Moho's \"Smooth Joint for Bone Pair\" - see "
+                             "moho2svg.py's Exporter._effective_subset. Closes the tear "
+                             "between two limb halves that are each bound to a single bone, "
+                             "but measured slightly WORSE against the reference frames "
+                             "overall, so it is off by default")
     parser.add_argument("--validate", action="store_true",
                         help="validate the output against lottie/lottie.schema.json "
                              "(needs the optional 'jsonschema' package)")
@@ -835,7 +899,8 @@ def main() -> None:
         # Lottie's data model, but Moho's own channels are keyframed at
         # integer frames, so sampling anything finer would not add fidelity.
         frames = list(range(document.start_frame, document.end_frame + 1))
-    exporter = LottieExporter(document, RenderSettings())
+    exporter = LottieExporter(document,
+                               RenderSettings(smooth_bone_joints=args.smooth_joints))
     lottie = exporter.export(frames, include_hidden=args.include_hidden)
 
     with open(args.out, "w", encoding="utf-8") as f:

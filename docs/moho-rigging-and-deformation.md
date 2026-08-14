@@ -140,8 +140,25 @@ All 40+ bone fields, grouped by what they are for. "Used" means
 
 **Editor state (not used)**
 
-`selected`, `hidden`, `shy`, `bone_label_showing`, `bone_tags`, `flip_h`,
-`flip_v`, `angle_weight`, `pos_weight`, `scale_weight`.
+`selected`, `hidden`, `shy`, `bone_label_showing`, `bone_tags`,
+`angle_weight`, `pos_weight`, `scale_weight`.
+
+**`flip_h` / `flip_v` — used (correcting an earlier "editor state" claim)**
+
+Bool channels that mirror everything the bone drives, applied by
+`Skeleton.world_matrices` exactly the way `Layer.local_matrix` applies a
+*layer's* own flips: `flip_h` negates the matrix's first column (the bone's
+own direction axis, the one `anim_scale` scales), `flip_v` the second.
+
+Rare but real: exactly **one** bone across all 19 sample documents ever sets
+either — `SketchBone.animeproj`'s `B23`, the left ankle that drives the
+`ayak-sol` foot layer through its `flexi_bone_subset`, keyframed `flip_h`
+`False` at frame 0 → `True` at frame 44 (an animator turning the foot around
+mid-walk rather than re-drawing it). While this was classed as editor state
+and ignored, that foot rendered pointing backwards against its own direction
+of travel for the whole second half of the walk. Fixing it cut the foot's
+pixel error against the reference frames by **51.9%** (measured over all 120
+frames of `moho/SketchBone/`).
 
 **Special case: `offset`** — see [§ 3.7](#37-offset-the-offset-bone-tool). It
 is listed under "editor state" in
@@ -587,8 +604,109 @@ Confirmed by reading the code (`Bone._build`, `Skeleton.world_matrices`,
 | Flexible binding + `flexi_bone_subset` + `strength` gate | implemented, falloff is a heuristic |
 | Deforming in the bone layer's own space, at any nesting depth | implemented |
 | Smart Bone dials driving actions | implemented |
-| Bone constraints, control bones, IK, dynamics, `scaling_mode`, `offset`, `anim_parent` | read into the model, **never applied** |
+| 2-bone Target IK (`target_bone`) + auto-stretch (`scaling_mode`/`max_auto_scaling`) | implemented — see `Skeleton._solve_ik_pair` |
+| Bone `flip_h` / `flip_v` | implemented — see `Skeleton.world_matrices` |
+| Bone constraints, control bones, dynamics, `offset`, `anim_parent` | read into the model, **never applied** |
 | `binding_mode`, `grandpa_bone`, `flexi_bone_elbow`, `bones_groups` | ignored |
+
+### 7.1 Audit: which unread fields could still matter
+
+Every field below was checked against all 19 sample documents, to separate
+"unread and harmless here" from "unread and a real gap". Recording the
+negative results matters as much as the positive ones: it stops the same
+field being re-investigated later.
+
+| Field | Where | Finding |
+|---|---|---|
+| `anim_parent` | bone | **Redundant here.** Never animated, and never differs from the static `parent`, on any bone in any of the 19 documents — including `ReparentBone.animeproj`, whose whole subject is re-parenting. |
+| `angle_/pos_/scale_control_parent` | bone | Not set on any bone of `SketchBone.animeproj`. Real elsewhere (`ControlBones.animeproj`), still unapplied. |
+| `flexi_bone_elbow` | layer | `False` on all 101 layers that carry it. Name suggests the joint-smoothing this tool lacks, but no sample turns it on, so its effect cannot be observed. |
+| `binding_mode` | skeleton | Effectively constant: `1` on 63 of 64 skeletons, `2` on one (`OffsetBoneTool.animeproj`'s "Happy Dance"). Not a per-layer switch. |
+| `mesh.points[].parent` | mesh point | **Per-point bone binding — a real, unimplemented feature.** See below. |
+| `mesh.groups` | mesh | Point groups. Empty on all but 10 meshes (`ReparentBone` / `SelectandReparentBoneTool` hands and feet, `Closed`). Still unread. |
+| `layer.timing_offset` | layer | Shifts a layer's whole animation in time. `0` on 839 layers, **`45` on 3** — `Rabbit.animeproj`'s `ProsBox`, `PROS` and `T I  PS`. Those three are therefore 45 frames out of step in any animated export. Unread. |
+
+**Per-point bone binding (`mesh.points[].parent`) is used far more widely
+than an earlier revision of this table claimed.** `MeshPoint._build` reads
+only `position` and `width`, so the field is dropped entirely. Corpus-wide
+distribution of the value: `-2` on 7,365 points (use the layer's own
+binding), `-1` on 551, and **a specific bone index on roughly 4,000 points
+spread over 119 meshes**. `Bandit.mohoproj` leans on it heavily — `Leg_F`
+binds 9 of its 28 points to bone 11, `Ears` binds all 20 across bones
+2/20/21/22/23, and `Body`, `BlueSpot`, `YellowSpot`, `Back_Texture` each
+pin part of themselves. Those meshes currently deform by layer binding
+instead of the artist's explicit per-point assignment.
+
+It is **not** what tore `SketchBone.animeproj`'s arms apart: every point of
+`kol-sol-ust`/`kol-sol-alt`/`kol-sag-ust`/`kol-sag-alt` is `-2`, and that
+document uses point binding on only 2 meshes (both ears, 5 points each to
+bone 0). The arm tear comes from single-bone `flexi_bone_subset` binding
+being rigid — see `Exporter._effective_subset`.
+
+**Implemented, measured, and left DISABLED** (`--point-bones`,
+`RenderSettings.point_bone_binding`). Honouring a per-point bone requires
+deforming `mesh.points` *before* `CurveGeometry.build` rather than deforming
+finished control points after, because a Bezier handle belongs to no single
+point and so has no bone to follow. `Exporter._geometry_and_mapper` picks
+that order only for a mesh that actually uses the field, since the two orders
+are not interchangeable — handle reconstruction commutes with a similarity
+transform but not with the non-uniform scale layer transforms and
+`Skeleton.world_matrices`'s asymmetric bone scale carry. (Switching *every*
+mesh moved all five tracked SVGs, 36,119 lines in `SketchBone.svg` alone.)
+
+Reading the field as "this point follows that bone rigidly" then measured
+**much worse**, so it is not enabled:
+
+| mesh (SketchBone ears) | err% ignoring the field | err% honouring it |
+|---|---|---|
+| `kulak-sol/kulak-sol` | 16.0% | **48.4%** |
+| `kulak-sag/kulak-sol` | 13.8% | **38.5%** |
+
+Whole-frame difference went **78.9% the wrong way**. So the field is real and
+widely used, but this interpretation of it is wrong. Untested candidates: the
+index may be into the **outermost** bone layer's skeleton rather than the
+innermost one the current code uses, or a bound point may still blend with
+its neighbours instead of snapping rigidly. The machinery is left wired up
+but off, so the next attempt starts from a measurement rather than a guess.
+| `mesh.shape_order` / `anim_shape_order` | mesh | Investigated twice; **correctly ignored** — see below. |
+
+**`shape_order` is an ID registry, not a z-order — confirmed, correcting an
+earlier revision of this section.** It is a `String` channel of shape *IDs*.
+It equals `mesh.shapes` file order in 565 of 614 meshes, and **differs in
+49** — `Bandit.mohoproj` (5/21), `IndependentAngle` /
+`MaximumIKStrethching` / `TargetBone` (12/28 each), `OffsetBoneTool` (6/19),
+`BoneDynamics` / `Rabbit` (1 each). An earlier revision read that as "49
+meshes drawn in the wrong z-order". **That was wrong.** In **47 of the 49**
+the ID list is strictly ascending while the file order is not, which is what
+a registry looks like and not what an artist-chosen z-order looks like
+(`Arm_B`: `"1|6|7|9|10"` stored, file order `10|9|6|1|7`, near-reverse); the
+2 exceptions, Bandit's `Leg_F`/`Leg_F 2`, are near-ascending too. Reordering
+by it also breaks `combo_mode` grouping, which is built from adjacency in
+file order — rendering Bandit that way aborts rather than drawing. Both
+findings match the independent experiment recorded in `moho2svg.py`'s own
+docstring. `Mesh.draw_order()` now states the rule in one place.
+`SketchBone.animeproj` is unaffected either way (0/82), and
+`anim_shape_order` is `false` on all 614 meshes, so no sampled document
+animates its z-order.
+
+**Joint tearing between two rigidly-bound halves is NOT explained by any
+unread field.** A layer whose `flexi_bone_subset` names exactly one bone
+deforms rigidly (`Skinner.deform` normalises by the single weight, so the
+falloff cancels out). `SketchBone.animeproj` binds each arm half that way -
+`kol-sol-ust`→bone 13, `kol-sol-alt`→bone 14, `kol-sag-ust`→15,
+`kol-sag-alt`→16 - so when the elbow bends the two halves rotate about
+different pivots and pull apart. Measured on the rendered outlines: the gap
+between `kol-sol-ust` and `kol-sol-alt` holds at 1-9 px up to frame 51, then
+jumps to 40 px at frame 56 and settles near 26 px, exactly tracking bone 14's
+own 41.5 degree swing between its keyframes at frames 49 and 55. The
+skeleton itself stays sound throughout (bone 13's tip to bone 14's origin is
+a constant 7.8 px), and neither half is point-animated, layer-transform
+animated, or non-rigidly scaled - so this is the binding model, not the
+bones. Moho's own "Smooth Joint for Bone Pair" is the feature that would
+blend across such a joint, and **no stored field for it was found**: the
+audit above rules out every candidate. Closing this would mean inventing a
+blend, which the falloff is already flagged as unvalidated for
+([§ 2.4](#24-flexible-region-binding)).
 | `parent_bone == -3` | falls through to flexible binding, unconfirmed |
 | Smart Warp / distortion layers | **not implemented, not detected** |
 | Point groups, curve profiles, `start_percent` / `end_percent` | ignored |

@@ -54,6 +54,16 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
     "fill" or "outline", matching moho2lottie's own two-groups-per-shape
     split (see docs/moho-to-lottie-plan.md Task 3's note on why fill and
     outline are never combined into one Lottie group).
+
+    The SHAPE sequence within each layer is reversed too, not just the layer
+    list - see LottieExporter._finalize_shapes for why Moho's back-to-front
+    mesh.shapes order becomes front-to-back in Lottie.  This check shares
+    that convention deliberately: while both sides emitted plain file order,
+    the check passed on output whose multi-shape layers were internally
+    z-inverted (the `kalca` belt buried under its own hip fill), because it
+    only ever compared the two orderings against EACH OTHER.  Geometry
+    agreement is all it can prove; the ordering convention itself has to be
+    argued from the writer's own rules and checked against reference frames.
     """
     Channel.reset_cache()
     doc = load_document(project_path)
@@ -62,13 +72,15 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
     for item in walk_render_tree(exp, frame, include_hidden):
         if item.event != "mesh":
             continue
-        shapes = []
+        blocks = []
         for shape in item.layer.mesh.shapes:
             if not shape.edges:
                 continue
             fill_beziers = build_path_bezier(item.geometries, shape.edges, item.to_px)
             if not fill_beziers:
                 continue
+            shapes = []
+            blocks.append(shapes)
             if shape.has_outline:
                 widths = [exp.eval(item.layer.mesh.points[i].width, frame)
                           for i in {item.layer.mesh.curves[e.curve].points[e.segment].point_index
@@ -86,7 +98,8 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
                     shapes.append(("outline", outline))
             if shape.has_fill:
                 shapes.append(("fill", fill_beziers))
-        out.append((item.layer.name, shapes))
+        flat = [entry for block in reversed(blocks) for entry in block]
+        out.append((item.layer.name, flat))
     out.reverse()          # Moho back-to-front -> Lottie front-to-back
     return out
 

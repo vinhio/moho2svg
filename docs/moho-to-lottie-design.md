@@ -80,9 +80,42 @@ Non-goals are listed in [§ 2.2](#22-out-of-scope-for-v1).
 | Boolean shape combination (`combo_mode`) | Only **16 shapes in all 19 documents** use a non-zero value (14 intersect, 2 union), all in `Bandit.mohoproj`. lottie-web's support for the `mm` merge element is poor. v1 draws these shapes with their plain outline and logs a warning naming each one. |
 | Smart Warp | Not decoded anywhere in this repository, and no sample document uses it. |
 | Cycle markers, `interp` easing | `moho2svg.py` itself ignores both (linear interpolation, no cycling). v1 inherits that behaviour rather than diverging from the renderer it is verified against. |
+| Rigid-body physics (`physics.enabled` with `physics.static == false`) | `moho2svg.py` already ignores physics, on the stated assumption that "none of them affect a flat vector export of a single frame" - true for a single frame, but not for an animated Lottie export: `Bandit.mohoproj`'s own top-level `BoneLayer` is a dynamic physics body, and its keyframed channels alone (all ending by frame 41-90) do not account for the screen-spanning motion Moho's own render shows across its full 25-127 frame range. Neither module runs a physics simulation, so an affected layer renders at its rest pose on every sampled frame; v1 logs a counted warning naming each one instead of silently producing a static-looking layer. |
 
 Every exclusion must produce a **counted warning on stderr**, not silence. A
 silently dropped feature reads as "supported" to the next reader.
+
+### 2.3 Two ordering rules the writer must get right
+
+Lottie paints the **earlier** entry of a list on top. That single rule has to
+be applied at *both* levels, and missing either one is invisible to
+`tools/check_lottie_geometry.py`, which only ever compares the writer's
+ordering against its own expectation of it:
+
+1. **Layers** — `_build_layers` reverses `collected`, since Moho lists layers
+   back to front.
+2. **Shapes within a layer** — `_finalize_shapes` reverses the shape blocks,
+   for exactly the same reason: `mesh.shapes[0]` is the backmost. This was
+   missed at first, which z-inverted every multi-shape layer while leaving
+   single-shape layers correct — `SketchBone.animeproj`'s `kalca` drew its
+   light hip fill over its own darker belt band, so only one of the two
+   colours was ever visible, while the neighbouring single-shape `ara-cizgi`
+   looked fine.
+
+Related, and found the same way: shape fills and gradient fills must set
+`"r": 2` (**even-odd**), not `1` (non-zero). Moho is always even-odd, and
+`moho2svg.py` writes `fill-rule="evenodd"` on every shape fill. With
+non-zero, any hole built from counter-wound subpaths plugs solid — the skull
+inside the `rozet1` badge lost its eye sockets.
+
+Moho's own `mesh.shape_order` (a `String` channel of shape IDs) looks like a
+z-order but is **not** one — it is an ID registry, and `mesh.shapes` file
+order remains the draw order. It differs from file order in 49 of 614
+meshes, but in 47 of those it is strictly ascending while the file order is
+not, and reordering by it breaks `combo_mode` grouping. See
+`Mesh.draw_order()` and `moho-rigging-and-deformation.md` § 7.1 for the full
+evidence. `SketchBone.animeproj` is unaffected either way (0/82), so the
+ordering fix above stands on its own.
 
 ---
 

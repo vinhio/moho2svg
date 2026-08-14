@@ -256,7 +256,7 @@ assignments to `self._active_actions` bracket it:
 self._active_actions = _active_actions_along(ancestors, frame)   # set
 self._layer_scale    = world_here.uniform_scale() or 1.0
 chain                = build_deform_chain(ancestors, layer, frame, self)
-to_px                = _deformed_pixel_mapper(chain, frame, layer)
+to_px                = _deformed_pixel_mapper(chain, frame)
 body, pts            = _render_mesh(layer.mesh, to_px, frame, indent)
 self._active_actions = []                                        # clear
 ```
@@ -925,18 +925,27 @@ Masking applies **uniformly at every depth, including the document root**.
 An earlier version special-cased top-level masking away; that turned out to be
 the wrong fix for an unrelated bug.
 
-### 9.3 The empty-Smart-Bone-context quirk
+### 9.3 Each mask source gets its own Smart Bone context
 
-`_mask_sources` is always evaluated with `self._active_actions` **empty** —
-never with the dials that are active for the mesh being clipped.
+`_mask_sources` itself is always entered with `self._active_actions`
+**empty** — `export_layer`/`export_document` call it between two clears, by
+construction. That used to mean every mask source's geometry was ALSO built
+under an empty context, never whatever dials are active for the mesh being
+clipped — preserved rather than fixed for a long time, since there was no
+reference export to confirm what should happen instead.
 
-This is not a design decision. It falls out of *when* `export_layer` /
-`export_document` call it relative to where they set and clear
-`_active_actions`: by construction it always lands between two clears. It has
-been **carefully preserved rather than fixed**, because there is no reference
-export to confirm what should happen instead. If you reorder those
-assignments, you change mask geometry for any rig whose mask source is driven
-by a Smart Bone. See the module docstring's KNOWN GAPS.
+**Fixed, confirmed against a real reference:** `_mask_source_shapes` (and its
+Lottie counterpart, `_mask_source_shapes_bezier`) now sets
+`self._active_actions = _active_actions_along(ancestors, frame)` itself,
+per mask source, before evaluating that source's own geometry — exactly the
+context that source would get if it were rendered as an ordinary mesh layer
+— and restores it to empty afterward. Confirmed against `SketchBone.mp4`:
+`SketchBone.animeproj`'s "goz" (eye) shape is a `masking == 2` source whose
+fill correctly closes for a blink (driven by the `goz-sol-ac-kapa`/
+`goz-sag-ac-kapa` Smart Bone dials), but the mask built from its geometry
+stayed permanently open-eye-shaped while this context was left empty - the
+masked "goz-bebegi" (pupil) visibly failed to disappear during a blink in
+the old output, though the eye's own fill did.
 
 ### 9.4 The SVG that comes out
 
@@ -1105,7 +1114,7 @@ reads it.
 | `layer.transforms.*` (5 of 10) | `Layer.local_matrix` | transform |
 | `layer.origin` | `Layer.local_matrix` | transform (pivot) |
 | `layer.parent_bone` | `build_deform_chain` → `SkinStep` | skinning |
-| `layer.flexi_bone_subset` | `_deformed_pixel_mapper` → `Skinner.deform` | skinning |
+| `layer.flexi_bone_subset` | `build_deform_chain` → `SkinStep.subset` → `_deformed_pixel_mapper` → `Skinner.deform` | skinning |
 | `layer.group_mask` | `_mask_sources` | masking, step (A) |
 | `layer.masking` | `_mask_sources`, `_mask_source_shapes`, `member_clip` | masking |
 | `layer.actions[].name` | `Layer.action_names` → `_active_smart_bones` | Smart Bones |

@@ -241,9 +241,12 @@ the format: 584,616 instances across the 19-file sample.
   plain dict instead of a channel object. Both forms are accepted
   transparently (`Channel` treats a bare scalar as a single keyframe).
 
-`moho2svg.py` evaluates a channel with **linear interpolation between the two
+`moho2svg.py` evaluates a channel with a **monotone cubic between the two
 bracketing keyframes**, clamped at both ends, ignoring `interp` entirely. That
-is exact at keyframes and approximate between them.
+is exact at keyframes and approximate between them. The curve shape was
+inferred by scoring rendered output against Moho's own frames, not decoded
+from the file — see
+[`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 3.6.
 
 ### 5.2 Channel types and `val` element shapes
 
@@ -1101,8 +1104,16 @@ Bone fields **not** used, grouped by what they would change:
   rather than nothing — an **exercised** gap. See
   [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 6.
 - **Editor state**: `hidden`, `shy`, `selected`, `bone_label_showing`,
-  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`, `flip_h`,
-  `flip_v`.
+  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`.
+- **`flip_h` / `flip_v`** — Bool channels, listed as editor state by an
+  earlier revision of this document. **That was wrong**: they mirror
+  everything the bone drives, and are now applied by
+  `Skeleton.world_matrices` the same way a layer's own flips are (each
+  negates one matrix column). Set on exactly one bone in the 19-file sample
+  — `SketchBone.animeproj`'s `B23` ankle, `False` → `True` at frame 44 —
+  where ignoring them left the `ayak-sol` foot pointing backwards for half
+  the walk cycle. See
+  [`moho-rigging-and-deformation.md`](moho-rigging-and-deformation.md) § 3.
 - **`offset`** — a plain `Vec2`, listed as editor state by an earlier
   revision of this document. **That was wrong**: it is non-zero on 5 bones in
   `OffsetBoneTool.animeproj` (zero on the other 845), where it is roughly the

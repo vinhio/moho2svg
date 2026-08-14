@@ -70,9 +70,8 @@ def check_document(path):
         for ancestors, layer in doc.vector_layers():
             exp._active_actions = exp._active_actions_along(ancestors, frame)
             exp._layer_scale = exp._full_chain_matrix(ancestors, layer, frame).uniform_scale() or 1.0
-            geometries = exp._curve_geometries(layer.mesh, frame)
             chain = build_deform_chain(ancestors, layer, frame, exp)
-            to_px = exp._deformed_pixel_mapper(chain, frame, layer)
+            geometries, to_px = exp._geometry_and_mapper(layer.mesh, chain, frame)
             exp._active_actions = []
             for index, shape in enumerate(layer.mesh.shapes):
                 if not shape.edges:
