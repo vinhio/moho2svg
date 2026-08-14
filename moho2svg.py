@@ -2570,6 +2570,63 @@ class RenderSettings:
     brush_raster_supersample: float = 2.0    # --brush-raster-supersample; canvas oversampling factor
 
 
+@dataclass
+class RenderItem:
+    """One step of walk_render_tree()'s depth-first walk over the layer
+    tree, in Moho's own draw order (back to front, matching
+    Document.walk()).  export_document and any other writer (e.g. a Lottie
+    exporter) consume the SAME sequence, so neither can make a different
+    masking, visibility, active-child, or deformation decision than the
+    other.
+
+    `event` is one of:
+
+    - "enter": `layer` (a container, or None for the document's own virtual
+      root) is about to have its children walked.  `mask_sources` is that
+      container's OWN contribution to clipping ITS children, via its
+      group_mask - computed once, here, at the exact point the
+      pre-extraction code computed it, because the value depends on
+      self._active_actions being empty at the moment of the call (see
+      Exporter._mask_sources's own docstring for why).  `exempt` says
+      whether `layer` itself ignores ITS OWN parent's mask (always False,
+      and irrelevant, for the virtual root).  A consumer that reconstructs
+      Moho's nested structure opens a masking scope here and closes it at
+      the matching "exit" - see Exporter.export_document for a worked
+      example.
+    - "mesh": one mesh layer to draw.  `geometries`/`to_px` are already
+      built for `frame`, under the correct Smart Bone context - see the
+      warning below about self._active_actions.
+    - "exit": the scope opened by the last unmatched "enter" is finished.
+
+    Every layer that is itself a container is wrapped in its own
+    "enter"/"exit" pair when the walk recurses into it, even one with zero
+    drawable children - Moho itself still draws such a container as an empty
+    group (confirmed: 8 of 201 containers across this repository's sample
+    documents are exactly that), so a consumer that skipped empty
+    "enter"/"exit" pairs would produce different output for those.
+
+    WARNING about self._active_actions: it is set to the correct Smart Bone
+    context for a "mesh" item's own layer and is left set ACROSS the yield,
+    so a consumer may safely evaluate that layer's own animated style
+    channels (fill/line colour, gradients, ...) while handling this item.
+    It is only cleared once the consumer asks walk_render_tree for the NEXT
+    item - do not hold onto a "mesh" RenderItem and evaluate a DIFFERENT
+    layer's channels before doing so.
+
+    `depth` is the true ancestor-chain length (`len(ancestors)`), NOT
+    necessarily an SVG indentation depth - see export_document's own
+    `render_scope` for why those two numbers can differ under `--flat`.
+    """
+    event: str
+    layer: Optional["Layer"]
+    ancestors: tuple
+    depth: int
+    exempt: bool = False
+    mask_sources: Sequence[tuple[str, float]] = ()
+    geometries: Optional[list] = None
+    to_px: Optional[Callable[["Vec2"], "Vec2"]] = None
+
+
 # ============================================================================
 # ==== EXPORTER  (-> render.go: the only stateful piece)                 ====
 # ============================================================================
@@ -3274,91 +3331,163 @@ class Exporter:
     def export_document(self, frame: float = 0, crop: bool = False,
                          nested_groups: bool = True, include_hidden: bool = False) -> str:
         """Export the whole document as one layered SVG - the CLI's
-        --combined mode."""
+        --combined mode.
+
+        Consumes walk_render_tree(): everything about WHAT to draw
+        (visibility, masking, deformation, switch-layer active children)
+        lives there, shared with any other writer that walks the same tree.
+        Everything in this method is purely about HOW to format that as
+        nested SVG <g>/<mask> elements, including the nested_groups/--flat
+        choice, which walk_render_tree has no opinion about at all.
+
+        NOTE (investigation in progress, see the module docstring's MASKING
+        section): confirmed against the Moho app that a masking==2 sibling's
+        own stroke stays fully visible on top of whatever it masks (Bandit's
+        Head_DarkBlue/BellyTexture pair) - this tool still draws it at its
+        plain list position, which is KNOWN WRONG for that specific pair. A
+        naive "move masking==2 to render after every masking==0 sibling" fix
+        was tried and reverted: on this same container most siblings
+        (Arm_B, Tail, Ears, Muzzle, Nose, EyeBrow, Arm_F, ...) are
+        masking==1 ("exempt"), and BellyTexture originally precedes some of
+        them (e.g. Muzzle) - forcing "masking==2 after masking==0" broke
+        that untouched relationship too, dragging BellyTexture's opaque fill
+        on top of the character's eyes/muzzle/nose, which is visibly worse
+        than the bug it was meant to fix. There is no single global reorder
+        of a layer list that satisfies both "every masking==2 after every
+        masking==0" and "never change relative order against any masking==1
+        sibling" for this document - the two constraints conflict for
+        BellyTexture specifically. Not fixed pending more evidence on how
+        masking==1 siblings should interact with this - see KNOWN GAPS.
+        """
         inner: list[str] = []
         pixel_points: list[Vec2] = []
+        it = iter(walk_render_tree(self, frame, include_hidden))
 
-        def emit(layers: Sequence[Layer], world: Mat2D, depth: int,
-                 container: Optional[Layer], ancestors: tuple[Layer, ...]) -> None:
-            pad = "  " * (depth + 1)
+        def render_scope(enter_item: RenderItem, pad_depth: int) -> None:
+            """Consume everything up to and including the "exit" matching
+            `enter_item` (already pulled from `it` by the caller), appending
+            to `inner` exactly as the pre-extraction recursive `emit()` did.
+
+            `pad_depth` is the indentation depth to use for `enter_item`'s
+            own <mask> and for its direct children - deliberately NOT
+            `enter_item.depth`: whether recursing into a nested container
+            actually increases indentation depends on nested_groups/
+            member_clip, a presentation choice only this function makes.
+            """
+            pad = "  " * (pad_depth + 1)
             clip = ""
-            sources = self._mask_sources(container, ancestors, frame)
-            if sources:
+            if enter_item.mask_sources:
                 mask_id = f"mask_{self._next_def_id()}"
-                inner.append(self._mask_element(sources, mask_id, pad))
+                inner.append(self._mask_element(enter_item.mask_sources, mask_id, pad))
                 clip = f' mask="url(#{mask_id})"'
 
-            active_child: Optional[Layer] = None
-            if container is not None and container.kind is LayerKind.SWITCH:
-                active_child = container.switch_active_child(frame, self)
-
-            # NOTE (investigation in progress, see the module docstring's
-            # MASKING section): confirmed against the Moho app that a
-            # masking==2 sibling's own stroke stays fully visible on top of
-            # whatever it masks (Bandit's Head_DarkBlue/BellyTexture pair) -
-            # this tool still draws it at its plain list position, which is
-            # KNOWN WRONG for that specific pair.  A naive "move masking==2
-            # to render after every masking==0 sibling" fix was tried and
-            # reverted: on this same container most siblings (Arm_B, Tail,
-            # Ears, Muzzle, Nose, EyeBrow, Arm_F, ...) are masking==1
-            # ("exempt"), and BellyTexture originally precedes some of them
-            # (e.g. Muzzle) - forcing "masking==2 after masking==0" broke
-            # that untouched relationship too, dragging BellyTexture's
-            # opaque fill on top of the character's eyes/muzzle/nose, which
-            # is visibly worse than the bug it was meant to fix.  There is no
-            # single global reorder of `layers` that satisfies both "every
-            # masking==2 after every masking==0" and "never change relative
-            # order against any masking==1 sibling" for this document - the
-            # two constraints conflict for BellyTexture specifically.  Not
-            # fixed pending more evidence on how masking==1 siblings should
-            # interact with this - see KNOWN GAPS.
-            for layer in layers:
-                if not layer.visible and not include_hidden:
-                    continue
-                if layer.edit_only and not include_hidden:
-                    continue
-                if active_child is not None and layer is not active_child:
-                    continue                  # switch layer: only its active child draws
-                world_here = world.compose(layer.local_matrix(frame, self))
-                name = svg_escape(layer.name)
+            for item in it:
+                if item.event == "exit":
+                    return
                 # the mask source itself, and anything exempt, draws unclipped
-                member_clip = "" if layer.masking in (1, 2) else clip
+                member_clip = "" if item.exempt else clip
+                name = svg_escape(item.layer.name)
 
-                if layer.mesh is not None:
-                    self._active_actions = self._active_actions_along(ancestors, frame)
-                    self._layer_scale = world_here.uniform_scale() or 1.0
-                    chain = build_deform_chain(ancestors, layer, frame, self)
-                    to_px = self._deformed_pixel_mapper(chain, frame, layer)
-                    body, pts = self._render_mesh(layer.mesh, to_px, frame, pad + "  ",
-                                                  suppress_outline=layer.kind is LayerKind.PATCH)
-                    self._active_actions = []
+                if item.event == "mesh":
+                    body, pts = self._render_mesh(
+                        item.layer.mesh, item.to_px, frame, pad + "  ",
+                        suppress_outline=item.layer.kind is LayerKind.PATCH)
                     pixel_points.extend(pts)
                     if body:
                         if nested_groups or member_clip:
                             inner.append(f'{pad}<g id="{name}" '
-                                         f'data-moho-mask="{layer.masking}"{member_clip}>')
+                                         f'data-moho-mask="{item.layer.masking}"{member_clip}>')
                             inner.extend(body)
                             inner.append(f"{pad}</g>")
                         else:
                             inner.extend(body)
-                elif layer.is_container:
+                else:  # "enter" - a container child; recurse into its own scope
                     # A GroupLayer/BoneLayer/SwitchLayer (or a TextLayer with
-                    # no mesh_layer to synthesise a child from) - recurse into
-                    # its children, which may be an empty list; that still
-                    # draws an empty <g>, matching Moho.
+                    # no mesh_layer to synthesise a child from) - its own
+                    # children may be an empty list, which still draws an
+                    # empty <g>, matching Moho.
                     if nested_groups or member_clip:
                         inner.append(f'{pad}<g id="{name}" '
-                                     f'data-moho-type="{layer.type_name}"{member_clip}>')
-                        emit(layer.children, world_here, depth + 1, layer, ancestors + (layer,))
+                                     f'data-moho-type="{item.layer.type_name}"{member_clip}>')
+                        render_scope(item, pad_depth + 1)
                         inner.append(f"{pad}</g>")
                     else:
-                        emit(layer.children, world_here, depth, layer, ancestors + (layer,))
-                # else: neither a mesh nor a container - e.g. an unresolved
-                # PatchLayer (see PATCH LAYERS) whose target never got a
-                # mesh - draws nothing at all, not even an empty <g>.
+                        render_scope(item, pad_depth)
 
-        emit(self.document.layers, IDENTITY_MATRIX, 0, None, ())
+        render_scope(next(it), 0)          # the document's own virtual root
         return self._wrap(self._viewbox(pixel_points, crop), inner)
+
+
+def walk_render_tree(exporter: "Exporter", frame: float,
+                      include_hidden: bool = False) -> Iterator[RenderItem]:
+    """Depth-first walk of a document's layer tree, yielding every decision
+    a renderer needs to draw it: visibility, edit_only, a switch layer's
+    active child, masking exemption, the deform chain, and the resulting
+    per-mesh pixel mapper.  Exporter.export_document and any other writer
+    (e.g. a Lottie exporter) both consume this, so neither can make a
+    different decision than the other.
+
+    This is exactly what used to be export_document's own `emit` closure,
+    with its SVG string-building removed - see Exporter.export_document for
+    the consumer that adds that back for SVG.  The one thing preserved
+    byte-for-byte from the original is the timing of
+    exporter._active_actions: it is set immediately before building a mesh
+    layer's geometry, left SET across the "mesh" RenderItem's yield (so a
+    consumer may evaluate that layer's own style channels under the correct
+    Smart Bone context), and cleared only once the consumer asks for the
+    next item - see moho-export-pipeline.md section 9.3, "the empty Smart
+    Bone context quirk", for why this ordering is load-bearing rather than
+    incidental: Exporter._mask_sources must see an EMPTY context, and it is
+    always called immediately after the previous item's clear (or before
+    any mesh item has run at all).
+    """
+    document = exporter.document
+
+    def walk(layers: Sequence[Layer], container: Optional[Layer],
+             ancestors: tuple[Layer, ...], world: Mat2D,
+             exempt: bool) -> Iterator[RenderItem]:
+        mask_sources = exporter._mask_sources(container, ancestors, frame)
+        yield RenderItem("enter", container, ancestors, len(ancestors),
+                          exempt=exempt, mask_sources=mask_sources)
+
+        active_child: Optional[Layer] = None
+        if container is not None and container.kind is LayerKind.SWITCH:
+            active_child = container.switch_active_child(frame, exporter)
+
+        for layer in layers:
+            if not layer.visible and not include_hidden:
+                continue
+            if layer.edit_only and not include_hidden:
+                continue
+            if active_child is not None and layer is not active_child:
+                continue                  # switch layer: only its active child draws
+            world_here = world.compose(layer.local_matrix(frame, exporter))
+            child_exempt = layer.masking in (1, 2)
+
+            if layer.mesh is not None:
+                exporter._active_actions = exporter._active_actions_along(ancestors, frame)
+                exporter._layer_scale = world_here.uniform_scale() or 1.0
+                chain = build_deform_chain(ancestors, layer, frame, exporter)
+                to_px = exporter._deformed_pixel_mapper(chain, frame, layer)
+                geometries = exporter._curve_geometries(layer.mesh, frame)
+                yield RenderItem("mesh", layer, ancestors, len(ancestors),
+                                  exempt=child_exempt, geometries=geometries, to_px=to_px)
+                exporter._active_actions = []
+            elif layer.is_container:
+                # A GroupLayer/BoneLayer/SwitchLayer (or a TextLayer with no
+                # mesh_layer to synthesise a child from) - recurse into its
+                # children, which may be an empty list; that still yields an
+                # "enter"/"exit" pair with nothing in between, matching
+                # Moho's own still-draws-an-empty-<g> behaviour.
+                yield from walk(layer.children, layer, ancestors + (layer,),
+                                 world_here, child_exempt)
+            # else: neither a mesh nor a container - e.g. an unresolved
+            # PatchLayer (see PATCH LAYERS) whose target never got a mesh -
+            # draws nothing at all, not even an empty "enter"/"exit" pair.
+
+        yield RenderItem("exit", container, ancestors, len(ancestors))
+
+    yield from walk(document.layers, None, (), IDENTITY_MATRIX, False)
 
 
 # ============================================================================

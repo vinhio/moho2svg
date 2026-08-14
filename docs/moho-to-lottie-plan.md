@@ -30,8 +30,8 @@ which step it stopped at, so a reader knows where to resume.
 | P3 | Fix: reset the `Channel` cache when a document is parsed | **DONE** | `5c4b8c3` |
 | P4 | Design document | **DONE** | `87abe40` |
 | P5 | This plan | **DONE** | `496f35c` |
-| 1 | A Bezier path builder beside the SVG one | **DONE** | (pending commit) |
-| 2 | One shared tree walk | IN PROGRESS | — |
+| 1 | A Bezier path builder beside the SVG one | **DONE** | `a91df9f` |
+| 2 | One shared tree walk | **DONE** | `pending` |
 | 3 | A Lottie file with one static frame | TODO | — |
 | 4 | Path keyframes across the frame range | TODO | — |
 | 5 | Gradients | TODO | — |
@@ -320,42 +320,76 @@ git commit -m "Add a Lottie bezier path builder beside the SVG one"
 
 ## Task 2: One shared tree walk
 
-**Status:** TODO
+**Status:** DONE — see the note below on why the shape changed from this
+task's original sketch, and read it before starting Task 3.
 
 **Files:**
 - Modify: `moho2svg.py` — `Exporter.export_document` (the `emit` closure) and a new module-level `RenderItem` dataclass plus `walk_render_tree()`
 
+**⚠ Interface changed from the original sketch below — read this first.**
+While extracting the walk, a real correctness hazard turned up: 8 of the 201
+containers across the sample corpus have **zero drawable descendants**
+(visible, not `edit_only`, and — for a `SwitchLayer` — the active child), and
+Moho still draws such a container as an **empty `<g></g>`**. Four of the five
+byte-identical-gated documents contain one. A `RenderItem` stream that only
+yielded actual mesh layers would have no way to signal "an empty container
+was here", so `export_document` could not have reconstructed that empty
+`<g>` — the gate would have failed on 4 of 5 documents, not passed silently.
+
+The fix was to make `walk_render_tree` yield a small **event stream**
+instead of a flat "one item per mesh layer" list — `"enter"` before a
+container's children, `"mesh"` per drawable mesh layer, `"exit"` after —
+mirroring the bracket structure `emit()` already had. `export_document`
+reconstructs its `<g>` nesting (including empty ones) by consuming this
+stream recursively, using a **single shared iterator**: a nested call reads
+directly off the same iterator via `for item in it`, and returning from that
+call leaves the iterator exactly where the caller's own loop resumes — the
+standard way to consume a flattened bracket-matched sequence without
+rebuilding a stack by hand.
+
+**Consumers written after this task (Task 3 onward) must filter for
+`item.event == "mesh"`** — the stream also contains `"enter"`/`"exit"`
+events that carry no `geometries`/`to_px` at all.
+
 **Interfaces:**
-- Consumes: everything `export_document` already uses — `Exporter._mask_sources`, `Layer.switch_active_child`, `Layer.local_matrix`, `build_deform_chain`, `Exporter._deformed_pixel_mapper`.
+- Consumes: everything `export_document` already used — `Exporter._mask_sources`, `Layer.switch_active_child`, `Layer.local_matrix`, `build_deform_chain`, `Exporter._deformed_pixel_mapper`, `Exporter._curve_geometries`.
 - Produces:
   ```python
   @dataclass
   class RenderItem:
-      layer: Layer                  # the layer to draw
-      ancestors: tuple              # its ancestor chain, root-first
-      depth: int                    # nesting depth, for SVG indentation
-      geometries: list              # CurveGeometry list at this frame
-      to_px: Callable               # mesh point -> canvas pixel
-      masking: int                  # the layer's own masking value
-      mask_sources: Sequence        # (path, alpha) pairs, empty when unmasked
-      container: Optional[Layer]    # the container whose mask applies
+      event: str                              # "enter" | "mesh" | "exit"
+      layer: Optional[Layer]                  # None only for "enter"/"exit" of the virtual root
+      ancestors: tuple                        # root-first, ending in the enclosing container
+      depth: int                              # len(ancestors) — true tree depth, NOT an SVG indent
+      exempt: bool = False                    # masking in (1, 2), relative to the PARENT's mask
+      mask_sources: Sequence = ()             # only non-empty on "enter"; this container's OWN group_mask contribution
+      geometries: Optional[list] = None       # only set on "mesh"
+      to_px: Optional[Callable] = None        # only set on "mesh"
 
   def walk_render_tree(exporter, frame, include_hidden=False) -> Iterator[RenderItem]
   ```
+  A `"mesh"` `RenderItem` is yielded with `exporter._active_actions` already
+  set to the correct Smart Bone context, and that context is **left set
+  across the yield** — cleared only when the consumer asks for the next
+  item. A consumer must finish evaluating that layer's own style channels
+  before advancing the iterator.
 
-- [ ] **Step 1: Capture the current output as the reference**
+- [x] **Step 1: Capture the current output as the reference**
 
-Run:
+Actually run (this repository has no `git stash` in flight; copy instead of
+stashing):
 ```bash
-make gen && git stash list >/dev/null && cp -R svg /tmp/svg-before
+make gen && cp -R svg /tmp/svg-before
 ```
-Expected: `/tmp/svg-before` holds the five reference SVGs.
+Confirmed: `/tmp/svg-before` held the five reference SVGs before this task's
+edit.
 
-- [ ] **Step 2: Extract the walk**
+- [x] **Step 2: Extract the walk**
 
-Move the body of `export_document`'s `emit` closure into `walk_render_tree`,
-yielding a `RenderItem` at the point where `emit` currently calls
-`self._render_mesh`. Keep every decision in place and in order:
+Moved `emit`'s body into `walk_render_tree`'s nested `walk()`, changed to
+yield `RenderItem` events instead of building SVG strings, exactly as
+described in the "interface changed" note above. Every decision preserved in
+place and in order:
 
 - the `not layer.visible and not include_hidden` skip
 - the `layer.edit_only and not include_hidden` skip
@@ -363,37 +397,53 @@ yielding a `RenderItem` at the point where `emit` currently calls
 - the `world.compose(layer.local_matrix(frame, self))` composition
 - the recursion into `layer.is_container`
 
-**Preserve the `_active_actions` set/clear ordering exactly.** `export_document`
-sets `self._active_actions` immediately before building `to_px` and clears it
-immediately after rendering the mesh. In the generator, set it before building
-`geometries`/`to_px`, and clear it before the `yield` — the same instant the
-current code clears it. See `moho-export-pipeline.md` § 9.3 for why the clear
-point is load-bearing.
+**The `_active_actions` set/clear ordering is preserved exactly, by
+construction**: `exporter._active_actions = []` sits textually AFTER the
+`yield RenderItem("mesh", ...)` line, so it only executes once the generator
+is *resumed* — i.e., once the consumer has finished processing that item and
+asks for the next one. This reproduces the original code's ordering (clear
+happens right after `_render_mesh` finishes, before the next layer) without
+the generator needing to know anything about what the consumer did with the
+item. See `moho-export-pipeline.md` § 9.3 for why this ordering is
+load-bearing rather than incidental.
 
-- [ ] **Step 3: Rewrite `export_document` as a consumer**
+- [x] **Step 3: Rewrite `export_document` as a consumer**
 
 `export_document` keeps its `<g>` nesting, mask emission and `--flat`
-handling, but gets its drawables from `walk_render_tree` instead of walking
-the tree itself.
+handling, in a new `render_scope(enter_item, pad_depth)` closure that
+recursively consumes the shared iterator. `pad_depth` is tracked separately
+from `RenderItem.depth`, because whether a nested container's own recursion
+actually increases SVG indentation depends on `nested_groups`/`member_clip`
+— a presentation choice `walk_render_tree` has no opinion about.
 
-- [ ] **Step 4: Verify byte-identical output**
+- [x] **Step 4: Verify byte-identical output**
 
-Run: `make gen && git diff --stat -- svg/ && diff -r svg /tmp/svg-before`
-Expected: both produce no output. **If a single byte moved, the extraction is
-wrong — do not proceed.** The most likely cause is an `_active_actions`
-set or clear that moved relative to a `geometries` build.
+Ran: `make gen && git diff --stat -- svg/ && diff -r svg /tmp/svg-before`.
+**Both produced no output** — confirmed byte-identical on all five gated
+documents, including `AddBone`, `SketchBone` and `WhatIsBone`, three of the
+four gated documents that contain an empty container.
 
-- [ ] **Step 5: Verify every document still exports**
+Went further than the plan's own gate: exported all **19** sample documents
+with `--combined` under both the pre-extraction code (checked out via a
+throwaway `git worktree` at the Task 1 commit) and the post-extraction code,
+and diffed the two output sets. **Byte-identical on all 19**, including the
+5 additional non-gated documents that also contain an empty container
+(`BoneStrengthTool.animeproj` ×2, `ReparentBone.animeproj`,
+`SelectandReparentBoneTool.animeproj`, `SketchBone.animeproj`'s second
+instance). This is stronger evidence than the plan asked for, specifically
+because the empty-container hazard was not something the plan anticipated.
 
-Run:
+- [x] **Step 5: Verify every document still exports**
+
+Ran:
 ```bash
 for f in moho/*.mohoproj moho/*.animeproj; do
   python3 moho2svg.py "$f" --combined /tmp/out.svg --brush-dir "" >/dev/null || echo "FAILED $f"
 done
 ```
-Expected: no `FAILED` lines.
+No `FAILED` lines.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add moho2svg.py
@@ -508,14 +558,25 @@ Layer building, for this task, samples one frame and emits static paths:
     def _build_layers(self, frames):
         """One Lottie shape layer per Moho mesh layer, in Lottie draw order.
 
+        walk_render_tree yields an EVENT STREAM ("enter"/"mesh"/"exit"), not
+        one item per mesh layer - see Task 2's note on why. Only "mesh"
+        events carry geometries/to_px; "enter"/"exit" exist purely so a
+        consumer that needs Moho's nested <g> structure (export_document)
+        can reconstruct it, including empty containers. This writer flattens
+        everything anyway (every layer gets an identity transform), so it
+        simply ignores "enter"/"exit" and keeps only "mesh" events.
+
         Moho draws its layer list back to front, which is the order
-        walk_render_tree yields.  Lottie draws the FIRST layer in the list on
-        top, so the finished list is reversed.  This is the single easiest
-        thing in the whole writer to get wrong without noticing: the artwork
-        still looks right, just with the wrong parts in front.
+        walk_render_tree yields "mesh" events in.  Lottie draws the FIRST
+        layer in the list on top, so the finished list is reversed.  This is
+        the single easiest thing in the whole writer to get wrong without
+        noticing: the artwork still looks right, just with the wrong parts
+        in front.
         """
         collected = []
         for item in walk_render_tree(self.exporter, frames[0]):
+            if item.event != "mesh":
+                continue
             shapes = self._build_shapes(item, frames)
             if shapes:
                 collected.append(self._shape_layer(item.layer.name, shapes))
@@ -839,8 +900,16 @@ git commit -m "Write Moho gradients as Lottie gradient fills"
 - Modify: `moho2lottie.py` — `_build_layers`, plus a new `_mask_properties`
 
 **Interfaces:**
-- Produces: `"hasMask": True` and a `"masksProperties"` list on every layer
-  whose `RenderItem.mask_sources` is non-empty.
+- Produces: `"hasMask": True` and a `"masksProperties"` list on every "mesh"
+  layer that is not `exempt` and sits inside an "enter" scope whose own
+  `mask_sources` is non-empty.
+
+**Note:** `mask_sources` lives on the `"enter"` `RenderItem` (the container),
+not on the `"mesh"` item itself — see Task 2's interface. `_build_layers`
+must track the CURRENT mask context itself while consuming the event stream
+(a small stack, pushed on `"enter"` when `mask_sources` is non-empty, popped
+on the matching `"exit"`), exactly the way `export_document`'s
+`render_scope` tracks `clip` for the same reason.
 
 - [ ] **Step 1: Find the layers that must change**
 
@@ -877,8 +946,10 @@ Expected: FAIL.
 - [ ] **Step 3: Emit `masksProperties`**
 
 ```python
-    def _mask_properties(self, item):
-        """Moho's mask, as per-layer Lottie masks.
+    def _mask_properties(self, mask_sources):
+        """Moho's mask, as per-layer Lottie masks.  `mask_sources` is the
+        CURRENT enclosing "enter" scope's own value (see the stack note
+        above) - the caller has already checked the mesh item is not exempt.
 
         A Lottie track matte applies to exactly one layer, so masking a group
         of siblings the way Moho does would need a precomposition per group.
@@ -893,11 +964,21 @@ Expected: FAIL.
         precomposition; see docs/moho-to-lottie-design.md section 6.1.
         """
         out = []
-        for bezier, alpha in item.mask_sources:
+        for bezier, alpha in mask_sources:
             out.append({"inv": False, "mode": "a", "pt": {"a": 0, "k": bezier},
                          "o": {"a": 0, "k": alpha * 100}, "x": {"a": 0, "k": 0}})
         return out
 ```
+
+In `_build_layers`, maintain `mask_stack = []`: push `item.mask_sources` on
+every `"enter"` whose `mask_sources` is non-empty (push `None` otherwise, as
+a placeholder so `"exit"` always has something to pop), pop on `"exit"`. For
+a `"mesh"` item, the active mask is `next((m for m in reversed(mask_stack) if
+m is not None), None)` — but re-check against `emit`'s own scoping first:
+only the DIRECTLY enclosing container's mask ever applies to a child, never
+a grandparent's (see `moho2svg.py`'s `member_clip` — it is computed fresh
+per scope, not accumulated), so in practice only `mask_stack[-1]` matters,
+never an outer entry. Apply it only when `not item.exempt`.
 
 `Exporter._mask_sources` currently returns SVG path strings. Change it to
 return the traced geometry alongside, or add a sibling that returns
