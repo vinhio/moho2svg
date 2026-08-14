@@ -34,7 +34,7 @@ which step it stopped at, so a reader knows where to resume.
 | 2 | One shared tree walk | **DONE** | `a81a6cb` |
 | 3 | A Lottie file with one static frame | **DONE** | `4189275` |
 | 4 | Path keyframes across the frame range | **DONE** | `4b31129` |
-| 5 | Gradients | TODO | — |
+| 5 | Gradients | **DONE** | (pending commit) |
 | 6 | Masking | TODO | — |
 | 7 | Switch layers | TODO | — |
 | 8 | Warnings, make targets and optional schema validation | TODO | — |
@@ -935,16 +935,44 @@ git commit -m "Bake Moho deformation into Lottie path keyframes"
 
 ## Task 5: Gradients
 
-**Status:** TODO
+**Status:** DONE — one real design gap in the original sketch: it treated
+gradient placement as static (`"a": 0`), computed once. Fixed by making the
+"s"/"e" points PER-FRAME instead - see the note below.
+
+**⚠ Gradient placement must be keyframed, not static — the original sketch
+missed this.** A gradient's `s`/`e` points are derived from the shape's OWN
+bounding box (matching `Exporter._build_gradient`'s SVG `objectBoundingBox`
+percentages). That box moves with the shape - most gradient-filled shapes in
+this corpus are on bone-deformed layers - so freezing it at frame 0 would
+visibly detach the gradient from a moving/deforming shape. Confirmed the
+gradient's SOURCE data (stop colours/locations, `gradient_type`,
+`effect_scale`, `effect_rotation`) really is frame-invariant everywhere in
+this corpus (0 animated instances of any of them, checked directly across
+all 19 documents) - only the box itself moves. Fixed by splitting gradient
+handling into `_eval_gradient` (the frame-invariant part, evaluated once in
+`_new_accumulator`, exactly like fill/line colour) and `_gradient_fill` (run
+in `_finalize_shapes`, which recomputes the bounding box from each frame's
+ALREADY-COLLECTED `fill_per_frame` data - no extra `exp.eval()`/`to_px()`
+calls needed, so this doesn't reopen the Task 4 staleness hazard) producing
+a new `_point_property` (2D-point counterpart of `_scalar_property`) for
+`s`/`e`.
+
+Also found and reproduced deliberately, not fixed: `Exporter._build_gradient`
+falls back to the shape's plain flat `fill_color` whenever it has fewer than
+2 stops (see `_render_shape`: `paint = fill_hex` is the default, only
+overridden once a gradient def actually succeeds). `_eval_gradient` mirrors
+that fallback exactly and counts it (`gradient_too_few_stops`) rather than
+silently drawing nothing or crashing - measured to never actually fire
+across the sample corpus, but the corpus is not a proof it never can.
 
 **Files:**
-- Modify: `moho2lottie.py` — `_build_shapes`
+- Modify: `moho2lottie.py` — `_new_accumulator` (new `_eval_gradient` call), `_finalize_shapes` (new `_gradient_fill`, `_bbox_of_beziers`, `_gradient_endpoints`, `_point_property`)
+- Modify: `tools/check_lottie_geometry.py` — already had `--require-gradients` from Task 4's own writing; unchanged this task
 
 **Interfaces:**
-- Produces: a `"ty": "gf"` element replacing `"ty": "fl"` when
-  `shape.style.fill_style["type"] == "SS_Gradient2"`.
+- Produces: a `"ty": "gf"` element replacing `"ty": "fl"` when `shape.style.fill_style["type"] == "SS_Gradient2"` **and** it resolves to 2 or more stops; the accumulator's `"gradient"` key (`None`, or a dict with `stops`/`stop_count`/`lottie_type`/`scale`/`rotation`) is what `_finalize_shapes` branches on.
 
-- [ ] **Step 1: Find a document that exercises it**
+- [x] **Step 1: Find a document that exercises it**
 
 Run:
 ```bash
@@ -970,52 +998,50 @@ Add to `tools/check_lottie_geometry.py` a `--require-gradients` flag that
 fails when the emitted file contains no `"ty": "gf"` element while the source
 document contains an `SS_Gradient2` style.
 
-Run: `python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 25 --require-gradients`
-Expected: FAIL — no gradient elements are emitted yet.
+Run against `Bandit.mohoproj`: not applicable (0 `SS_Gradient2` occurrences,
+per Step 1). Ran instead against `WhatIsBone.animeproj` (68 occurrences, the
+most of any sample document): confirmed `--require-gradients` FAILED before
+Step 3, since no `"gf"` element existed yet.
 
-- [ ] **Step 3: Emit `gf`**
+- [x] **Step 3: Emit `gf`**
 
-```python
-    def _gradient_fill(self, shape, frame, item):
-        """A Lottie gradient fill from Moho's SS_Gradient2 fill_style.
-
-        Placement reuses whatever geometry the SVG writer computes for its
-        <linearGradient>/<radialGradient>, so both exporters are wrong in the
-        same way rather than differently - gradient placement precision is an
-        existing KNOWN GAP in moho2svg.py, not something this writer fixes.
-        """
-        fill_style = shape.style.fill_style
-        stops = []
-        for stop in fill_style.get("gradients") or []:
-            location = self.exporter.eval(stop["location"], frame)
-            color = Color.from_raw(self.exporter.eval(stop["color"], frame))
-            stops.extend([location, color.r, color.g, color.b])
-        start, end = self._gradient_endpoints(shape, frame, item)
-        return {"ty": "gf",
-                 "t": 2 if fill_style.get("gradient_type") == 1 else 1,
-                 "g": {"p": len(stops) // 4, "k": {"a": 0, "k": stops}},
-                 "s": {"a": 0, "k": [start.x, start.y]},
-                 "e": {"a": 0, "k": [end.x, end.y]},
-                 "o": {"a": 0, "k": 100}}
-```
+Implemented as `_eval_gradient` (frame-invariant part - stops, type, scale,
+rotation) plus `_gradient_fill`/`_bbox_of_beziers`/`_gradient_endpoints` (the
+per-frame placement part) - see the "gradient placement must be keyframed"
+note above for why this is two functions, not the plan's original one.
 
 Moho's `gradient_type` is 0 linear / 1 radial; Lottie's `t` is 1 linear /
-2 radial, so the mapping is not identity — write it out rather than adding 1.
+2 radial, so the mapping is not identity — written out rather than adding 1.
 
 `_gradient_endpoints` derives the two points from the shape's pixel bounding
-box and its `effect_scale`/`effect_rotation`, matching
-`Exporter._build_gradient`.
+box (recomputed fresh per frame from `fill_per_frame`, not cached from a
+single frame) and the once-evaluated `effect_scale`/`effect_rotation`,
+matching `Exporter._build_gradient`'s own formula.
 
-- [ ] **Step 4: Re-run both checks**
+- [x] **Step 4: Re-run both checks**
 
-Run:
-```bash
-python3 moho2lottie.py moho/Bandit.mohoproj --out /tmp/bandit.json
-python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj /tmp/bandit.json 25 40 --require-gradients
-```
-Expected: `OK`.
+Ran against `WhatIsBone.animeproj` (frames 1/60/120/180/240,
+`--require-gradients`): `OK`. Ran the same against `Bandit.mohoproj` too, to
+confirm `--require-gradients` is correctly a no-op when the source has no
+gradients at all: `OK`.
 
-- [ ] **Step 5: Commit**
+Went further than the plan's own two checks:
+- Inspected the emitted structure directly: 68 `"gf"` elements in
+  `WhatIsBone.animeproj`'s output, both `t: 1` (linear) and `t: 2` (radial)
+  present, 2 stops each (`g.k.k` length 8 = 2 × 4 numbers), `s`/`e` both
+  keyframed (`"a": 1`) with values that visibly track a moving bounding box
+  frame to frame - confirming the keyframed-placement fix actually engages,
+  not just parses.
+- Ran a full-corpus smoke export (18 of 19 documents, same expected
+  `SketchBone.animeproj` SwitchLayer exception as Task 4): no crashes, and
+  `gradient_too_few_stops` fired on zero shapes across the entire corpus,
+  consistent with the corpus-wide stop-count measurement from Step 1's
+  broader check.
+- Re-ran `make gen` (byte-identical) and `check_bezier_roundtrip.py` (still
+  passes on all 19 documents) - this task touches only fill-paint selection,
+  never path geometry, so neither should have moved, and neither did.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add moho2lottie.py tools/check_lottie_geometry.py

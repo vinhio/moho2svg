@@ -17,13 +17,12 @@ Deliberately out of scope for this exporter (see docs/moho-to-lottie-design.md
 section 2.2, and the corresponding counted warnings on stderr at the end of
 an export): brush-textured strokes (drawn as a plain uniform stroke
 instead), boolean shape combination via combo_mode (drawn as a plain,
-unclipped outline), ImageLayer, Smart Warp. Gradient fills are drawn as a
-flat colour for now - a real Lottie "gf" gradient fill is Task 3 of the
-Lottie exporter's own implementation plan, not yet done.
+unclipped outline), ImageLayer, Smart Warp.
 """
 
 import argparse
 import json
+import math
 import os
 import sys
 from collections import Counter
@@ -41,8 +40,9 @@ WARNING_EXPLANATIONS = {
                   "as a plain, unclipped outline",
     "brush": "shape(s) with a textured brush outline drawn as a plain "
              "uniform stroke instead",
-    "gradient": "shape(s) with a gradient fill drawn as a flat colour "
-                "instead (not yet implemented)",
+    "gradient_too_few_stops": "gradient fill(s) with fewer than 2 stops drawn "
+                              "as a flat colour instead (matches "
+                              "Exporter._build_gradient's own SVG fallback)",
 }
 
 # Lottie's line-cap constant (shapes/base-stroke.json's "lc"), keyed by the
@@ -233,6 +233,17 @@ class LottieExporter:
         return {"a": 1,
                 "k": [{"t": float(f), "s": [v]} for f, v in zip(frames, per_frame)]}
 
+    def _point_property(self, per_frame_points: list, frames) -> dict:
+        """A Lottie 2D point property (e.g. a gradient's start/end point):
+        static when it never changes across frames, keyframed otherwise -
+        the 2D-point counterpart of _scalar_property.  `per_frame_points` is
+        one (x, y) tuple per frame."""
+        if all(p == per_frame_points[0] for p in per_frame_points[1:]):
+            return {"a": 0, "k": list(per_frame_points[0])}
+        return {"a": 1,
+                "k": [{"t": float(f), "s": [list(p)]}
+                      for f, p in zip(frames, per_frame_points)]}
+
     def _sh_elements(self, per_frame_subpaths: list, frames) -> list:
         """One Lottie "sh" element per subpath, each a (possibly keyframed)
         _path_property built across `frames`.
@@ -361,20 +372,27 @@ class LottieExporter:
             outline_cap = LINE_CAPS.get(style.line_cap_name(), 2)
 
         fill_color = None
+        gradient = None
         if shape.has_fill:
-            # A gradient fill (style.fill_style["type"] == "SS_Gradient2") is
-            # drawn as this flat fill_color for now - Task 5 adds a real
-            # Lottie "gf" gradient fill.  Counted, not silent: a gradient-
-            # filled shape drawn flat is a real, visible gap until then.
             if isinstance(style.fill_style, dict) and \
                     style.fill_style.get("type") == "SS_Gradient2":
-                self.warnings["gradient"] += 1
-            fill_color = Color.from_raw(exp.eval(style.fill_color, frame0))
+                gradient = self._eval_gradient(shape, style.fill_style, frame0)
+            if gradient is None:
+                # No gradient, or fewer than 2 stops - Exporter._build_gradient
+                # falls back to the shape's own flat fill_color in exactly
+                # this case (see _render_shape: `paint = fill_hex` is the
+                # default, only overridden when the gradient def succeeds),
+                # so this reproduces that fallback rather than a different one.
+                if isinstance(style.fill_style, dict) and \
+                        style.fill_style.get("type") == "SS_Gradient2":
+                    self.warnings["gradient_too_few_stops"] += 1
+                fill_color = Color.from_raw(exp.eval(style.fill_color, frame0))
 
         return {
             "name": shape.name or "",
             "has_fill": shape.has_fill,
             "fill_color": fill_color,
+            "gradient": gradient,
             "fill_per_frame": [],
             "outline_kind": outline_kind,
             "tapered": tapered,
@@ -383,6 +401,39 @@ class LottieExporter:
             "outline_cap": outline_cap,
             "outline_per_frame": [],
             "outline_width_per_frame": [],
+        }
+
+    def _eval_gradient(self, shape, fill_style: dict, frame0: float):
+        """The frame-invariant part of a gradient fill - stop colours/
+        locations, type, effect scale/rotation - evaluated once, since none
+        of these fields is ever animated across this repository's sample
+        documents (0 instances checked directly). Returns None when there
+        are fewer than 2 stops, mirroring Exporter._build_gradient's own
+        "not enough stops to be a gradient at all" fallback to a flat fill.
+
+        Placement (the "s"/"e" points, which depend on the shape's own
+        bounding box) is NOT computed here - the box moves frame to frame
+        for a deforming shape, so it is computed per frame in
+        _finalize_shapes from the already-collected fill_per_frame data,
+        no extra exporter calls needed.
+        """
+        exp = self.exporter
+        stops = []
+        for stop in fill_style.get("gradients") or []:
+            location = exp.eval(stop["location"], frame0)
+            color = Color.from_raw(exp.eval(stop["color"], frame0))
+            stops.extend([location, color.r, color.g, color.b])
+        if len(stops) < 8:                     # fewer than 2 stops (4 numbers each)
+            return None
+        return {
+            "stops": stops,
+            "stop_count": len(stops) // 4,
+            # Moho's gradient_type is 0 linear / 1 radial; Lottie's own "t"
+            # is 1 linear / 2 radial - not the same numbering, so this is
+            # written out rather than derived by adding 1.
+            "lottie_type": 2 if fill_style.get("gradient_type") == 1 else 1,
+            "scale": exp.eval(shape.effect_scale, frame0),
+            "rotation": exp.eval(shape.effect_rotation, frame0),
         }
 
     def _finalize_shapes(self, layer, accs: list, frames) -> list:
@@ -430,14 +481,79 @@ class LottieExporter:
                 out.append(self._finalize_outline_group(layer, acc, frames, name))
 
             if acc["has_fill"]:
-                color = acc["fill_color"]
                 elements = self._sh_elements(acc["fill_per_frame"], frames)
-                elements.append({"ty": "fl", "r": 1,
-                                  "c": {"a": 0, "k": [color.r, color.g, color.b]},
-                                  "o": {"a": 0, "k": color.a * 100}})
+                if acc["gradient"] is not None:
+                    elements.append(self._gradient_fill(acc, frames))
+                else:
+                    color = acc["fill_color"]
+                    elements.append({"ty": "fl", "r": 1,
+                                      "c": {"a": 0, "k": [color.r, color.g, color.b]},
+                                      "o": {"a": 0, "k": color.a * 100}})
                 elements.append({"ty": "tr", **identity_transform()})
                 out.append({"ty": "gr", "nm": f"{name}_fill", "it": elements})
         return out
+
+    def _gradient_fill(self, acc: dict, frames) -> dict:
+        """A Lottie "gf" gradient fill element from `acc["gradient"]" (the
+        frame-invariant stop/type/scale/rotation data - see _eval_gradient)
+        plus a PER-FRAME start/end point derived from the shape's own
+        already-collected fill geometry.
+
+        Placement reuses the same bounding-box formula
+        Exporter._build_gradient uses for its SVG objectBoundingBox percent
+        coordinates, converted to this shape's absolute pixel bounding box
+        (SVG's percentages are relative to that same box, in the same pixel
+        space build_path_bezier() already writes vertices in) - so both
+        exporters are wrong in the same way rather than differently.
+        Gradient placement precision is an existing KNOWN GAP in
+        moho2svg.py, not something this method fixes.
+        """
+        grad = acc["gradient"]
+        starts, ends = [], []
+        for subpaths in acc["fill_per_frame"]:
+            bbox = self._bbox_of_beziers(subpaths)
+            start, end = self._gradient_endpoints(
+                bbox, grad["lottie_type"], grad["scale"], grad["rotation"])
+            starts.append(start)
+            ends.append(end)
+        return {"ty": "gf", "r": 1, "t": grad["lottie_type"],
+                "g": {"p": grad["stop_count"], "k": {"a": 0, "k": grad["stops"]}},
+                "s": self._point_property(starts, frames),
+                "e": self._point_property(ends, frames),
+                "o": {"a": 0, "k": 100}}
+
+    @staticmethod
+    def _bbox_of_beziers(subpaths: list) -> tuple:
+        """(x0, y0, x1, y1) covering every vertex of every subpath - the
+        pixel-space equivalent of an SVG shape's own bounding box, which is
+        what `objectBoundingBox` gradient percentages are relative to."""
+        xs = [v[0] for b in subpaths for v in b["v"]]
+        ys = [v[1] for b in subpaths for v in b["v"]]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    @staticmethod
+    def _gradient_endpoints(bbox: tuple, lottie_type: int, scale: float,
+                             rotation: float) -> tuple:
+        """The Lottie "s"/"e" points for one frame, from `bbox` and the same
+        scale/rotation/cx=cy=50% formula Exporter._build_gradient uses.
+
+        SVG's objectBoundingBox scales x and y percentages INDEPENDENTLY by
+        the box's own width/height, so a non-square box turns a "circular"
+        percentage radius elliptical - Lottie's own radial gradient has no
+        such independent-axis control (only a single centre-to-edge
+        distance), so the radial case here averages half-width and
+        half-height into one effective radius rather than picking one axis
+        arbitrarily - a documented approximation, not a spec-exact port.
+        """
+        x0, y0, x1, y1 = bbox
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        half_w, half_h = (x1 - x0) / 2.0, (y1 - y0) / 2.0
+        if lottie_type == 2:                       # radial
+            r = max(1.0, 50.0 * scale) / 100.0 * (half_w + half_h)
+            return (cx, cy), (cx + r, cy)
+        dx = math.cos(rotation) * scale * half_w
+        dy = -math.sin(rotation) * scale * half_h
+        return (cx - dx, cy - dy), (cx + dx, cy + dy)
 
     def _finalize_outline_group(self, layer, acc: dict, frames, name: str) -> dict:
         """One shape's outline as a Lottie group - the pure-data half of
