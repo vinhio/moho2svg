@@ -1697,12 +1697,19 @@ class Document:
     section below) or Document.from_raw() if you already have the parsed JSON."""
 
     def __init__(self, width: float, height: float, layers: list[Layer],
-                 styles: StyleTable, format_version: Any):
+                 styles: StyleTable, format_version: Any,
+                 fps: float = 24.0, start_frame: int = 0, end_frame: int = 0):
         self.width = width
         self.height = height
         self.layers = layers            # top-level (root) layers
         self.styles = styles
         self.format_version = format_version
+        self.fps = fps                  # project_data.fps - playback rate
+        # project_data.start_frame/end_frame: the document's own render
+        # range, in absolute frame numbers, BOTH ENDS INCLUSIVE on the Moho
+        # side (used by a Lottie writer to convert into Lottie's ip/op).
+        self.start_frame = start_frame
+        self.end_frame = end_frame
 
     @classmethod
     def from_raw(cls, raw: dict) -> "Document":
@@ -1719,7 +1726,10 @@ class Document:
         styles = StyleTable.build(raw.get("styles") or [])
         layers = [Layer._build(item, styles) for item in raw["layers"]]
         pd = raw["project_data"]
-        doc = cls(pd["width"], pd["height"], layers, styles, raw.get("version"))
+        doc = cls(pd["width"], pd["height"], layers, styles, raw.get("version"),
+                  fps=pd.get("fps", 24.0),
+                  start_frame=pd.get("start_frame", 0),
+                  end_frame=pd.get("end_frame", 0))
         doc._resolve_patch_layers()
         return doc
 
@@ -2017,7 +2027,7 @@ def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
 
 def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
                        to_px: Callable[[Vec2], Vec2],
-                       visible_only: bool = False) -> list[dict]:
+                       visible_only: bool = False, close: bool = True) -> list[dict]:
     """Build one shape's outline as Lottie bezier dicts - the Lottie
     counterpart of build_path_d().
 
@@ -2039,6 +2049,16 @@ def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
     hidden (CurvePoint.segments_on / SegmentGeometry.on) and starts a fresh
     subpath after each such gap.
 
+    `close` mirrors build_path_d()'s own `close` parameter: when True (the
+    default), a subpath whose end coincides with its start is marked "c":
+    True and its duplicate closing vertex is dropped (see close_current()
+    below). When False, that duplicate vertex is kept and "c" stays False -
+    a genuinely different bezier, not just a formatting choice: an open path
+    gets line-cap ends at the seam when stroked, a closed one gets a
+    seamless join there. Pass close=True for a fill; NEVER for a plain
+    (non-tapered) stroke - see build_path_d()'s own docstring for why Moho's
+    own exporter never closes a stroke path either.
+
     Coordinates are rounded to 3 decimals, matching build_path_d()'s
     f"{x:.3f}", so the two builders describe the same curve to the same
     precision.
@@ -2050,8 +2070,8 @@ def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
     last: Optional[Vec2] = None
 
     def close_current() -> None:
-        """Finish the subpath being built, marking it closed when it returns
-        to its own start.
+        """Finish the subpath being built, marking it closed when `close` is
+        set and it returns to its own start.
 
         A closed Lottie bezier does not repeat the first vertex, so the
         duplicate endpoint is dropped - but its incoming tangent is the
@@ -2062,7 +2082,7 @@ def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
         nonlocal current
         if current is None:
             return
-        if len(current["v"]) > 1 and first is not None and last is not None \
+        if close and len(current["v"]) > 1 and first is not None and last is not None \
                 and last.distance_to(first) < 1e-9:
             current["c"] = True
             current["i"][0] = current["i"][-1]     # carry the wrap-around tangent
@@ -2104,6 +2124,18 @@ class TaperedStrokeOutliner:
 
     def build(self, geometries: list[CurveGeometry], edges: Sequence[Edge],
               to_px: Callable[[Vec2], Vec2], stroke_width_px: float) -> str:
+        pieces = [self._outline_one_run(run, to_px, stroke_width_px)
+                  for run in self._traced_runs(geometries, edges)]
+        return " ".join(p for p in pieces if p)
+
+    def _traced_runs(self, geometries: list[CurveGeometry], edges: Sequence[Edge]):
+        """Group a shape's traced outline into contiguous runs of
+        (p0, c1, c2, p1, w0, w1), split at any segments_on==False gap.
+
+        Shared by build() (SVG) and build_bezier() (Lottie) - pure data
+        preparation, no output-format-specific formatting, so extracting it
+        cannot change either writer's behaviour.
+        """
         traced = PathTracer.trace(geometries, edges)
 
         Run = list[tuple[Vec2, Vec2, Vec2, Vec2, float, float]]
@@ -2126,9 +2158,7 @@ class TaperedStrokeOutliner:
             current.append((seg.p0, seg.c1, seg.c2, seg.p1, w0, w1))
         if current:
             runs.append(current)
-
-        pieces = [self._outline_one_run(run, to_px, stroke_width_px) for run in runs]
-        return " ".join(p for p in pieces if p)
+        return runs
 
     def _outline_one_run(self, run, to_px: Callable[[Vec2], Vec2],
                           stroke_width_px: float) -> str:
@@ -2180,6 +2210,138 @@ class TaperedStrokeOutliner:
                      f"{left[0].x:.2f} {left[0].y:.2f}")
         d.append("Z")
         return " ".join(d)
+
+    def build_bezier(self, geometries: list[CurveGeometry], edges: Sequence[Edge],
+                      to_px: Callable[[Vec2], Vec2], stroke_width_px: float,
+                      cap_segments: int = 8) -> list[dict]:
+        """Lottie counterpart of build() - the filled outline of a stroke
+        whose width varies along its length, as Lottie bezier dicts.
+
+        Returns one dict per RUN, exactly like build_path_bezier(): a CLOSED
+        run (a ring, e.g. a circle's outline) returns TWO dicts (an outer and
+        an inner counter-wound loop, matching build()'s own two-loop
+        SVG output) meant to be painted together with an evenodd fill rule so
+        the hole survives; an OPEN run returns ONE dict (a single closed
+        "capsule" polygon).
+
+        The outline itself is a SAMPLED POLYGON, matching build()'s own
+        approach of stepping self.samples_per_segment times per Bezier
+        segment and connecting the samples with straight lines - so every
+        vertex here is written with ZERO tangents (i=o=[0,0]): a Lottie
+        bezier with all-zero tangents renders as a polyline, exactly what
+        build() already produces via SVG "L" commands. This is intentionally
+        NOT a smooth curve fit; it is exactly as faceted as build()'s own SVG
+        output, at the same sample density.
+
+        Rounded end caps are the one place this cannot match build() bit for
+        bit: build() emits a single SVG elliptical arc ("A"), which has no
+        Lottie/cubic-bezier equivalent. This approximates the same half-turn
+        with `cap_segments` straight segments instead - visibly a small
+        polygon rather than a perfect arc, most noticeable at a large stroke
+        width sampled with few segments. Not confirmed against a real Lottie
+        player; only confirmed to close the outline correctly by
+        construction (see the docstring's TAPERED STROKES section in the
+        module header for the underlying offset-curve technique itself).
+        """
+        out: list[dict] = []
+        for run in self._traced_runs(geometries, edges):
+            out.extend(self._outline_one_run_bezier(run, to_px, stroke_width_px, cap_segments))
+        return out
+
+    def _sample_offsets(self, run, to_px: Callable[[Vec2], Vec2], stroke_width_px: float):
+        """Sample `run` and compute its left/right offset curves, in pixel
+        space, at each sample's own interpolated width.
+
+        Deliberately a FRESH implementation rather than a refactor of
+        _outline_one_run's own sampling loop: the two must produce the same
+        polygon, but sharing the code would mean touching the one method
+        this module's byte-identical SVG regression check exercises through
+        two of the five gated reference documents (Bandit, ReparentBone) -
+        not worth the regression risk for what is otherwise a handful of
+        duplicated lines.  Returns None for a run too short to offset (fewer
+        than 2 samples), matching _outline_one_run's own "" / no-output case.
+        """
+        steps = self.samples_per_segment
+        samples: list[tuple[Vec2, float]] = []
+        for p0, c1, c2, p1, w0, w1 in run:
+            for i in range(steps + 1):
+                t = i / steps
+                point = cubic_bezier_point(p0, c1, c2, p1, t)
+                if i == 0 and samples and samples[-1][0].distance_to(point) < 1e-12:
+                    continue
+                samples.append((point, w0 + (w1 - w0) * t))
+        pixels = [(to_px(p), w) for p, w in samples]
+        n = len(pixels)
+        if n < 2:
+            return None
+
+        left: list[Vec2] = []
+        right: list[Vec2] = []
+        for i, (p, w) in enumerate(pixels):
+            a = pixels[max(0, i - 1)][0]
+            b = pixels[min(n - 1, i + 1)][0]
+            tangent = b - a
+            length = tangent.length() or 1.0
+            normal = Vec2(-tangent.y / length, tangent.x / length)
+            half = stroke_width_px * w / 2.0
+            left.append(p + normal.scaled(half))
+            right.append(p - normal.scaled(half))
+
+        closed = run[0][0].distance_to(run[-1][3]) < 1e-9 and len(run) > 1
+        start_radius = stroke_width_px * pixels[0][1] / 2.0
+        end_radius = stroke_width_px * pixels[-1][1] / 2.0
+        return left, right, closed, start_radius, end_radius
+
+    @staticmethod
+    def _polygon_bezier(points: Sequence[Vec2], closed: bool) -> dict:
+        """One Lottie bezier dict from a plain polygon: all tangents zero, so
+        it renders as straight lines between the given points."""
+        v = [[round(p.x, 3), round(p.y, 3)] for p in points]
+        zero = [[0.0, 0.0]] * len(v)
+        return {"v": v, "i": list(zero), "o": list(zero), "c": closed}
+
+    @staticmethod
+    def _arc_points(center: Vec2, start: Vec2, end: Vec2, segments: int) -> list[Vec2]:
+        """`segments` points approximating the half-turn arc from `start` to
+        `end` around `center`, going the short way - see build_bezier()'s
+        own docstring for why this is a polygon approximation, not a true
+        arc, and endpoints are EXCLUDED (the caller already has them from the
+        left/right offset curves, so including them here would duplicate a
+        vertex)."""
+        r = (start - center).length()
+        if r < 1e-9 or segments < 1:
+            return []
+        a0 = math.atan2(start.y - center.y, start.x - center.x)
+        a1 = math.atan2(end.y - center.y, end.x - center.x)
+        # Sweep the SHORT way around - a stroke's end cap is a half-turn, so
+        # the two candidate sweeps differ by roughly pi either direction;
+        # picking the smaller keeps the cap on the outside of the stroke,
+        # matching build()'s own "A ... 0 0 1" sweep-flag choice.
+        delta = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+        return [Vec2(center.x + r * math.cos(a0 + delta * (i + 1) / (segments + 1)),
+                     center.y + r * math.sin(a0 + delta * (i + 1) / (segments + 1)))
+                for i in range(segments)]
+
+    def _outline_one_run_bezier(self, run, to_px: Callable[[Vec2], Vec2],
+                                 stroke_width_px: float, cap_segments: int) -> list[dict]:
+        offsets = self._sample_offsets(run, to_px, stroke_width_px)
+        if offsets is None:
+            return []
+        left, right, closed, start_radius, end_radius = offsets
+
+        if closed:
+            return [self._polygon_bezier(left, True),
+                    self._polygon_bezier(list(reversed(right)), True)]
+
+        points = list(left)
+        if end_radius > 0.05:
+            mid = left[-1].scaled(0.5) + right[-1].scaled(0.5)
+            points += self._arc_points(mid, left[-1], right[-1], cap_segments)
+        points += list(reversed(right))
+        if start_radius > 0.05:
+            mid = right[0].scaled(0.5) + left[0].scaled(0.5)
+            points += self._arc_points(mid, right[0], left[0], cap_segments)
+        return [self._polygon_bezier(points, True)]
 
 
 @dataclass(frozen=True)

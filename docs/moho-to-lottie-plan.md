@@ -32,7 +32,7 @@ which step it stopped at, so a reader knows where to resume.
 | P5 | This plan | **DONE** | `496f35c` |
 | 1 | A Bezier path builder beside the SVG one | **DONE** | `a91df9f` |
 | 2 | One shared tree walk | **DONE** | `a81a6cb` |
-| 3 | A Lottie file with one static frame | TODO | — |
+| 3 | A Lottie file with one static frame | **DONE** | (pending commit) |
 | 4 | Path keyframes across the frame range | TODO | — |
 | 5 | Gradients | TODO | — |
 | 6 | Masking | TODO | — |
@@ -454,14 +454,67 @@ git commit -m "Extract the layer tree walk so a second exporter can reuse it"
 
 ## Task 3: A Lottie file with one static frame
 
-**Status:** TODO
+**Status:** DONE — with two scope expansions found necessary while
+implementing, neither in the original sketch below. Read the note before
+Step 3.
+
+**⚠ Scope expanded beyond this task's original sketch — read this first.**
+The plan's own code sketch for `_build_shapes` turned out to be wrong in a
+way that would have mis-rendered the MAJORITY of stroked shapes, not an edge
+case:
+
+1. **Tapered strokes.** Measured: **1,065 of 1,615 outlined shapes (66%)**
+   across the sample corpus have a varying width along their length. The
+   design doc lists tapered strokes as in-scope for v1 ("already converts
+   these to a filled outline, so they arrive as ordinary geometry"), but the
+   sketch's `_mean_point_width` fallback (`widths[0] if untapered else 1.0`)
+   would have drawn a plain uniform stroke at the WRONG width for two-thirds
+   of all stroked shapes — silently, with no warning, contradicting this
+   plan's own Global Constraint. Fixed by adding
+   `TaperedStrokeOutliner.build_bezier()` (a Lottie-native sibling of the
+   existing SVG-only `build()`), which reuses `build()`'s own offset-curve
+   sampling technique but writes each vertex with ZERO tangents (a polyline,
+   matching `build()`'s own straight-line SVG segments at the same sample
+   density) and approximates `build()`'s rounded-cap SVG arc with
+   `cap_segments` straight segments (Lottie's bezier format has no arc
+   primitive). `TaperedStrokeOutliner.build()` and `_outline_one_run()`
+   themselves are UNTOUCHED — only `_traced_runs()` was extracted from
+   `build()` (a verbatim, behavior-preserving move: pure data grouping, no
+   float formatting or SVG-specific logic) so both writers group runs
+   identically without duplicating that part. Verified: `make gen` still
+   byte-identical (`Bandit.svg`/`ReparentBone.svg` exercise 93/78 taper
+   outline elements between them), and `build_bezier()` produces correct
+   two-loop output for both a closed ring case and an open capsule case,
+   checked directly against real shapes in `SketchBone.animeproj`.
+
+2. **Shape-element ordering is a real open question, not a formatting
+   choice.** The sketch put one shape's fill "sh" elements, an "fl", the
+   outline's "sh" elements, and an "st"/second "fl" all in ONE Lottie group.
+   Whether a paint operator in Lottie's `it` array applies only to
+   IMMEDIATELY preceding "sh" siblings or to ALL of them is explicitly
+   **unverified** — [`lottie-and-thorvg.md`](lottie-and-thorvg.md) section
+   6.4 says this ordering rule is not in the schema. Guessing wrong here
+   would mean a shape's fill and outline paint operators cross-contaminate
+   (e.g. the outline's stroke also stroking the fill's own path). Sidestepped
+   entirely by giving each shape up to TWO SEPARATE Lottie groups — one for
+   fill, one for outline — since a paint operator is unambiguously scoped to
+   its OWN group. The outline group is listed first (Lottie, like Moho/SVG,
+   paints earlier entries on top), matching `_render_shape`'s own fill-under/
+   outline-over paint order.
+
+Also added, not in the original sketch: a `close: bool = True` parameter on
+`build_path_bezier()` (Task 1), needed because a plain stroke must NOT close
+its path the way a fill does — see `build_path_d()`'s own docstring for why
+Moho's own exporter never closes a stroke path either — and a `"gradient"`
+warning counter, since `SS_Gradient2` fills are drawn as a flat colour until
+Task 5 and the plan's own Global Constraint forbids a silent, uncounted gap.
 
 **Files:**
-- Modify: `moho2svg.py` — add `fps`, `start_frame`, `end_frame` to `Document`
+- Modify: `moho2svg.py` — `Document.__init__`/`.from_raw` (`fps`/`start_frame`/`end_frame`), `build_path_bezier` (new `close` parameter), `TaperedStrokeOutliner` (`_traced_runs` extracted, `build_bezier`/`_sample_offsets`/`_polygon_bezier`/`_arc_points`/`_outline_one_run_bezier` added)
 - Create: `moho2lottie.py`
 
 **Interfaces:**
-- Consumes: `walk_render_tree` and `build_path_bezier` from Tasks 1 and 2; `Color.from_raw`, `ResolvedStyle`, `Exporter._stroke_width_px`, `Shape.has_fill`/`.has_outline`/`.style`/`.edges`.
+- Consumes: `walk_render_tree` and `build_path_bezier` from Tasks 1 and 2; `Color.from_raw`, `ResolvedStyle.line_cap_name`, `Exporter._stroke_width_px`, `Exporter.tapered_outliner.build_bezier`, `Shape.has_fill`/`.has_outline`/`.combo_mode`/`.style`/`.edges`.
 - Produces:
   ```python
   class LottieExporter:
@@ -470,7 +523,7 @@ git commit -m "Extract the layer tree walk so a second exporter can reuse it"
   ```
   A one-element `frames` list produces a still; Task 4 passes the full range.
 
-- [ ] **Step 1: Add the three document accessors**
+- [x] **Step 1: Add the three document accessors**
 
 In `moho2svg.py`, `Document.__init__` and `Document.from_raw` currently keep
 only `width`, `height`, `layers`, `styles`, `format_version`. Add `fps`,
@@ -487,12 +540,12 @@ Document them: `fps` is the playback rate, `start_frame`/`end_frame` are the
 document's own render range in absolute frame numbers, and both are inclusive
 on the Moho side.
 
-- [ ] **Step 2: Write the failing check**
+- [x] **Step 2: Write the failing check**
 
 Run: `python3 moho2lottie.py moho/Bandit.mohoproj --out /tmp/bandit.json --frame 25`
 Expected: FAIL with `No such file or directory: 'moho2lottie.py'`
 
-- [ ] **Step 3: Write `moho2lottie.py`**
+- [x] **Step 3: Write `moho2lottie.py`**
 
 Structure it with the same banner style `moho2svg.py` uses:
 
@@ -670,12 +723,12 @@ from `collections`, and from `moho2svg` — `Color`, `Exporter`, `RenderSettings
 The CLI takes `project`, `--out`, `--frame`, and `--include-hidden`, parsed with
 `argparse`, and writes `json.dump(..., separators=(",", ":"))`.
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 Run: `python3 moho2lottie.py moho/Bandit.mohoproj --out /tmp/bandit.json --frame 25`
 Expected: writes the file and prints its size and the warning summary.
 
-- [ ] **Step 5: Sanity-check the structure**
+- [x] **Step 5: Sanity-check the structure**
 
 Run:
 ```bash
@@ -689,7 +742,7 @@ print('first layer name', d['layers'][0]['nm'])
 Expected: `fr 24.0 ip 25.0 op 128.0 w 1920 h 1080`, a non-zero layer count, and
 a first-layer name that is the **frontmost** layer in Moho, not the backmost.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add moho2lottie.py moho2svg.py
