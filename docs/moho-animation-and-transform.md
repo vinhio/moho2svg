@@ -448,14 +448,27 @@ guaranteed to be topologically sorted.
 The local matrix as implemented scales only the first column:
 
 ```
-local = Mat2D(cos·scale, sin·scale, -sin, cos, pos.x, pos.y)
+local = Mat2D(cos·scale, sin·scale, -sin·across, cos·across, pos.x, pos.y)
 ```
 
-That asymmetry is **kept on purpose**. It matches every available reference
-render, and no sample exercises a bone whose `anim_scale` is far from `1.0` in
-a way that could distinguish asymmetric from uniform scaling. `scaling_mode`
-(observed `0` and `2`) is a plausible explanation and is **not decoded**. Do
-not "fix" this without new reference evidence.
+`across` is `1` for a bone with `scaling_mode == 2` (scale along the bone
+only) and `scale` for any other bone (ordinary uniform scale).
+
+**`scaling_mode` is now decoded**, correcting an earlier revision that called
+the asymmetry unexplained and warned against touching it. It is Moho's
+per-bone **"Squash and stretch scaling"** switch, and scaling one axis only is
+precisely what squash-and-stretch means. The evidence is
+`SketchBone.animeproj`'s `kafasi` head rig: the two bones carrying each ear
+(`B2`/`B3` and `B4`/`B5`) have `scaling_mode == 2`, while the third bone in
+each ear's own `flexi_bone_subset` (`B20`, `B19`) has `0` — exactly the split
+Moho's bone constraints panel shows for that rig. Corpus-wide: `2` on 264
+bones, `0` on 586.
+
+Only 28 bones in the whole sample ever move `anim_scale` off `1.0`, and 9 of
+those are `scaling_mode == 0` (in `Rabbit`, `BoneDynamics`, `BoneStrengthTool`
+and `OffsetBoneTool`), so those are the only places the correction is
+observable. None of them is a tracked reference document, which is why
+`make gen` stays byte-identical.
 
 ### 5.4 Rigid and flexible binding
 

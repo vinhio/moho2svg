@@ -1444,6 +1444,13 @@ class LayerKind(str, Enum):
 _LAYER_KIND_BY_TYPE_NAME = {k.value: k for k in LayerKind if k is not LayerKind.OTHER}
 
 
+# Bone.scaling_mode's value for Moho's per-bone "Squash and stretch scaling"
+# option - see Skeleton.world_matrices' NOTE ON SCALE.  The only other value
+# observed is 0 (ordinary uniform scaling): 264 bones vs 586 across the 19
+# sample documents.
+SQUASH_STRETCH_SCALING_MODE = 2
+
+
 @dataclass(frozen=True)
 class Bone:
     """One bone of a Skeleton.  `parent` is an index into that same skeleton's
@@ -1543,15 +1550,29 @@ class Skeleton:
         in `bones` than their children - this walks each bone's parent chain
         on demand, memoising visited bones, rather than assuming any order).
 
-        NOTE ON SCALE: only the matrix's first column is scaled by the bone's
-        own `anim_scale`; the second is not (see the `local` line below). That
-        asymmetry is preserved exactly as found during development, because it
-        passed every regression test available - but no test in this tool's
-        corpus actually exercises a bone with anim_scale far from 1.0 in a way
-        that would tell an asymmetric scale apart from a symmetric (uniform)
-        one, so this has NOT been independently confirmed as intentional Moho
-        behaviour versus an earlier transcription slip.  Flagged rather than
-        "corrected" - see the module docstring's KNOWN GAPS.
+        NOTE ON SCALE: `anim_scale` is applied to the matrix's first column
+        alone - stretching the bone along its own axis without widening it
+        across - for a bone whose `scaling_mode` is 2, and to BOTH columns
+        (an ordinary uniform scale) otherwise.
+
+        That asymmetry was carried for a long time as an unexplained quirk,
+        applied to every bone and flagged in the module docstring's KNOWN
+        GAPS as possibly an old transcription slip, because nothing in the
+        corpus distinguished it.  `scaling_mode` is what distinguishes it:
+        it is Moho's per-bone "Squash and stretch scaling" switch, and
+        scaling one axis only is exactly what squash-and-stretch means.
+
+        Decoded from the rig rather than guessed.  In `SketchBone.animeproj`'s
+        `kafasi` head skeleton the two bones carrying each ear - `B2`/`B3` for
+        one, `B4`/`B5` for the other - have `scaling_mode == 2`, while the
+        third bone in each ear's own `flexi_bone_subset` - `B20` and `B19` -
+        has `scaling_mode == 0`.  That split is visible in Moho's own bone
+        constraints panel as squash-and-stretch being ticked on the first two
+        and not the third, which is how it was spotted.  Corpus-wide the field
+        is 2 on 264 bones and 0 on 586.
+
+        (`squash_stretch_scaling` is a separate float - a magnitude, 1.0 on
+        831 of 850 bones - not the on/off switch.)
 
         A bone with `target_bone` set (Moho's 2-bone "Target" IK) is solved
         together with its own parent as a 2-bone chain reaching for the
@@ -1605,7 +1626,11 @@ class Skeleton:
             # the single real occurrence this was derived from.
             fh = -1.0 if exporter.eval(bone.flip_h, frame) else 1.0
             fv = -1.0 if exporter.eval(bone.flip_v, frame) else 1.0
-            local = Mat2D(c * scale * fh, s * scale * fh, -s * fv, c * fv, pos.x, pos.y)
+            # Squash-and-stretch scales along the bone only; every other bone
+            # scales uniformly - see this method's NOTE ON SCALE.
+            across = 1.0 if bone.scaling_mode == SQUASH_STRETCH_SCALING_MODE else scale
+            local = Mat2D(c * scale * fh, s * scale * fh,
+                           -s * across * fv, c * across * fv, pos.x, pos.y)
             out[i] = parent_matrix.compose(local) if parent_matrix is not None else local
         return out  # type: ignore[return-value]
 
@@ -1775,8 +1800,10 @@ class Skeleton:
         reach = length1 + length2
         if distance <= reach or reach <= 1e-9:
             return 1.0
-        max1 = bone1.max_auto_scaling if bone1.scaling_mode == 2 else 1.0
-        max2 = bone2.max_auto_scaling if bone2.scaling_mode == 2 else 1.0
+        max1 = (bone1.max_auto_scaling
+                if bone1.scaling_mode == SQUASH_STRETCH_SCALING_MODE else 1.0)
+        max2 = (bone2.max_auto_scaling
+                if bone2.scaling_mode == SQUASH_STRETCH_SCALING_MODE else 1.0)
         return min(distance / reach, max1, max2)
 
 
@@ -3651,11 +3678,16 @@ class Exporter:
         and from 13.8% to 38.5%, taking the whole-frame difference 78.9% the
         wrong way.  So the field is real and widely used - roughly 4,000
         points over those 119 meshes - but this reading of it is wrong.
-        Candidates not yet tested: the index may be into the OUTERMOST bone
-        layer's skeleton rather than the innermost one used here, or a bound
-        point may still blend with its neighbours rather than snapping
-        rigidly.  Left wired up but disabled so the next attempt starts from
-        a measurement instead of a guess.
+        Resolving the index against the OUTERMOST skeleton instead was then
+        tested and is WORSE still - 49.4% ear error against 40.7% for the
+        innermost and 14.5% for ignoring the field entirely - so it is not a
+        skeleton mix-up.  The value genuinely is a bone index (123 of the
+        4,400 bound points exceed their own mesh's point count, so it cannot
+        be a point index); it is the RIGID reading that is wrong.  Untested:
+        a bound point may still blend with its neighbours with that bone
+        merely forced into the weighting, or the behaviour may be gated by
+        `skeleton.binding_mode`.  Left wired up but disabled so the next
+        attempt starts from these measurements instead of a guess.
         """
         if mesh.has_point_bones and self.settings.point_bone_binding:
             return (self._curve_geometries(mesh, frame,

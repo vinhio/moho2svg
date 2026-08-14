@@ -126,9 +126,12 @@ All 40+ bone fields, grouped by what they are for. "Used" means
 `ik_lock`, `ik_global_angle`, `ik_parent_target`, `ignored_by_ik`,
 `bone_enable_arc_solver`, `anim_parent`.
 
-**Scaling behaviour (not used)**
+**Scaling behaviour**
 
-`scaling_mode`, `squash_stretch_scaling`, `max_auto_scaling`.
+`scaling_mode` — **used**, and decoded as the "Squash and stretch scaling"
+switch (see [§ 2.3](#23-from-bones-to-matrices)). `max_auto_scaling` — used,
+as the IK auto-stretch cap. `squash_stretch_scaling` — a magnitude (`1.0` on
+831 of 850 bones), still unused.
 
 **Physics / dynamics (not used)**
 
@@ -373,7 +376,7 @@ the same for `pos_` and `scale_`.
 
 | Field | Observed | Note |
 |---|---|---|
-| `scaling_mode` | `0` on 586 bones, `2` on 264 | **Not decoded.** The most plausible explanation for the asymmetric bone scale kept in `Skeleton.world_matrices` ([§ 2.3](#23-from-bones-to-matrices)). |
+| `scaling_mode` | `0` on 586 bones, `2` on 264 | **Decoded: this is Moho's per-bone "Squash and stretch scaling" switch.** `2` = on (scale along the bone only), `0` = off (ordinary uniform scale). Spotted in `SketchBone.animeproj`'s `kafasi` rig, where the two bones carrying each ear (`B2`/`B3`, `B4`/`B5`) are `2` and the third bone in the same `flexi_bone_subset` (`B20`, `B19`) is `0` — matching what Moho's own bone constraints panel shows. `Skeleton.world_matrices` now applies the asymmetry only for `2`. |
 | `squash_stretch_scaling` | `1.0` on 831 bones; also `0.41`, `0.61`, `0.7`, `2.0`, `10.0` | How much a scaled bone squashes across its length. |
 | `max_auto_scaling` | `1.0` on 804 bones; up to `10.0` | Caps automatic stretching (IK stretch). |
 
@@ -417,7 +420,7 @@ time: 3 documents keyframe `anim_scale` on many bones (`Bandit` 25,
 | Independent angle | unknown | possibly wrong child angle | 45 bones, 10 docs |
 | `offset` | unknown | possibly shifted binding weights | 5 bones, 1 doc |
 | `anim_parent` (reparenting) | n/a | none — 850/850 match static `parent` | never keyframed |
-| `scaling_mode` family | n/a | unknown scale behaviour | 264 bones use mode `2` |
+| `squash_stretch_scaling`, `max_auto_scaling` magnitudes | n/a | scale magnitude detail | `scaling_mode` itself is now decoded and used |
 
 ---
 
@@ -662,12 +665,31 @@ Reading the field as "this point follows that bone rigidly" then measured
 | `kulak-sol/kulak-sol` | 16.0% | **48.4%** |
 | `kulak-sag/kulak-sol` | 13.8% | **38.5%** |
 
-Whole-frame difference went **78.9% the wrong way**. So the field is real and
-widely used, but this interpretation of it is wrong. Untested candidates: the
-index may be into the **outermost** bone layer's skeleton rather than the
-innermost one the current code uses, or a bound point may still blend with
-its neighbours instead of snapping rigidly. The machinery is left wired up
-but off, so the next attempt starts from a measurement rather than a guess.
+Whole-frame difference went **78.9% the wrong way**.
+
+The "wrong skeleton" theory was then tested and **disproved**. Only
+`SketchBone.animeproj` can distinguish the two — its ears sit under `kafasi`
+(21 bones) inside `cat_boy` (42), whereas `Bandit.mohoproj` has a single bone
+layer so both readings coincide there. Scored on the same ear region across
+30 frames:
+
+| where the index is resolved | ear-region error | whole-frame difference |
+|---|---|---|
+| field ignored | **14.5%** | **851,143** |
+| innermost skeleton (`kafasi`) | 40.7% | 1,522,999 |
+| outermost skeleton (`cat_boy`) | 49.4% | 1,587,490 |
+
+So it is not a skeleton mix-up: **both** rigid readings are much worse than
+ignoring the field. The value *is* a bone index — 123 of the 4,400 bound
+points hold a number larger than their own mesh's point count (Bandit's
+`Ears` stores 20–23 for a 20-point mesh), which rules out a point index — so
+what is wrong is the *rigid* reading, not the index space.
+
+What remains untested: a bound point may still blend with its neighbours,
+with the named bone merely forced into the weighting rather than taking the
+point over; or the behaviour may be gated by `skeleton.binding_mode`. The
+machinery stays wired up behind `--point-bones` but disabled, so a third
+attempt starts from these measurements rather than from a guess.
 | `mesh.shape_order` / `anim_shape_order` | mesh | Investigated twice; **correctly ignored** — see below. |
 
 **`shape_order` is an ID registry, not a z-order — confirmed, correcting an
