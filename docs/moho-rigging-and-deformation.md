@@ -189,6 +189,120 @@ of travel for the whole second half of the walk. Fixing it cut the foot's
 pixel error against the reference frames by **51.9%** (measured over all 120
 frames of `moho/SketchBone/`).
 
+**This regressed once already, silently, and is easy to reintroduce.**
+`B23` is a root bone, but its own children in the same `flexi_bone_subset`
+(`B24`, `B25`) compose off it. A later, otherwise-correct fix (bone scale no
+longer accumulating down the chain — see [§ 2.3](#23-from-bones-to-matrices))
+replaced full 2x2 matrix composition with a scalar rotation-angle sum for
+every non-root bone, and a scalar angle cannot represent a mirror: `B23`'s
+own matrix kept flipping correctly (`det` still negative from frame 44), but
+`B24`'s and `B25`'s stopped — the reflection never reached them, so
+`ayak-sol` tore relative to its own ankle from frame 44 on, while the leg
+(driven by an unrelated, unflipped bone group) still looked fine. That
+"leg right, foot wrong" split is exactly why it read as the same bug back
+rather than a new one. The fix (`Skeleton.world_matrices`'s own "NOTE ON
+FLIP PROPAGATION") composes a *matrix* for accumulated rotation-and-flip,
+not a scalar angle, so `det` multiplies correctly through the chain again.
+Both of the checks below must be rerun after ANY change to
+`Skeleton.world_matrices` or `Skeleton._solve_ik_pair`, not only ones that
+mention `flip_h` — this is the second time a scale/composition change broke
+it without touching the flip code itself:
+
+- **Instant, no reference needed** — every bone at or after a flip, and
+  every one of its descendants, must have `det(world_matrices(f)[i]) < 0`:
+  see the exact command in `world_matrices`'s docstring.
+- **Against Moho's own render** — `make check-reference` now runs a
+  *winding* check (`tools/check_reference_frames.py`, `run_winding_check`,
+  `WINDING_CHECKS`) on `ayak-sol` specifically, because the existing
+  bounding-box-centre check was too weak to catch this: the box barely
+  moved (43.4 px wide broken vs 41.9 px correct at frame 44) while the
+  outline's winding flipped. Add a layer to `WINDING_CHECKS` for any other
+  bone whose `flip_h`/`flip_v` is a real, keyframed change.
+- **Against real Moho renders, whole document, both legs** —
+  `moho/track/SketchBone/foot/` (120 frames covering `bacak-sag`/`ayak-sag`,
+  which never flips, alongside `bacak-sol`/`ayak-sol`, which does) and
+  `moho/track/SketchBone/parts/ayak-sol-{43,44,45,46}.jpg` (four screenshot
+  crops), both supplied specifically to arbitrate this fix. The screenshots
+  alone were not enough evidence and led to a WRONG first diagnosis, worth
+  recording because the correction is the useful part.
+
+  Per-vertex error (mean point-to-point distance vs. the reference) across
+  all 120 frames: `ayak-sag` (the control — same rig shape, never flips)
+  never exceeds 5.88 px anywhere. `ayak-sol` peaks at 50.91 px at frame 45,
+  then decays to under 0.5 px by frame 57 — a real, large, but **transient**
+  error, not a permanent one. Disabling propagation instead (the
+  alternative this fix replaced) is unambiguously worse: 24–67 px from
+  frame 44 onward and *never* recovering.
+
+  **The flip event itself is the root cause of the transient error** — not
+  an incidental trigger for an unrelated curve-approximation issue (an
+  earlier draft of this note said exactly that, and undersold the flip's
+  own role; corrected after the person who supplied this reference frame
+  set rechecked the Moho app and confirmed the target bone's own
+  reorientation at frame 43→44 is instant there too). Printing `B24`'s
+  WORLD angle — `B24` carries no flip of its own; this is pure composition
+  through its flipped parent `B23` — frame by frame:
+
+  | Frame | 43 | 44 | 45 | 46 | 47 |
+  |---|---|---|---|---|---|
+  | `B24` world angle | −8.23° | **−146.56°** | −138.86° | −130.01° | −121.65° |
+
+  A **−138.34° jump in one frame**, then smooth ~7–9°/frame change
+  afterward. That discontinuity — not any curve-shape detail — is what the
+  44–46 transient error actually is, and it is the mathematically CORRECT
+  consequence of composing a rotation through a reflection: `B23` itself
+  swings from a local angle of 182.87° to a world angle of 2.87° the
+  instant `flip_h` goes true (182.87+180 = 362.87 = 2.87° mod 360, exactly
+  as reflecting one column of a rotation matrix predicts), and `B24`'s own
+  small, real, authored −24.38° local-angle keyframe (also timed at frame
+  44) then composes through that now-mirrored parent frame — which is what
+  a reflected coordinate system does to a subsequent local rotation: it
+  reverses its apparent handedness in world space.
+
+  Two alternative composition formulas were tried against this exact
+  120-frame reference and both came out equal-or-worse:
+  - Reordering the flip to apply in the parent's frame before this bone's
+    own rotation — identical result here, because `B24` itself never flips
+    (the reordering is a no-op when there is nothing to reorder).
+  - Propagating a separate boolean "mirrored" flag by XOR down the chain
+    while summing local angles as plain scalars (no handedness reversal),
+    applying the mirror once at the end — the "intuitive" alternative, and
+    much worse: it no longer converges to the correct steady state at all
+    (16.70 px mean / 33.08 px max at frame 90, versus ~0.3 px here).
+
+  So the jump is real, large, and directly, unavoidably caused by the flip
+  event composing correctly through the chain — not a symptom to explain
+  away. What remains an open, secondary detail is why the error does not
+  stay at its peak: it decays smoothly to near-zero by frame 57, reading
+  ~0 exactly at `B23.anim_angle`'s own later keyframes (49: 2.26 px, 53:
+  2.71 px, 57: 0.46 px) while peaking BETWEEN them (28 px mean at 45,
+  12 px mean at 52). `B23.anim_angle` swings 178° → 216.4° → 130° → 159.8°
+  across exactly those keyframes — reversing direction twice in 14 frames —
+  with no explicit Bézier handle (confirmed: `im & 8` unset throughout),
+  i.e. Moho's own undecoded default easing curve, approximated by
+  `Channel._segment`'s monotone cubic (see [`moho-animation-and-transform.md`
+  § 3.6](moho-animation-and-transform.md#36-what-mohosvgpy-does-instead)) —
+  a known, pre-existing imprecision elsewhere, levered large here by the
+  chain's length and by sitting right on top of the flip's own real
+  discontinuity.
+
+  **Not a `Skinner.deform` skinning-blend artifact** (an earlier draft of
+  this note wrongly guessed that too, on only 4 sampled frames) — a wrong
+  blend weight would not zero out exactly at `B23`'s own keyframes the way
+  this does. Left unfixed, since Moho's real easing curve is undecoded —
+  see the module docstring's KNOWN GAPS.
+
+  **Confirmed against live Moho playback**, not just its exported frames:
+  the person who supplied this reference set watched `ayak-sol` scrub frame
+  by frame in the Moho app from 44 through 49 and confirmed it keeps
+  visibly changing shape/size across that whole span before settling — not
+  a clean single-frame snap. That validates `moho/track/SketchBone/foot/`
+  as trustworthy ground truth and settles what would otherwise be a
+  recurring question: the *flip* is instant (43→44), but "the shape keeps
+  changing for several more frames after" is Moho's own real behaviour, not
+  an artifact of this fix. The open gap is only the *precise* shape during
+  frames 44–48, not the fact that settling takes a few frames.
+
 **Special case: `offset`** — see [§ 3.7](#37-offset-the-offset-bone-tool). It
 is listed under "editor state" in
 [`moho-project-file-format.md` § 9](moho-project-file-format.md#9-bones-and-skinning),

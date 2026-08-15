@@ -190,6 +190,122 @@ của chính nó trong suốt nửa sau của bước đi. Sửa nó cắt sai s
 chân so với các frame tham chiếu đi **51.9%** (đo trên cả 120 frame của
 `moho/SketchBone/`).
 
+**Lỗi này đã tái phát một lần, âm thầm, và rất dễ tái phát lần nữa.** `B23`
+là bone gốc, nhưng chính con của nó trong cùng `flexi_bone_subset` (`B24`,
+`B25`) lại compose dựa trên nó. Một fix sau đó, tự nó đúng (scale của bone
+không còn tích luỹ xuống chuỗi — xem [§ 2.3](#23-từ-bone-đến-ma-trận)), đã
+thay phép compose ma trận 2x2 đầy đủ bằng phép cộng dồn **góc vô hướng** cho
+mọi bone không phải gốc — mà một góc vô hướng thì không thể biểu diễn phản
+chiếu (mirror): ma trận của chính `B23` vẫn lật đúng (`det` vẫn âm từ frame
+44), nhưng ma trận của `B24` và `B25` thì không — phản chiếu không bao giờ
+lan tới chúng, nên `ayak-sol` bị rách so với chính mắt cá chân của nó từ
+frame 44 trở đi, trong khi chân (do một nhóm bone khác, không bị lật, điều
+khiển) vẫn trông đúng. Chính cái split "chân đúng, bàn chân sai" đó là lý do
+nó đọc như cùng một lỗi quay lại thay vì một lỗi mới. Bản sửa (mục "NOTE ON
+FLIP PROPAGATION" trong chính `Skeleton.world_matrices`) compose một **ma
+trận** cho phần xoay-và-lật tích luỹ, không phải một góc vô hướng, nên `det`
+lại nhân đúng xuyên suốt chuỗi. Cả hai phép kiểm dưới đây phải chạy lại sau
+**bất kỳ** thay đổi nào vào `Skeleton.world_matrices` hay
+`Skeleton._solve_ik_pair`, không chỉ những thay đổi nhắc tới `flip_h` — đây
+là lần thứ hai một thay đổi về scale/compose làm hỏng nó mà không hề đụng
+vào code xử lý flip:
+
+- **Tức thì, không cần bản đối chứng** — mọi bone tại hoặc sau một lần lật,
+  và mọi bone con của nó, phải có `det(world_matrices(f)[i]) < 0`: xem lệnh
+  cụ thể trong docstring của `world_matrices`.
+- **Đối chiếu bản render của chính Moho** — `make check-reference` giờ chạy
+  thêm một phép kiểm *hướng vẽ (winding)* (`tools/check_reference_frames.py`,
+  `run_winding_check`, `WINDING_CHECKS`) riêng cho `ayak-sol`, vì phép kiểm
+  tâm bounding-box cũ quá yếu để bắt được lỗi này: bounding box gần như
+  không đổi (rộng 43.4px lúc lỗi so với 41.9px lúc đúng ở frame 44) trong
+  khi hướng vẽ của outline đã lật ngược. Thêm layer vào `WINDING_CHECKS` cho
+  bất kỳ bone nào khác có `flip_h`/`flip_v` là một thay đổi keyframe thật.
+- **Đối chiếu bản render thật của Moho, cả tài liệu, cả hai chân** —
+  `moho/track/SketchBone/foot/` (120 frame, phủ cả `bacak-sag`/`ayak-sag`,
+  bone không bao giờ lật, lẫn `bacak-sol`/`ayak-sol`, bone có lật) và
+  `moho/track/SketchBone/parts/ayak-sol-{43,44,45,46}.jpg` (bốn ảnh chụp
+  crop), cả hai được cung cấp riêng để phân xử bản sửa này. Chỉ riêng ảnh
+  chụp thì chưa đủ bằng chứng và đã dẫn tới một chẩn đoán **sai**, đáng ghi
+  lại vì phần sửa lại chính là phần hữu ích.
+
+  Sai số theo từng điểm (khoảng cách trung bình điểm-tới-điểm so với bản đối
+  chứng) trên cả 120 frame: `ayak-sag` (đối chứng — cùng hình dạng rig,
+  không bao giờ lật) không bao giờ vượt quá 5.88px ở bất kỳ đâu. `ayak-sol`
+  đạt đỉnh 50.91px ở frame 45, rồi giảm dần xuống dưới 0.5px vào frame 57 —
+  một sai số thật, lớn, nhưng **thoáng qua**, không phải vĩnh viễn. Tắt việc
+  lan truyền (phương án bản sửa này thay thế) thì tệ hơn rõ rệt: 24-67px từ
+  frame 44 trở đi và **không bao giờ hồi phục**.
+
+  **Chính sự kiện lật là nguyên nhân gốc của sai số thoáng qua** — không
+  phải một yếu tố phụ kích hoạt một vấn đề đường cong nội suy không liên
+  quan (một bản nháp trước của ghi chú này nói đúng như vậy, và đã hạ thấp
+  vai trò của chính sự kiện lật; sửa lại sau khi người cung cấp bộ frame đối
+  chứng này xem lại Moho App và xác nhận bone target thật sự đổi hướng tức
+  thì tại frame 43→44 trong chính Moho). In ra góc **world** của `B24` — bản
+  thân `B24` không hề tự lật; đây thuần tuý là kết quả compose qua bone cha
+  `B23` đã lật — theo từng frame:
+
+  | Frame | 43 | 44 | 45 | 46 | 47 |
+  |---|---|---|---|---|---|
+  | Góc world của `B24` | −8.23° | **−146.56°** | −138.86° | −130.01° | −121.65° |
+
+  Một **cú nhảy −138.34° chỉ trong một frame**, sau đó đổi mượt ~7-9°/frame.
+  Cú gián đoạn đó — không phải chi tiết hình dạng đường cong nào — mới chính
+  là sai số thoáng qua ở khung 44-46, và nó là hệ quả **đúng về mặt toán
+  học** của việc compose một phép xoay qua một phép phản chiếu: bản thân
+  `B23` chuyển từ góc local 182.87° sang góc world 2.87° ngay khi `flip_h`
+  bật (182.87+180 = 362.87 = 2.87° mod 360, đúng khớp với việc phản chiếu
+  một cột của ma trận xoay), và keyframe góc local riêng của `B24` (−24.38°,
+  cũng đặt đúng tại frame 44, nhỏ và có thật, do animator vẽ) sau đó compose
+  qua khung cha vừa bị phản chiếu — đúng là thứ mà một hệ toạ độ bị phản
+  chiếu làm với một phép xoay local tiếp theo: nó đảo ngược chiều (handedness)
+  biểu kiến của phép xoay đó trong không gian world.
+
+  Đã thử hai công thức compose khác đối chiếu với đúng bộ 120 frame này, cả
+  hai đều **bằng hoặc tệ hơn**:
+  - Đổi thứ tự, áp flip trong không gian cha *trước* khi xoay bone — kết quả
+    y hệt ở đây, vì bản thân `B24` không bao giờ tự lật (đổi thứ tự vô nghĩa
+    khi không có gì để đổi).
+  - Lan truyền một cờ boolean "mirrored" riêng bằng XOR xuống chuỗi, trong
+    khi cộng góc local như số vô hướng thường (không đảo chiều), rồi áp
+    gương một lần duy nhất ở cuối — phương án "trực giác" hơn, nhưng tệ hơn
+    nhiều: nó không còn hội tụ đúng về trạng thái ổn định nữa (16.70px trung
+    bình / 33.08px lớn nhất ở frame 90, so với ~0.3px của cách hiện tại).
+
+  Vậy cú nhảy là có thật, lớn, và là hệ quả trực tiếp, không tránh được của
+  việc sự kiện lật compose đúng xuyên suốt chuỗi — không phải một triệu
+  chứng cần giải thích cho qua. Điều vẫn còn là chi tiết phụ, chưa rõ, là vì
+  sao sai số không giữ nguyên ở đỉnh: nó giảm dần mượt về gần 0 vào frame
+  57, đọc ~0 đúng tại các keyframe sau của `B23.anim_angle` (49: 2.26px, 53:
+  2.71px, 57: 0.46px) trong khi đạt đỉnh **giữa** các keyframe đó (28px
+  trung bình ở frame 45, 12px ở frame 52). `B23.anim_angle` dao động 178° →
+  216.4° → 130° → 159.8° đúng qua các keyframe đó — đảo chiều hai lần trong
+  14 frame — mà không có tay cầm Bezier tường minh nào (đã xác nhận: `im & 8`
+  tắt suốt), tức là đường easing mặc định chưa giải mã của chính Moho, được
+  xấp xỉ bằng monotone cubic của `Channel._segment` (xem
+  [`moho-animation-and-transform.md`
+  § 3.6](moho-animation-and-transform.md#36-thay-vào-đó-mohosvgpy-làm-gì))
+  — một điểm thiếu chính xác đã biết từ trước ở nơi khác, bị khuếch đại lớn
+  ở đây bởi chiều dài chuỗi và vì nằm chồng ngay lên cú gián đoạn thật của
+  chính sự kiện lật.
+
+  **Không phải lỗi blend của `Skinner.deform`** (một bản nháp trước của ghi
+  chú này đoán sai điều đó, chỉ dựa trên 4 frame) — một trọng số blend sai
+  sẽ không tự về 0 đúng tại các keyframe riêng của `B23` như thế này. Cố
+  tình để chưa sửa, vì đường easing thật của Moho chưa được giải mã — xem
+  mục KNOWN GAPS của module docstring.
+
+  **Đã đối chiếu với chính Moho App đang chạy**, không chỉ các frame đã
+  xuất: người cung cấp bộ đối chứng này đã tua từng frame `ayak-sol` trong
+  Moho App từ 44 tới 49 và xác nhận nó vẫn tiếp tục đổi hình/kích thước
+  suốt khoảng đó trước khi ổn định — không phải một cú snap gọn trong đúng
+  1 frame. Điều này xác nhận `moho/track/SketchBone/foot/` là bản đối chứng
+  đáng tin, và giải quyết dứt điểm một câu hỏi lẽ ra sẽ còn lặp lại: **phép
+  lật** là tức thời (43→44), nhưng "hình vẫn đổi thêm vài frame sau đó" là
+  hành vi thật của chính Moho, không phải hiện tượng do bản sửa này tạo ra.
+  Khoảng trống còn lại chỉ là hình dạng **chính xác** trong khung 44-48,
+  không phải chuyện việc ổn định mất vài frame.
+
 **Trường hợp đặc biệt: `offset`** — xem [§ 3.7](#37-offset-công-cụ-offset-bone).
 Nó được liệt kê dưới "trạng thái editor" trong
 [`moho-project-file-format.md` § 9](moho-project-file-format.md#9-bones-và-skinning),

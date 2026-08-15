@@ -66,12 +66,15 @@ Repository layout:
   a feature was actually exercised, not just silently skipped) both check this
   repository against **itself**. `check_reference_frames.py` (`make
   check-reference`) is the only one that checks it against an **outside
-  authority**: the 103 frames Moho 14.4 itself exported to `moho/track/Bandit/svg/`,
-  comparing per-group centroid travel over the document's full 25–127 range.
-  Reach for that one whenever a change touches how time or transforms are
-  read — it is what caught the channel-cycle and Smart Bone defects that every
-  self-consistent check had passed. None needs a Lottie player or a
-  third-party package.
+  authority**: real frames Moho 14.4 itself exported, under `moho/track/`
+  (three documents' worth — see the script's own `CHECKS`/`WINDING_CHECKS`
+  tables for exactly which). Two measurements: per-group centroid travel
+  (position/shape drift) and per-shape *winding* (the sign of its enclosed
+  area, which only a mirror/reflection flips). Reach for this whenever a
+  change touches how time, transforms or bone flips are read — it is what
+  caught the channel-cycle, Smart Bone and bone-flip-propagation regressions
+  that every self-consistent (SVG-only or Lottie-only) check had passed.
+  None of the three scripts needs a Lottie player or a third-party package.
 - `docs/` — usage guide (`moho-exporting-svg.md`), file-format reference
   (`moho-project-file-format.md`), the animation/transform model
   (`moho-animation-and-transform.md`), the rigging and deformation reference
@@ -268,6 +271,34 @@ separate transform traversals, and a field-to-stage cross-reference table, see
    `export_document` (the whole tree, walking masking/switch-layer active
    child/visibility as it goes).
 9. **CLI** (`main`) is argument parsing and file I/O only.
+
+### Three subsystems worth extra care before touching
+
+These have each caused a real regression once already — read the cited
+docstring before changing anything nearby, and re-run `make check-reference`
+afterward regardless of what you touched:
+
+- **`Skeleton.world_matrices`** composes a bone chain's rotation, flip
+  (`flip_h`/`flip_v`) and scale together. A parent's reflection (`det < 0`)
+  must propagate to descendants by composing actual 2x2 matrices
+  (`orient[]`); reducing that to a scalar angle sum breaks the moment any
+  bone in a document flips (silently correct on every document without one).
+  See that method's own "NOTE ON SCALE" and "NOTE ON FLIP PROPAGATION" for
+  the full evidence trail, including the exact regression this caused and
+  the verification commands to rerun.
+- **`Channel._parse_cycles` / `_cycle_value`** — a channel's "cycle" marker
+  (`interp[i].im & 4`) makes it *replay* an earlier stretch after its last
+  keyframe, but the replay **accumulates** the per-cycle delta rather than
+  repeating the same values (a walk cycle walks somewhere, it doesn't walk
+  in place). See `moho-animation-and-transform.md` § 3.4 for how this was
+  decoded and validated against a real Moho render.
+- **`Skeleton.dynamic_angles`** (bone dynamics / spring physics, behind
+  `--bone-dynamics`, off by default) drives the spring from the *parent's*
+  world rotation, not the bone's own keyed angle — a bone with a constant
+  local angle still needs to swing when its parent moves. This is an
+  unverified model (Moho gives three force numbers and no equation); see the
+  method's own docstring for what has and hasn't been checked against a real
+  render.
 
 ### Porting to Go
 

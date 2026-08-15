@@ -68,6 +68,19 @@ that guard the pipeline.
 
 Exit code 0 if every group is inside tolerance, 1 otherwise.  A missing
 reference directory is skipped, not failed - both are gitignored.
+
+WINDING CHECKS (`run_winding_check`, `WINDING_CHECKS`) are a second,
+independent measurement added after the bbox-centre check above proved too
+weak to catch a real regression: `Skeleton.world_matrices` briefly lost the
+ability to propagate a bone's `flip_h`/`flip_v` mirror to its own children
+(see that method's "NOTE ON FLIP PROPAGATION"), which flips a shape's
+winding direction while barely moving its bounding box - `ayak-sol`'s width
+was 43.4px broken vs 41.9px correct at the exact frame that broke, a gap
+`run_check`'s tolerances would never catch. Winding (the sign of the
+shoelace formula, `signed_area`) catches it directly: every sampled frame of
+`ayak-sol` mismatched sign in the broken build, none did after the fix. Add
+a layer to `WINDING_CHECKS` whenever a bone's `flip_h`/`flip_v` is a real,
+keyframed change - that is the one signal this check exists for.
 """
 import os
 import re
@@ -224,10 +237,116 @@ def run_check(project, pattern, frames, groups):
     return failures
 
 
+def reference_group_paths(path, name):
+    """[[on-curve points], ...] - one list PER `<path>` inside the innermost
+    `<g id=name>` of one Moho SVG, kept separate rather than merged.
+
+    `reference_groups` above flattens every path in a group into one point
+    list, which is fine for a bounding-box centre but destroys the very
+    thing `run_winding_check` needs: a shape's own signed area, and
+    therefore its winding direction.
+    """
+    svg = open(path).read()
+    stack, out = [], []
+    for match in TOKEN.finditer(svg):
+        token = match.group(0)
+        if token.startswith('</g'):
+            if stack:
+                stack.pop()
+        elif token.startswith('<g'):
+            found = GROUP_ID.search(match.group(1))
+            stack.append((found.group(1) if found else '').replace('_', ' '))
+        else:
+            data = PATH_D.search(match.group(2) or '')
+            if not data or not stack or stack[-1] != name:
+                continue
+            flat = [float(n) for n in NUMBER.findall(data.group(1))]
+            pairs = list(zip(flat[0::2], flat[1::2]))
+            if pairs:
+                out.append([pairs[0]] + pairs[3::3])
+    return out
+
+
+def our_layer_paths(exporter, frame, name):
+    """[[on-curve points], ...] for ONE layer, one list per shape, straight
+    from the pipeline - the per-shape counterpart of `our_layers`."""
+    out = []
+    for item in walk_render_tree(exporter, float(frame)):
+        if item.event != 'mesh' or item.layer.name != name:
+            continue
+        for shape in item.layer.mesh.shapes:
+            if not shape.edges:
+                continue
+            for bezier in build_path_bezier(item.geometries, shape.edges,
+                                            item.to_px) or []:
+                points = [tuple(p) for p in bezier.get('v', [])]
+                if points:
+                    out.append(points)
+    return out
+
+
+def signed_area(polygon):
+    """The shoelace formula.  Its MAGNITUDE is the enclosed area; its SIGN is
+    the winding direction, and that sign is exactly what a `flip_h`/`flip_v`
+    mirror reverses.  See `run_winding_check`."""
+    total = 0.0
+    for i in range(len(polygon)):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % len(polygon)]
+        total += x1 * y2 - x2 * y1
+    return total / 2.0
+
+
+# (project, reference pattern, frames to sample, [layer names to check])
+#
+# A WINDING check, not a position check: it asks only "does this layer's
+# winding direction (see signed_area) agree with Moho's own render", which
+# `run_check`'s bounding-box-centre-displacement metric is a WEAK detector
+# for - a mirrored shape can keep almost the same bounding box while its
+# outline winds the wrong way.  Add a layer here whenever a bone's
+# flip_h/flip_v channel is a real, keyframed change (not just a stray
+# default), since that is precisely the failure mode this check exists to
+# catch - see moho2svg.py's `Skeleton.world_matrices`, "NOTE ON FLIP
+# PROPAGATION" for the regression this was written against.
+WINDING_CHECKS = [
+    ('moho/SketchBone.mohoproj', 'moho/track/SketchBone/new/SketchBone_%05d.svg',
+     [1, 30, 44, 45, 50, 60, 90, 120], ['ayak-sol']),
+]
+
+
+def run_winding_check(project, pattern, frames, layers):
+    if not os.path.isfile(pattern % frames[0]):
+        print('skipped %s winding check: %s not present\n'
+              % (os.path.basename(project), os.path.dirname(pattern)))
+        return []
+    Channel.reset_cache()
+    exporter = Exporter(load_document(project))
+    failures = []
+    print('%s winding check (a mirrored bone losing its own mirror downstream)'
+          % os.path.basename(project))
+    for name in layers:
+        mismatches = []
+        for frame in frames:
+            ref_area = sum(signed_area(p)
+                           for p in reference_group_paths(pattern % frame, name))
+            our_area = sum(signed_area(p) for p in our_layer_paths(exporter, frame, name))
+            if (ref_area < 0) != (our_area < 0):
+                mismatches.append(frame)
+        status = 'OK' if not mismatches else ('MISMATCH at frames %s' % mismatches)
+        print('  %-16s %s' % (name, status))
+        if mismatches:
+            failures.append('%s winding %s: sign disagrees with Moho at frames %s'
+                             % (os.path.basename(project), name, mismatches))
+    print()
+    return failures
+
+
 def main() -> int:
     failures = []
     for project, pattern, frames, groups in CHECKS:
         failures += run_check(project, pattern, frames, groups)
+    for project, pattern, frames, layers in WINDING_CHECKS:
+        failures += run_winding_check(project, pattern, frames, layers)
     if failures:
         print('FAIL')
         for failure in failures:

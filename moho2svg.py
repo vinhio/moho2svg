@@ -746,6 +746,21 @@ KNOWN GAPS
   - Gradient centre/radius placement is approximate (see GRADIENTS).
   - The flexible-binding weight falloff is unvalidated for overlapping-influence
     cases (see BONE DEFORMATION).
+  - Channel._segment's monotone-cubic curve is a stand-in for Moho's own
+    undecoded easing (no explicit Bezier handle exists for the vast majority
+    of channels - see § 3.5 of moho-animation-and-transform.md).  Usually
+    sub-pixel.  Quantified as NOT always sub-pixel on `SketchBone.mohoproj`'s
+    `B23.anim_angle` (bone 22, cat_boy skeleton): a 178->216.4->130->159.8deg
+    swing reversing direction twice in 14 frames produces up to 50.91px of
+    per-vertex error on `ayak-sol` (the flexible-bound foot two bones down
+    the chain) at the worst between-keyframe frame, confirmed by its own
+    per-vertex error reading ~0 exactly AT each of that channel's own
+    keyframes and rising only between them - see Skeleton.world_matrices'
+    "NOTE ON FLIP PROPAGATION" point (c) for the full evidence trail (that
+    investigation first misattributed this to a skinning-blend bug on only
+    4 sampled frames; the 120-frame comparison against
+    moho/track/SketchBone/foot/ that corrected it is the reason to trust
+    this entry over a quick visual check next time too).
   - PatchLayer (see PATCH LAYERS) reuses its target's mesh AND transform - the
     heuristic part is specifically ignoring the patch's own transform/
     parent_bone/flexi_bone_subset/origin, which is confirmed necessary (using
@@ -1837,7 +1852,12 @@ class Bone:
     `flip_h` False at frame 0 -> True at frame 44. Ignoring it left that
     foot pointing backwards against its own direction of travel for the
     whole second half of the walk, which is what the field was found
-    from."""
+    from.
+
+    B23's own two children in that same subset, B24 and B25, are what
+    regressed this once already, in a way that is easy to reintroduce again
+    if `Skeleton.world_matrices` is ever touched without re-running its own
+    verification: see that method's "NOTE ON FLIP PROPAGATION"."""
     name: str
     parent: int
     length: float
@@ -2009,6 +2029,175 @@ class Skeleton:
         document's body from 30.3 to 24.5 px while making its tail and one
         ear worse.  Left out rather than guessed.
 
+        NOTE ON FLIP PROPAGATION - REGRESSION, FOUND AND FIXED ONCE ALREADY.
+        `flip_h`/`flip_v` were first implemented in commit "Fix bone
+        deformation, Smart Bone and channel interpolation defects", which
+        composed each bone with `parent_matrix.compose(local)` - full 2x2
+        matrix multiplication, which propagates a reflection
+        (`det < 0`) through a chain automatically, the way matrix composition
+        always does.  Implementing rule (2) above REPLACED that composition,
+        for any non-root bone, with `rot[i] = rot[parent] + angle` - a bare
+        SCALAR angle sum - because only the rotation needed to keep
+        accumulating once scale was decoupled from it.  That is wrong: a
+        scalar angle cannot represent a reflection, so a parent's flip
+        stopped reaching its children. `SketchBone.mohoproj`'s ankle chain
+        `B23 -> B24 -> B25` (bones 22/23/24, exactly the
+        `flexi_bone_subset` that deforms the `ayak-sol` foot mesh - the LEFT
+        ankle driving the layer named, confusingly, "right foot"; see this
+        class's own Bone docstring) makes the break exact: `B23.flip_h` goes
+        `False -> True` at frame 44, so `det(world(B23))` correctly flips
+        from `+1` to `-1` there, but `det(world(B24))` and `det(world(B25))`
+        stayed at `+1` on every frame with the scalar-angle version - the
+        mirror never reached them. The leg (a different, unflipped bone
+        group) still looked right, which is what made this read as
+        "the foot is backwards, the leg is fine" rather than "rotation is
+        broken everywhere" - exactly the symptom the ORIGINAL flip_h fix's
+        own commit message describes ("a foot pointing backwards ... for
+        half the walk"), which is why it was mistaken for the same bug come
+        back rather than a new one.
+
+        THE FIX is to decouple magnitude from the chain (rule 2) while still
+        propagating ORIENTATION - rotation AND reflection together - by
+        composing actual 2x2 matrices, not by summing angles.  `orient[i]`
+        tracks each bone's accumulated rotation-and-flip with NO scale and
+        NO translation (`local_orient` below); `orient[parent].compose(
+        local_orient)` is exactly `Mat2D.compose`, so `det` multiplies
+        correctly through the chain (`det(A.compose(B)) == det(A) * det(B)`
+        for the same reason two mirrors make a rotation).  The bone's own
+        scale is then applied on top of `orient[i]` only when building
+        `out[i]`, never accumulated into `orient` itself, which is what still
+        gets rule (2) right.
+
+        VERIFY THIS STAYS FIXED - TWO INDEPENDENT WAYS, BOTH CHEAP.
+
+        (a) `det(world_matrices(f)[i])` must be negative for every bone at or
+        after a flip and for every one of its descendants, never just the
+        flipped bone itself:
+
+            python3 -c "
+            import sys; sys.path.insert(0, '.')
+            from moho2svg import Channel, Exporter, load_document
+            Channel.reset_cache()
+            doc = load_document('moho/SketchBone.mohoproj')
+            cat_boy = next(l for l in doc.layers[0].children if l.name == 'cat_boy')
+            exp = Exporter(doc)
+            for f in (0, 44, 45, 120):
+                w = cat_boy.skeleton.world_matrices(float(f), exp)
+                print(f, [round(w[i].a*w[i].d - w[i].b*w[i].c) for i in (22, 23, 24)])
+            "
+            # expect [1, 1, 1] at f=0, [-1, -1, -1] at f=44/45/120 - never a mix.
+
+        (b) `make check-reference` (`tools/check_reference_frames.py`,
+        `run_winding_check`) scores the ACTUAL mesh this bug shipped wrong -
+        `ayak-sol`, against Moho's own render, now tracked under
+        `moho/track/SketchBone/new/` - by the sign of its shoelace area,
+        which a mirror flips.  Confirmed on this exact regression: every one
+        of 8 sampled frames from 1 to 120 mismatched sign in the broken
+        build (bounding-box WIDTH barely moved - 43.4px broken vs 41.9px
+        correct at frame 44 - which is why the bbox-centre checks in the
+        same file did not catch this the first time); none mismatch after
+        the fix in this commit. Rerun both (a) and (b) after ANY change to
+        this method, not just ones that mention flip_h - (a) is instant and
+        catches the mechanism directly, (b) is the one with a real
+        consequence attached.
+
+        (c) VISUAL + WHOLE-DOCUMENT VERTEX ERROR, against
+        `moho/track/SketchBone/foot/` - 120 frames covering BOTH legs
+        (`bacak-sag`/`ayak-sag`, which never flips, alongside
+        `bacak-sol`/`ayak-sol`, which does), supplied specifically to
+        arbitrate this fix after an initial 4-frame visual check
+        (`moho/track/SketchBone/parts/ayak-sol-{43,44,45,46}.jpg`, still
+        useful for a quick look) was not enough evidence on its own and led
+        to a wrong first diagnosis - recorded here because the correction is
+        the useful part.
+
+        Per-vertex error (mean of point-to-point distance against the
+        reference) across ALL 120 frames, propagated vs not:
+
+            layer               flip propagated          flip NOT propagated
+            ayak-sag (control)  max 5.88px anywhere       (unaffected either way)
+            ayak-sol            max 50.91px at f45,        24-67px from f44
+                                 decays to <0.5px by f57    ONWARD, forever
+
+        Not-propagating is unambiguously worse and never recovers - confirms
+        (a) and (b) again, more strongly.
+
+        THE FLIP EVENT ITSELF IS THE ROOT CAUSE OF THE TRANSIENT ERROR - not
+        an incidental trigger for an unrelated curve-approximation issue (an
+        earlier revision of this note said exactly that, and it undersold
+        the flip's own role; corrected here after the person who supplied
+        this reference frame set rechecked the Moho app and confirmed the
+        target bone's own reorientation at frame 43->44 is instant there
+        too, which is the fact that prompted re-deriving this). Printing
+        `B24`'s WORLD angle (`B24` carries no flip of its own - this is
+        pure composition through its flipped parent `B23`) frame by frame:
+
+            f=43: -8.23deg   f=44: -146.56deg   (a -138.34deg jump in ONE frame)
+            f=45..49: -138.86, -130.01, -121.65, -115.43, -112.99  (smooth, ~7-9deg/frame after)
+
+        That -138.34deg discontinuity, not any curve-shape detail, is what
+        the 44-46 transient error actually is. It is the mathematically
+        CORRECT consequence of composing a rotation through a reflection:
+        `B23` itself swings from a local angle of 182.87deg to a world
+        angle of 2.87deg the instant `flip_h` goes true (negating one
+        column reflects direction theta to theta+180, confirmed exactly:
+        182.87+180 = 362.87 = 2.87mod360) - a ~175deg reorientation of `B23`
+        alone, on top of which `B24`'s own small, real, authored
+        -24.38deg local-angle keyframe (also timed at frame 44) composes
+        through the now-mirrored parent frame, which is what a reflected
+        coordinate system does to a subsequent local rotation: it reverses
+        its apparent handedness in world space. Two alternative composition
+        formulas were tried against this exact 120-frame reference and
+        BOTH came out equal-or-worse, which is why the model above is kept
+        rather than adjusted further:
+          - Reordering the flip to apply in the parent's frame before this
+            bone's own rotation (`Diag(fh,fv).R(theta)` instead of
+            `R(theta).Diag(fh,fv)`) - identical result here, because `B24`
+            itself never flips (`Diag(1,1)` is the identity either order),
+            so this distinction cannot matter for this particular chain.
+          - Propagating a separate boolean "mirrored" flag by XOR down the
+            chain while summing local angles as plain scalars (no
+            handedness reversal), applying the mirror once at the end -
+            mathematically the "intuitive" alternative, and MUCH worse: it
+            no longer converges to the correct steady state at all (16.70px
+            mean / 33.08px max at frame 90, versus this method's ~0.3px).
+
+        So the -138deg jump is real, large, and directly, unavoidably
+        caused by the flip event composing correctly through the chain -
+        not a symptom to be explained away. What IS still an open,
+        secondary detail is that the error does not stay at its peak: it
+        decays smoothly back toward zero by frame 57, and reads ~0 exactly
+        at `B23.anim_angle`'s own later keyframes (49: 2.26px, 53: 2.71px,
+        57: 0.46px) while peaking BETWEEN them (28px mean at 45, 12px mean
+        at 52) - `B23.anim_angle` swings 178deg -> 216.4deg -> 130deg ->
+        159.8deg across exactly those keyframes (reversing direction twice
+        in 14 frames) with no explicit Bezier handle (`interp[i].im & 8`
+        unset throughout, confirmed), i.e. Moho's own undecoded default
+        easing curve, approximated by `Channel._segment`'s monotone cubic
+        (see that method's own docstring) - a KNOWN, pre-existing
+        imprecision elsewhere levered large here by the chain's length and
+        by sitting right on top of the flip's own real discontinuity.  NOT
+        a `Skinner.deform` skinning-blend artifact (an earlier revision of
+        this note wrongly guessed that too, on only 4 sampled frames) - a
+        wrong blend weight would not zero out exactly at `B23`'s own
+        keyframes the way this does.
+
+        CONFIRMED AGAINST LIVE MOHO PLAYBACK, not just its exported frames:
+        the person who supplied this reference set watched `ayak-sol` scrub
+        frame by frame in the Moho app itself from 44 through 49 and
+        confirmed it keeps visibly changing shape/size across that whole
+        span before settling - not a clean single-frame snap immediately
+        followed by stillness. That directly validates
+        `moho/track/SketchBone/foot/` as trustworthy ground truth (its own
+        numbers already showed the same multi-frame settling) and settles
+        what would otherwise be a recurring question: the FLIP toggle is
+        instant (43->44, confirmed both ways), but "the shape keeps changing
+        for several more frames after" is Moho's own real behaviour, not an
+        artifact of this method. The open gap is narrower than that: only
+        the PRECISE shape during frames 44-48 doesn't yet match, which is
+        the interpolation-curve imprecision above, not the mere fact that
+        settling takes a few frames.
+
         That asymmetry was carried for a long time as an unexplained quirk,
         applied to every bone and flagged in the module docstring's KNOWN
         GAPS as possibly an old transcription slip, because nothing in the
@@ -2058,7 +2247,10 @@ class Skeleton:
         """
         n = len(self.bones)
         out: list[Optional[Mat2D]] = [None] * n
-        rot: list[float] = [0.0] * n
+        # Accumulated ROTATION-AND-FLIP only, no scale, no translation - see
+        # the NOTE ON SCALE / NOTE ON FLIP PROPAGATION below for why this has
+        # to be a composed matrix and not a scalar angle.
+        orient: list[Optional[Mat2D]] = [None] * n
         seen: set[int] = set()
         order: list[int] = []
         ik_pairs = self._ik_pairs(frame, exporter)   # bone1 index -> (bone2 index, target index)
@@ -2088,8 +2280,9 @@ class Skeleton:
             parent_matrix = out[parent] if parent >= 0 else None
             solved = self._solve_ik_pair(i, ik_pairs, out, pos, scale, parent_matrix, frame, exporter)
             if solved is not None:
-                out[i], (bone2_index, bone2_matrix) = solved
+                out[i], orient[i], (bone2_index, bone2_matrix, bone2_orient) = solved
                 out[bone2_index] = bone2_matrix
+                orient[bone2_index] = bone2_orient
                 continue
             angle = dynamic.get(i, exporter.eval(bone.anim_angle, frame))
             c, s = math.cos(angle), math.sin(angle)
@@ -2102,25 +2295,29 @@ class Skeleton:
             fv = -1.0 if exporter.eval(bone.flip_v, frame) else 1.0
             # Squash-and-stretch scales along the bone only; every other bone
             # scales uniformly - see this method's NOTE ON SCALE.
-            # Squash-and-stretch scales along the bone only; every other bone
-            # scales uniformly - see this method's NOTE ON SCALE.
             across = 1.0 if bone.scaling_mode == SQUASH_STRETCH_SCALING_MODE else scale
             local = Mat2D(c * scale * fh, s * scale * fh,
                            -s * across * fv, c * across * fv, pos.x, pos.y)
-            rot[i] = (rot[parent] if parent >= 0 else 0.0) + angle
+            # The same local rotation/flip, but with UNIT magnitude - no
+            # scale baked in.  Composing these (not the angle-only versions
+            # below) is what keeps a parent's flip_h/flip_v propagating
+            # through a REFLECTION rather than being lost - see NOTE ON FLIP
+            # PROPAGATION.
+            local_orient = Mat2D(c * fh, s * fh, -s * fv, c * fv, 0.0, 0.0)
             if parent_matrix is None:
                 out[i] = local
+                orient[i] = local_orient
             else:
                 # SCALE DOES NOT ACCUMULATE DOWN THE CHAIN.  The child's
                 # ORIGIN follows the parent's scaled frame - a squashing torso
                 # does drag its head down - but the child's own axes are
-                # rebuilt from the accumulated ROTATION and its OWN scale, so
-                # the squash does not shrink the child as well.  See this
+                # rebuilt from the accumulated ORIENTATION and its OWN scale,
+                # so the squash does not shrink the child as well.  See this
                 # method's NOTE ON SCALE.
                 origin = parent_matrix.apply(pos)
-                cc, ss = math.cos(rot[i]), math.sin(rot[i])
-                out[i] = Mat2D(cc * scale * fh, ss * scale * fh,
-                                -ss * across * fv, cc * across * fv,
+                o = orient[parent].compose(local_orient)
+                orient[i] = o
+                out[i] = Mat2D(o.a * scale, o.b * scale, o.c * across, o.d * across,
                                 origin.x, origin.y)
         return out  # type: ignore[return-value]
 
@@ -2432,10 +2629,17 @@ class Skeleton:
     def _solve_ik_pair(self, bone1_index: int, ik_pairs: dict[int, tuple[int, int]],
                         out: list[Optional[Mat2D]], pos1: Vec2, scale1: float,
                         parent_matrix: Optional[Mat2D], frame: float,
-                        exporter: "Exporter") -> Optional[tuple[Mat2D, tuple[int, Mat2D]]]:
+                        exporter: "Exporter"
+                        ) -> Optional[tuple[Mat2D, Mat2D, tuple[int, Mat2D, Mat2D]]]:
         """If `bone1_index` is the base of a 2-bone IK pair, return
-        (bone1's world matrix, (bone2 index, bone2's world matrix));
+        (bone1's world matrix, bone1's orientation,
+        (bone2 index, bone2's world matrix, bone2's orientation));
         otherwise None (the caller falls back to plain FK for this bone).
+        "Orientation" is the matching entry for `_world_matrices`'s `orient[]`
+        chain - rotation only, no scale or translation - see that method's
+        NOTE ON FLIP PROPAGATION for why it has to be a composed matrix and
+        not a scalar angle, and this method's own note at the return
+        statement for why IK's orientation never carries a flip.
         Needs `out[target_index]` already resolved - guaranteed by `add`'s
         extended topological order."""
         pair = ik_pairs.get(bone1_index)
@@ -2494,7 +2698,21 @@ class Skeleton:
         c2, s2 = math.cos(world_angle2), math.sin(world_angle2)
         bone2_matrix = Mat2D(c2 * scale2 * stretch, s2 * scale2 * stretch, -s2, c2,
                               elbow.x, elbow.y)
-        return bone1_matrix, (bone2_index, bone2_matrix)
+        # Orientation (rotation only, no scale/translation) for the caller's
+        # `orient[]` chain - see world_matrices' NOTE ON FLIP PROPAGATION.
+        # col2 of each matrix above is ALREADY unit magnitude with no flip
+        # baked in (`(-s1, c1)` / `(-s2, c2)`), which is what makes lifting it
+        # straight out safe here: this solve has never applied `flip_h`/
+        # `flip_v` to either bone (KNOWN GAP, unrelated to and pre-existing
+        # this method's fix - an IK-solved bone cannot currently be flipped).
+        # A future descendant of one of these two bones still needs SOME
+        # orientation to compose against, so this returns the identity-flip
+        # rotation both bones actually have today rather than leaving it None
+        # (which crashed `_world_matrices` outright the first time this was
+        # exercised - `SketchBone.animeproj`'s own leg IK).
+        orient1 = Mat2D(c1, s1, -s1, c1, 0.0, 0.0)
+        orient2 = Mat2D(c2, s2, -s2, c2, 0.0, 0.0)
+        return bone1_matrix, orient1, (bone2_index, bone2_matrix, orient2)
 
     @staticmethod
     def _ik_auto_stretch(bone1: "Bone", bone2: "Bone", length1: float, length2: float,
