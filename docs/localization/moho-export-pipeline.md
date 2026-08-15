@@ -261,7 +261,7 @@ Khi `emit()` quyết định vẽ, trình tự chính xác này chạy — và h
 self._active_actions = _active_actions_along(ancestors, frame)   # set
 self._layer_scale    = world_here.uniform_scale() or 1.0
 chain                = build_deform_chain(ancestors, layer, frame, self)
-to_px                = _deformed_pixel_mapper(chain, frame, layer)
+to_px                = _deformed_pixel_mapper(chain, frame)
 body, pts            = _render_mesh(layer.mesh, to_px, frame, indent)
 self._active_actions = []                                        # clear
 ```
@@ -269,7 +269,7 @@ self._active_actions = []                                        # clear
 `export_layer` làm điều tương tự cho một layer đơn lẻ, với hai khác biệt:
 `--local` thay toàn bộ chuỗi biến dạng bằng `_plain_pixel_mapper(IDENTITY)`,
 và mask được tính *sau khi* `_active_actions` bị xóa (đó là nơi điểm lạ trong
-[§ 9.3](#93-điểm-lạ-của-ngữ-cảnh-smart-bone-rỗng) đến từ).
+[§ 9.3](#93-mỗi-mask-source-có-ngữ-cảnh-smart-bone-riêng) đến từ).
 
 ### 3.2 `--flat` (`nested_groups=False`)
 
@@ -929,18 +929,27 @@ Masking áp dụng **đều ở mọi độ sâu, kể cả gốc tài liệu**.
 đối xử đặc biệt với masking ở cấp cao nhất; hóa ra đó là sửa sai cho một lỗi
 không liên quan.
 
-### 9.3 Điểm lạ của ngữ cảnh Smart Bone rỗng
+### 9.3 Mỗi mask source có ngữ cảnh Smart Bone riêng
 
-`_mask_sources` luôn được đánh giá với `self._active_actions` **rỗng** — không
-bao giờ với các dial đang hoạt động cho mesh đang bị cắt.
+Bản thân `_mask_sources` luôn được bước vào với `self._active_actions`
+**rỗng** — `export_layer`/`export_document` gọi nó giữa hai lần xóa, do cấu
+tạo. Điều đó từng nghĩa là hình học của mọi mask source cũng được dựng trong
+một ngữ cảnh rỗng, không bao giờ với các dial đang hoạt động cho mesh đang bị
+cắt — được giữ thay vì sửa trong một thời gian dài, vì không có xuất tham
+chiếu nào để xác nhận điều gì nên xảy ra thay thế.
 
-Đây không phải một quyết định thiết kế. Nó rơi ra từ *khi nào* `export_layer` /
-`export_document` gọi nó so với nơi chúng đặt và xóa `_active_actions`: do cấu
-tạo, nó luôn nằm giữa hai lần xóa. Nó đã được **giữ cẩn thận thay vì sửa**, vì
-không có xuất tham chiếu nào để xác nhận điều gì nên xảy ra thay thế. Nếu bạn
-sắp xếp lại các phép gán đó, bạn thay đổi hình học mask cho bất kỳ rig nào có
-mask source bị điều khiển bởi một Smart Bone. Xem KNOWN GAPS trong docstring
-của module.
+**Đã sửa, đã xác nhận với một tham chiếu thật:** `_mask_source_shapes` (và
+đối tác Lottie của nó, `_mask_source_shapes_bezier`) giờ tự đặt
+`self._active_actions = _active_actions_along(ancestors, frame)`, cho từng
+mask source, trước khi đánh giá hình học của riêng source đó — đúng ngữ cảnh
+mà source đó sẽ nhận nếu nó được render như một mesh layer thường — và khôi
+phục nó về rỗng sau đó. Đã xác nhận với `SketchBone.mp4`: shape "goz" (mắt)
+của `SketchBone.animeproj` là một source `masking == 2` có phần tô đóng lại
+đúng cho một cái nháy mắt (được điều khiển bởi các dial Smart Bone
+`goz-sol-ac-kapa`/`goz-sag-ac-kapa`), nhưng mask dựng từ hình học của nó cứ
+giữ nguyên hình dạng mắt mở vĩnh viễn trong khi ngữ cảnh này bị để rỗng -
+"goz-bebegi" (con ngươi) bị mask thấy rõ là không biến mất khi nháy mắt trong
+đầu ra cũ, dù phần tô của chính mắt thì có biến mất.
 
 ### 9.4 SVG tạo ra trông thế nào
 
@@ -1057,7 +1066,7 @@ nó chia làm ba vòng đời:
 | Vòng đời | Các trường | Ghi chú |
 |---|---|---|
 | **Mỗi lần xuất** | `_skin_cache`, `_next_id` | `_next_id` đặt tên các def `<mask>`/`<linearGradient>`/`<filter>`. Dùng chung một Exporter cho các lần xuất đồng thời sẽ đan xen các id và tạo ra các def tham chiếu chéo. |
-| **Mỗi mesh layer** (đặt rồi xóa) | `_active_actions`, `_layer_scale` | Được đặt ngay trước khi render các shape của một layer, bị xóa ngay sau đó. Điểm xóa chính xác là điểm chịu lực — xem [§ 9.3](#93-điểm-lạ-của-ngữ-cảnh-smart-bone-rỗng). |
+| **Mỗi mesh layer** (đặt rồi xóa) | `_active_actions`, `_layer_scale` | Được đặt ngay trước khi render các shape của một layer, bị xóa ngay sau đó. Điểm xóa chính xác là điểm chịu lực — xem [§ 9.3](#93-mỗi-mask-source-có-ngữ-cảnh-smart-bone-riêng). |
 | **Mỗi lần xuất, chỉ thêm** | `_brush_asset_cache`, `_brush_defs`, `_brush_refs`, `_brush_tinted_defs`, `_brush_tinted_ids` | Được điền một cách lười *trong khi* phần body đang được render, đây là lý do `_wrap()` chỉ có thể thêm trước `<defs>` ở rất cuối. |
 
 **Hãy xây một `Exporter` cho mỗi lần xuất** — hoặc cho mỗi goroutine trong một
@@ -1106,7 +1115,7 @@ Dùng cái này để nhảy từ một trường trong `moho-project-file-forma
 | `layer.transforms.*` (5 trên 10) | `Layer.local_matrix` | transform |
 | `layer.origin` | `Layer.local_matrix` | transform (trục xoay) |
 | `layer.parent_bone` | `build_deform_chain` → `SkinStep` | skinning |
-| `layer.flexi_bone_subset` | `_deformed_pixel_mapper` → `Skinner.deform` | skinning |
+| `layer.flexi_bone_subset` | `build_deform_chain` → `SkinStep.subset` → `_deformed_pixel_mapper` → `Skinner.deform` | skinning |
 | `layer.group_mask` | `_mask_sources` | masking, bước (A) |
 | `layer.masking` | `_mask_sources`, `_mask_source_shapes`, `member_clip` | masking |
 | `layer.actions[].name` | `Layer.action_names` → `_active_smart_bones` | Smart Bones |

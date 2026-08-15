@@ -603,7 +603,12 @@ frame.  Structurally:
     must be single-valued/monotonic-ish to invert; Exporter._active_smart_bones
     picks whichever of the two brackets the dial's current angle (falling back
     to whichever is closer if neither does, e.g. the paired action has near-zero
-    span because that direction was never posed).
+    span because that direction was never posed).  Those TWO names are the only
+    candidates: a dial bone is an ordinary bone, so a plain stored animation
+    that poses the whole rig records its angle too, and treating every action
+    registered on that angle as a candidate lets an unrelated animation
+    masquerade as a dial - see _active_smart_bones for the Bandit case that
+    found this and the 144 px -> 0.73 px it was worth.
   - Resolving a dial's own *current* angle deliberately bypasses this same
     override mechanism (Channel.eval_raw, not Channel.eval) - a dial's position
     always means its literal position on the main timeline, not a value that
@@ -634,14 +639,25 @@ A mesh layer's points are transformed in one of two ways, decided per *layer*
   - Flexible ("region"/"flexi" binding): every point is a distance-weighted
     blend of *every* bone's rest_to_pose transform (optionally restricted to a
     named subset, layer.flexi_bone_subset).  The weight function
-    (Skinner.deform, RenderSettings.bone_weight_falloff) is a HEURISTIC: this
-    tool's regression tests happened to only ever exercise layers where exactly
-    one bone has non-negligible weight near any given point, so several very
-    different falloff shapes (inverse-distance-squared, linear, Hermite, a hard
-    cutoff at `strength`) all reproduce the same reference output. The default,
-    inverse-distance-squared with no cutoff, is Moho's commonly-cited scheme for
-    this binding mode, but it has not been distinguished from the alternatives
-    by evidence the way (for example) the stroke-width formula has.
+    (Skinner.deform, RenderSettings.bone_weight_falloff) is a HEURISTIC, and
+    the four candidates are now DISTINGUISHABLE - which they were not until
+    Moho's own reference frames arrived.  Scored with `make check-reference`
+    (sum of mean positional error over the layers each document can address):
+
+        falloff    SketchBone (10 layers)   Bandit: TailBase dx / Belly dy
+        inv_d2            34.15  <- best         8.25 px      3.02 px
+        cut_d2            35.54                  6.38 px      3.02 px
+        hermite           41.53                  2.02 px      1.62 px
+        linear            43.58                  1.89 px      1.59 px
+
+    The two documents DISAGREE, and not marginally: the bounded-support
+    shapes (linear, hermite) win every Bandit layer that blends many bones,
+    and lose every comparable SketchBone layer (`kuyruk` 2.37 -> 6.24 px,
+    `golge` 6.48 -> 10.47 px).  So none of the four is Moho's actual
+    function; `inv_d2` stays the default because it wins on the broader
+    reference (10 layers against 3, and the newer format).  Layers where one
+    bone dominates - `Bandit`'s `Tip`, bound to just two - score IDENTICALLY
+    under all four, which is why nothing distinguished them before.
 
 Deformation for a given mesh layer is a *chain* of steps (Exporter._deform_chain
 builds a Layer's full ancestor chain into this before any point is touched):
@@ -739,9 +755,40 @@ KNOWN GAPS
     no-outline duplication IS confirmed directly against the Moho app - see
     PATCH LAYERS - so this remaining gap is narrower than it used to be:
     transform/position only, not appearance.)
-  - Physics (wind/gravity/dynamics) and layer_effects/layer_shadow are
-    ignored; a single static frame rarely shows either, but an animated
-    Lottie export can - see moho2lottie.py's own "physics" warning.
+  - Physics (wind/gravity) and layer_effects/layer_shadow are ignored; a
+    single static frame rarely shows either, but an animated Lottie export
+    can - see moho2lottie.py's own "physics" warning.  Nothing in this
+    corpus actually trips that warning any more: Layer.physics_dynamic now
+    requires a bone to subscribe via `wind_dynamics` on top of the two
+    fields Moho defaults on for every layer, and the one document it used to
+    flag turned out to be explained by the channels after all (see
+    Channel._cycle_value).
+  - Bone dynamics (Skeleton.dynamic_angles) now drives the spring from the
+    PARENT's world rotation, so a bone whose own angle never moves still
+    swings - which is how every rig in the corpus actually uses the feature.
+    It responds on 3 of the 6 documents that use it, up from 1.  The three
+    that stay inert have dynamic bones hanging off a parent that only
+    TRANSLATES; making those move needs a pivot-acceleration term, tried and
+    rejected on evidence (see dynamic_angles).  Force units are fitted, not
+    decoded.  `torque_force`, `angle_weight` and the
+    `*_control_delay`/`pos_`/`scale_`/`wind_` dynamics families are read or
+    skipped but never applied.
+  - `Bandit.mohoproj`'s whole TAIL sits ~18 px (base) to ~32 px (tip) off
+    vertically against Moho's own render, where every other layer in the
+    document manages 0.3-2.8 px.  DIAGNOSED as the bone-dynamics gap above,
+    not a binding defect: the reference's tail bob is a copy of the body's
+    own bob, lagged 4 frames (cross-correlation 0.93 at that lag, -0.91 at
+    zero) and amplified down the chain (6.7 px at the muzzle, 10.0 at the
+    tail base, 15.1 at the tip) - lag plus gain is a resonant oscillator,
+    and the tail bones are the document's only two with dynamics on.  Ruled
+    out by measurement: all 28 rigid bindings, 5 subsets and all 4 falloffs
+    leave the vertical error within ~2 px of each other.  See `make
+    check-reference`.
+  - A channel's cycle marker IS applied (see Channel._parse_cycles), but its
+    REPEAT COUNT is not decoded - nothing in the corpus separates "repeat
+    forever" from "repeat N times", so a cycle runs until the channel's next
+    keyframe, or forever when the marker sits on the last one.  Moho's own
+    interp EASING curve is still not decoded either (see Channel._segment).
   - Moho's 2-bone "Target" IK (`Bone.target_bone`) IS solved - see
     Skeleton._solve_ik_pair - but ONLY the exact 2-bone (bone + its own
     parent) case confirmed on this corpus (`SketchBone.animeproj`'s legs).
@@ -1022,6 +1069,55 @@ def _pose_offset(base: Any, here: Any, rest: Any) -> Any:
     return here
 
 
+def _channel_ever_true(raw: Any) -> bool:
+    """True when a Bool field is on at ANY point - on its own timeline or
+    inside any Smart Bone action pose registered on it.
+
+    Used as a cheap prefilter for switches that are cheap to test once and
+    expensive to test per frame (Skeleton.dynamic_angles).  The action poses
+    have to be included: `BoneDynamics.animeproj` registers a "JumpCycle"
+    pose on the `bone_dynamics` of all six of its rabbit-ear bones, so a
+    Smart Bone can turn the feature on for a bone whose own timeline never
+    does.
+
+    Args:
+      raw: a raw Bool channel, or a plain bool for a field Moho left
+        unanimated.
+
+    Returns:
+      True if any keyframe of the field or of one of its poses is truthy.
+    """
+    channel = Channel.of(raw)
+    if any(channel.val or []):
+        return True
+    return any(any(action.pose.val or []) for action in channel.actions)
+
+
+@dataclass(frozen=True)
+class CycleSpec:
+    """One "cycle" setting read off a channel's `interp` list.
+
+    Moho lets an animator mark a keyframe as *cycling*: past that keyframe the
+    channel does not hold its last value, it jumps back and replays an earlier
+    stretch of its own timeline.  `docs/moho-animation-and-transform.md` § 3.4
+    documents where the setting lives in the file; `Channel._parse_cycles`
+    documents how the numbers were decoded.
+
+    Fields:
+      end     the frame of the keyframe carrying the marker.  The cycle only
+              affects frames strictly AFTER this one.
+      resume  the frame the channel jumps back to at `end + 1`.  Always
+              `<= end`, so the replayed stretch is `[resume, end]` and the
+              period is `end - resume + 1` frames.
+      limit   the next keyframe after `end`, if the channel has one - the
+              cycle stops there and normal evaluation takes over.  None means
+              the marker is on the last keyframe, so the cycle never stops.
+    """
+    end: float
+    resume: float
+    limit: Optional[float]
+
+
 class Channel:
     """A Moho animated value.
 
@@ -1040,14 +1136,16 @@ class Channel:
     depends on context the way it does here.
     """
 
-    __slots__ = ("when", "val", "actions")
+    __slots__ = ("when", "val", "actions", "cycles")
 
     _cache: dict[int, "Channel"] = {}
 
-    def __init__(self, when: list[float], val: list[Any], actions: list[ActionRef]):
+    def __init__(self, when: list[float], val: list[Any], actions: list[ActionRef],
+                 cycles: Sequence[CycleSpec] = ()):
         self.when = when
         self.val = val
         self.actions = actions
+        self.cycles = tuple(cycles)
 
     @staticmethod
     def reset_cache() -> None:
@@ -1086,12 +1184,127 @@ class Channel:
             cached = Channel._cache.get(key)
             if cached is not None:
                 return cached
-            actions = [ActionRef(a.get("name"), Channel.of(a.get("pose")))
+            actions = [ActionRef(a.get("name"),
+                                 Channel.of(a.get("pose")).without_cycles())
                        for a in (raw.get("actions") or [])]
-            channel = Channel(raw["when"], raw["val"], actions)
+            channel = Channel(raw["when"], raw["val"], actions,
+                              Channel._parse_cycles(raw["when"], raw.get("interp")))
             Channel._cache[key] = channel
             return channel
         return Channel([0], [raw], [])
+
+    @staticmethod
+    def _parse_cycles(when: list[float], interp: Any) -> tuple["CycleSpec", ...]:
+        """Read the cycle markers out of a channel's `interp` list.
+
+        Moho stores the setting on the keyframe it belongs to, using two
+        general-purpose slots (`v1`, `v2`) whose meaning depends on a flag
+        bit in `im`:
+
+        - `im & 4` marks "this keyframe carries a cycle setting".  Without
+          the bit the slots hold the untouched default `(0.1, 0.5)` or the
+          worked-on-but-not-cycling `(-1, -1)`, so the bit has to be checked
+          first.
+        - `v1 >= 0` means the setting was entered as a RELATIVE frame count,
+          and the channel resumes at `when[i] - v1`.
+        - otherwise `v2 >= 0` means it was entered as an ABSOLUTE frame, and
+          the channel resumes at `v2`.
+        - both negative (`-1`, or the `-1000000` sentinel Moho writes for the
+          unused slot) means no usable setting; the marker is ignored.
+
+        How this was decoded (INFERENCE, not a documented format): the five
+        sample documents that use cycles carry only four distinct
+        `(v1, v2, keyframe)` combinations, and for each one the resumed-at
+        frame `A` was found empirically, by looking for the earlier frame
+        whose value equals the value at the marked keyframe - which is what a
+        seamless loop makes true, and what animators build.  Scoring every
+        candidate frame over every cycling channel of each document gives a
+        single clear winner per document:
+
+            document                v1     v2      keyframe   winner
+            Bandit.mohoproj         15    -1e6        41      25 (92/94)
+            TransformBoneTool       23    -1          25       1 (8/10)
+            WhatIsBone              -1     2          28       1 (212/217)
+            OffsetBoneTool          -1     2          24       1 (32/32)
+            BoneStrengthTool        -1     1          24       0 (too few
+                                                        numeric channels to
+                                                        discriminate; follows
+                                                        the same formula)
+
+        Both readings then land one frame LATER than that winner
+        (`41 - 15 = 26` vs `A = 25`; `v2 = 2` vs `A = 1`), consistently, in
+        every document.  That off-by-one is the point: the stored number is
+        not the loop's start, it is the frame the channel RESUMES at - the
+        one that follows the marked keyframe.  Because `value(A) ==
+        value(end)` on a seamless loop, resuming at `A + 1` and looping over
+        `[A + 1, end]` gives exactly the same motion as looping over
+        `[A, end]`, which is why both descriptions fit the data and the
+        stored one is used here directly.
+
+        `limit` is set to the next keyframe when the marker is not on the
+        last one.  17 channels in `WhatIsBone.animeproj` are like that (a
+        cycle on frame 28 with a further keyframe at 227).  Cycling only up
+        to that keyframe is an INFERENCE - the alternative, ignoring the
+        marker entirely, would leave those 17 bones frozen while the other
+        227 channels of the same rig cycle, which is plainly not what the
+        animator built.
+
+        Args:
+          when: the channel's keyframe times.
+          interp: the channel's raw `interp` list, or None when absent.
+
+        Returns:
+          A tuple of CycleSpec, in keyframe order.  Empty when the channel
+          does not cycle, which is the overwhelmingly common case (520
+          markers across all 19 sample documents).
+        """
+        if not interp or len(when) < 2:
+            return ()
+        specs = []
+        for i, entry in enumerate(interp[:len(when)]):
+            if not isinstance(entry, dict) or not (entry.get("im", 0) & 4):
+                continue
+            v1, v2 = entry.get("v1", -1.0), entry.get("v2", -1.0)
+            if v1 >= 0:
+                resume = when[i] - v1
+            elif v2 >= 0:
+                resume = v2
+            else:
+                continue
+            # A resume point outside the channel's own past would give an
+            # empty or backwards period; treat such a marker as unusable
+            # rather than guessing.
+            if not (when[0] <= resume <= when[i]):
+                continue
+            limit = when[i + 1] if i + 1 < len(when) else None
+            specs.append(CycleSpec(when[i], resume, limit))
+        return tuple(specs)
+
+    def without_cycles(self) -> "Channel":
+        """This channel with every cycle marker dropped, recursively.
+
+        Used for Smart Bone action POSES.  An action is a pose library
+        indexed by a dial's current angle (see Channel.frame_for_value), not
+        a timeline that plays; "repeat forever past the last keyframe" has no
+        meaning there, and applying it is actively wrong because a pose is
+        read as an OFFSET (see _pose_offset) so an accumulating cycle adds a
+        drift that never comes back.
+
+        Moho stores the marker on the pose anyway - `Bandit.mohoproj` carries
+        the very same `(v1=15, end=41)` cycle on
+        `bones[0].anim_pos.actions[0].pose` as on `bones[0].anim_pos` itself,
+        with the same `+0.710093` per-repeat delta - so the marker has to be
+        ignored here rather than assumed absent.  Honouring it moved that
+        document's head and muzzle by a spurious 590 px across frames 44-80
+        while the root bone's own position stayed perfectly smooth, which is
+        how this was found.
+        """
+        if not self.cycles and not any(a.pose.cycles for a in self.actions):
+            return self
+        return Channel(self.when, self.val,
+                       [ActionRef(a.name, a.pose.without_cycles())
+                        for a in self.actions],
+                       ())
 
     def action_pose(self, name: str) -> Optional["Channel"]:
         for a in self.actions:
@@ -1099,15 +1312,96 @@ class Channel:
                 return a.pose
         return None
 
+    def _cycle_value(self, cycle: "CycleSpec", frame: float, period: float) -> Any:
+        """The value at `frame` inside `cycle`, replaying the cycled stretch
+        and ACCUMULATING one period's worth of change per repeat.
+
+        Moho's cycle does not replay the same numbers.  It replays the same
+        *motion*, carried forward from wherever the previous repeat ended, so
+        a walk cycle walks somewhere instead of walking on the spot.  Each
+        repeat adds
+
+            delta = value(cycle.end) - value(cycle.resume - 1)
+
+        which is zero for a seamless loop - the overwhelmingly common case -
+        and so leaves those channels behaving exactly like a plain replay.
+
+        CONFIRMED against Moho's own render, and it is the strongest
+        validation in this file.  `Bandit.mohoproj`'s root bone `B1` carries
+        `anim_pos` keyed over frames 25-41 with a cycle marker on frame 41,
+        and its x gains `+0.710093` document units - 383.45 px - every
+        16-frame repeat.  Predicting the character's centroid from that,
+        against the 103 frames Moho itself exported to
+        `moho/Bandit/svg/Bandit_000*.svg`:
+
+            model       mean |error|    max |error|
+            additive         3.3 px         8.4 px      <- this
+            plain replay  1025.7 px      2299.4 px
+
+        over a march of 2437 px.  A plain replay leaves the character walking
+        on the spot; the reference walks it clean across the frame.
+
+        This also closes an old mystery.  Layer.physics_dynamic was written
+        around "Bandit's keyframed channels do not account for the
+        screen-spanning motion Moho's own render shows", and treated that as
+        evidence of an unsimulated rigid-body physics run.  The channels do
+        account for it - the cycle reading was simply wrong.
+
+        Only numeric and `{x, y[, z]}` vector values accumulate.  A colour, a
+        bool or a string has no meaningful "one period's worth of change", so
+        those replay unchanged - the same split `_pose_offset` makes for
+        Smart Bone poses, and for the same reason.
+
+        Args:
+          cycle: the marker being applied.
+          frame: a frame strictly after `cycle.end`.
+          period: `cycle.end - cycle.resume + 1`, precomputed by the caller.
+
+        Returns:
+          The accumulated value at `frame`.
+        """
+        past = frame - cycle.end - 1          # 0 on the first frame past `end`
+        repeats = int(past // period) + 1
+        # The mapped frame is always <= cycle.end, so it can only be caught by
+        # an EARLIER cycle on the same channel (a nested region, which is
+        # correct) - the recursion cannot loop.
+        base = self.eval_raw(cycle.resume + (past - (repeats - 1) * period))
+        if isinstance(base, bool) or not isinstance(base, (int, float, dict)):
+            return base
+        end_value = self.eval_raw(cycle.end)
+        start_value = self.eval_raw(cycle.resume - 1)
+        if isinstance(base, (int, float)):
+            return base + repeats * (end_value - start_value)
+        if set(base) <= _OFFSETTABLE_VECTOR_KEYS:
+            return {k: base[k] + repeats * (end_value.get(k, 0.0)
+                                            - start_value.get(k, 0.0))
+                    for k in base}
+        return base
+
     def eval_raw(self, frame: float) -> Any:
         """The plain piecewise-linear value at `frame`, ignoring any Smart Bone
         action override.  Used directly (rather than via .eval()) exactly once
         in this codebase: resolving a dial bone's *own* current angle must not
         recurse into the action-override machinery it is itself part of - see
-        the module docstring's SMART BONES section."""
+        the module docstring's SMART BONES section.
+
+        A cycle marker (see CycleSpec) is honoured first, by mapping `frame`
+        back into the stretch the cycle replays and evaluating that instead.
+        Without it a cycled channel simply holds its last value, which is how
+        `WhatIsBone.animeproj`'s 240-frame walk used to stop dead at frame 28.
+
+        The cycle ACCUMULATES rather than replaying the same values - see
+        _cycle_value.
+        """
         when, val = self.when, self.val
         if len(when) == 1 or frame <= when[0]:
             return val[0]
+        for cycle in self.cycles:
+            if frame > cycle.end and (cycle.limit is None or frame < cycle.limit):
+                period = cycle.end - cycle.resume + 1
+                if period <= 0:
+                    break
+                return self._cycle_value(cycle, frame, period)
         if frame >= when[-1]:
             return val[-1]
         for i in range(len(when) - 1):
@@ -1118,7 +1412,15 @@ class Channel:
                     return {k: self._segment(i, k, t) for k in a}
                 if isinstance(a, (int, float)) and not isinstance(a, bool):
                     return self._segment(i, None, t)
-                return a          # strings / bools: snap to the left keyframe
+                # Strings and bools do not interpolate - they step, holding
+                # the left keyframe's value until the next one arrives.  ON
+                # the next keyframe, though, the value is that keyframe's:
+                # the segment scan reaches `when[i] <= frame <= when[i+1]`
+                # from the left first, so without this the change lands one
+                # frame late.  `BoneDynamics.animeproj`'s `Main` bone has
+                # `bone_dynamics` keyed [0, 1, 29] = [False, True, False],
+                # and read frame 1 as False.
+                return val[i + 1] if frame == when[i + 1] else a
         return val[-1]
 
     def _segment(self, i: int, key: Optional[str], t: float) -> float:
@@ -1246,11 +1548,32 @@ class Channel:
         return value
 
     def frame_for_value(self, target: float) -> float:
-        """Invert a piecewise-linear channel: the frame whose value equals
-        `target` (clamped to the channel's own value range, and picking the
-        nearest keyframe if the range is degenerate).  Used to turn "the dial's
+        """Invert this channel: the frame whose value equals `target`
+        (clamped to the channel's own value range, and picking the nearest
+        keyframe if the range is degenerate).  Used to turn "the dial's
         current angle" into "the corresponding frame within its pose action" -
-        see the module docstring's SMART BONES section."""
+        see the module docstring's SMART BONES section.
+
+        The inversion must undo exactly the curve `eval_raw` produces, and
+        that curve is a monotone cubic, not a straight line - so the segment
+        is inverted by bisection on `_segment` rather than by the linear
+        `t = (target - a) / (b - a)` this used to do.
+
+        That mismatch was a real defect, not a rounding detail.  Every Smart
+        Bone dial pose curve in `SketchBone.animeproj` has exactly two
+        keyframes, and a two-keyframe monotone cubic is an S-curve
+        (`a + d(1.5t^2 - t^3 + 0.5t)`), so it departs from the straight line
+        most in mid-travel and not at all at the ends.  The head-turn dial
+        driving that rig's ears therefore resolved to the wrong pose frame by
+        a growing amount as the head turned - ear silhouette IoU against
+        Moho's own `moho/SketchBone/ears/` render fell from 91.7% with the
+        dial at rest (frame 1) to 52.8% with it mid-travel (frame 55).
+
+        Bisection is safe here precisely because `_segment` is monotone
+        within a segment by construction (its tangents are clamped so the
+        curve cannot leave its own endpoints), so the value is strictly
+        ordered and there is exactly one crossing.
+        """
         when, val = self.when, self.val
         if len(when) < 2:
             return when[0] if when else 0.0
@@ -1261,7 +1584,24 @@ class Channel:
             if (a <= target <= b) or (b <= target <= a):
                 if abs(b - a) < 1e-12:
                     return when[i]
-                t = (target - a) / (b - a)
+                # A dial resting exactly on one of its own pose keyframes is
+                # the common case (every dial at frame 0), and bisection would
+                # answer it as "t = 1e-13" rather than "t = 0".  Answer those
+                # exactly, both because it is right and because the alternative
+                # perturbs otherwise-unchanged output in the last decimal.
+                if target == a:
+                    return when[i]
+                if target == b:
+                    return when[i + 1]
+                low, high = 0.0, 1.0
+                rising = b > a
+                for _ in range(40):          # 1e-12 of the segment; cheap and exact enough
+                    mid = (low + high) / 2.0
+                    if (self._segment(i, None, mid) < target) == rising:
+                        low = mid
+                    else:
+                        high = mid
+                t = (low + high) / 2.0
                 return when[i] + t * (when[i + 1] - when[i])
         return when[-1] if abs(target - val[-1]) < abs(target - val[0]) else when[0]
 
@@ -1507,9 +1847,86 @@ class Bone:
     anim_scale: Any
     target_bone: Any
     scaling_mode: int
+    squash_stretch_scaling: float
     max_auto_scaling: float
     flip_h: Any
     flip_v: Any
+    bone_dynamics: Any
+    angle_dynamics: Any                 # None when the file predates the field
+    wind_dynamics: Any                  # None when the file predates the field
+    spring_force: float
+    damping_force: float
+    torque_force: float
+
+    def dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
+        """Whether this bone's ANGLE dynamics is switched on at `frame`.
+
+        Newer Moho splits the setting in two, and BOTH parts must be on:
+
+        - `bone_dynamics` - the per-bone master switch.  Present in every
+          format version, a keyframed Bool channel, and Smart-Bone
+          overridable.
+        - `angle_dynamics` - "the angle channel takes part", one of a family
+          (`pos_dynamics`, `scale_dynamics`, `wind_dynamics`, each with its
+          own `*_spring_force`/`*_damping_force`/`*_torque_force`/`*_weight`/
+          `*_control_delay`) that only exists from format 1045.  Absent means
+          an older file, which is read as "on", so old documents behave
+          exactly as before.
+
+        EVIDENCE for the AND, and against reading either field alone.
+        `SketchBone` exists in this corpus twice: the 2016 original
+        (`.animeproj`, format 1038) and a re-save from Moho Pro 14.4
+        (`.mohoproj`, format 1045) of the SAME document.
+
+        | field | 1038 original | 1045 re-save |
+        |---|---|---|
+        | `bone_dynamics` | false on all 94 bones | false on all 94 bones |
+        | `angle_dynamics` | field does not exist | **true on all 94 bones** |
+
+        So `angle_dynamics` alone cannot be the switch: Moho's own upgrade
+        path sets it true on every bone of a document that uses no dynamics
+        at all.  It is simply the default for the new field.
+
+        `bone_dynamics` alone cannot be it either, on the new format:
+        `Bandit.mohoproj` (also 1045) has it true on **all 28 bones**,
+        including the Smart Bone dials `EyeBlink`, `HeadTurn`,
+        `SquashStretch` and `EyeMovement`, which plainly must not wobble -
+        while `angle_dynamics` is true on only 2 of them.
+
+        The AND fits both files and changes nothing on the four old-format
+        documents that use the feature (`WhatIsBone` 52 bones, `AddBone` 21,
+        `BoneDynamics` 7, `Rabbit` 7, `ControlBones` 2 - all unchanged,
+        since they have no `angle_dynamics` to fail).
+
+        INFERENCE, not confirmed against Moho itself: no reference render
+        exercises bone dynamics cleanly (see Skeleton.dynamic_angles).  Only
+        `--bone-dynamics` is affected, and that is off by default.
+
+        Args:
+          frame: the frame to test the switch at.
+          exporter: used to evaluate the channels with the active Smart Bone
+            context.
+
+        Returns:
+          True when this bone's angle should be spring-simulated at `frame`.
+        """
+        if not exporter.eval(self.bone_dynamics, frame):
+            return False
+        return self.angle_dynamics is None or bool(
+            exporter.eval(self.angle_dynamics, frame))
+
+    @property
+    def dynamics_ever_on(self) -> bool:
+        """True when dynamics_on() could be true at SOME frame.
+
+        A frame-independent prefilter, so the per-frame test is only paid for
+        bones that could ever need it.  Both halves of the switch are
+        keyframed Bool channels that a Smart Bone action can also drive, so
+        both are tested with _channel_ever_true rather than by reading one
+        value."""
+        if not _channel_ever_true(self.bone_dynamics):
+            return False
+        return self.angle_dynamics is None or _channel_ever_true(self.angle_dynamics)
 
     @staticmethod
     def _build(raw: dict) -> "Bone":
@@ -1523,9 +1940,16 @@ class Bone:
             anim_scale=raw["anim_scale"],
             target_bone=raw.get("target_bone", -1),
             scaling_mode=raw.get("scaling_mode", 0),
+            squash_stretch_scaling=raw.get("squash_stretch_scaling", 1.0),
             max_auto_scaling=raw.get("max_auto_scaling", 1.0),
             flip_h=raw.get("flip_h", False),
             flip_v=raw.get("flip_v", False),
+            bone_dynamics=raw.get("bone_dynamics", False),
+            angle_dynamics=raw.get("angle_dynamics"),   # None = field absent
+            wind_dynamics=raw.get("wind_dynamics"),     # None = field absent
+            spring_force=raw.get("spring_force", 2.0),
+            damping_force=raw.get("damping_force", 1.0),
+            torque_force=raw.get("torque_force", 2.0),
         )
 
 
@@ -1550,10 +1974,40 @@ class Skeleton:
         in `bones` than their children - this walks each bone's parent chain
         on demand, memoising visited bones, rather than assuming any order).
 
-        NOTE ON SCALE: `anim_scale` is applied to the matrix's first column
-        alone - stretching the bone along its own axis without widening it
-        across - for a bone whose `scaling_mode` is 2, and to BOTH columns
-        (an ordinary uniform scale) otherwise.
+        NOTE ON SCALE: two separate rules, both measured against Moho's own
+        renders.
+
+        (1) `anim_scale` is applied to the matrix's first column alone -
+        stretching the bone along its own axis without widening it across -
+        for a bone whose `scaling_mode` is 2, and to BOTH columns (an
+        ordinary uniform scale) otherwise.
+
+        (2) SCALE DOES NOT ACCUMULATE DOWN THE CHAIN.  A child's origin is
+        placed with the parent's full, scaled matrix - so a squashing torso
+        does drag its head down - but the child's own axes are rebuilt from
+        the accumulated ROTATION and the child's OWN scale.  A parent that
+        squashes therefore moves its children without shrinking them.
+
+        Rule (2) was decoded from `BoneDynamics.animeproj`, where `TorsoA`
+        squashes to `anim_scale = 0.61` at frame 1.  Composing normally
+        collapsed the rabbit's ear from 130 px tall (its rest height, and
+        Moho's) to 83.5 px - almost exactly 130 x 0.61 - while Moho's own
+        export keeps it at 130.  Fixing it improved every other reference
+        too, which is why it is rule and not special-casing:
+
+            layer (vertical error, mean / max px)   before        after
+            Bandit  Muzzle                        2.65 / 5.92   0.85 / 2.05
+            Bandit  BellyTexture                  2.84 / 6.26   0.68 / 1.66
+            SketchBone  kafasi                    2.35 / 10.94  1.53 / 2.08
+            SketchBone  kulak-sol                 4.47 / 20.20  3.20 / 6.68
+            SketchBone  cizgiler-sag              2.20 / 9.51   1.64 / 3.49
+
+        `squash_stretch_scaling` (0.61 on `TorsoA`, 0.41 on `TorsoB`, 1.0 on
+        831 of 850 bones) is still NOT used.  Four cross-axis formulas were
+        fitted for it against the same reference - `1/s`, `s**-q`, a blend,
+        and a linear one - and none won across layers: `1/s` improved that
+        document's body from 30.3 to 24.5 px while making its tail and one
+        ear worse.  Left out rather than guessed.
 
         That asymmetry was carried for a long time as an unexplained quirk,
         applied to every bone and flagged in the module docstring's KNOWN
@@ -1583,8 +2037,28 @@ class Skeleton:
         the bone1/bone2 pair that depends on it, exactly the way a normal
         parent already does.
         """
+        return self._world_matrices(frame, exporter,
+                                     self.dynamic_angles(frame, exporter))
+
+    def _world_matrices(self, frame: float, exporter: "Exporter",
+                         dynamic: dict[int, float]) -> list[Mat2D]:
+        """world_matrices' body, with the simulated angles passed in rather
+        than fetched.
+
+        Split out so Skeleton.dynamic_angles can build the KEYED pose - the
+        pose with no dynamics applied, `dynamic = {}` - without recursing
+        back into itself through world_matrices.  Every other caller wants
+        world_matrices, which supplies the simulated angles for them.
+
+        Args:
+          frame: the frame to evaluate at.
+          exporter: channel-evaluation context.
+          dynamic: {bone index: local angle in radians} overriding
+            `anim_angle` for those bones; empty for the plain keyed pose.
+        """
         n = len(self.bones)
         out: list[Optional[Mat2D]] = [None] * n
+        rot: list[float] = [0.0] * n
         seen: set[int] = set()
         order: list[int] = []
         ik_pairs = self._ik_pairs(frame, exporter)   # bone1 index -> (bone2 index, target index)
@@ -1617,7 +2091,7 @@ class Skeleton:
                 out[i], (bone2_index, bone2_matrix) = solved
                 out[bone2_index] = bone2_matrix
                 continue
-            angle = exporter.eval(bone.anim_angle, frame)
+            angle = dynamic.get(i, exporter.eval(bone.anim_angle, frame))
             c, s = math.cos(angle), math.sin(angle)
             # flip_h/flip_v negate one column each, exactly as
             # Layer.local_matrix does for a layer's own flips - column 1 is
@@ -1628,11 +2102,256 @@ class Skeleton:
             fv = -1.0 if exporter.eval(bone.flip_v, frame) else 1.0
             # Squash-and-stretch scales along the bone only; every other bone
             # scales uniformly - see this method's NOTE ON SCALE.
+            # Squash-and-stretch scales along the bone only; every other bone
+            # scales uniformly - see this method's NOTE ON SCALE.
             across = 1.0 if bone.scaling_mode == SQUASH_STRETCH_SCALING_MODE else scale
             local = Mat2D(c * scale * fh, s * scale * fh,
                            -s * across * fv, c * across * fv, pos.x, pos.y)
-            out[i] = parent_matrix.compose(local) if parent_matrix is not None else local
+            rot[i] = (rot[parent] if parent >= 0 else 0.0) + angle
+            if parent_matrix is None:
+                out[i] = local
+            else:
+                # SCALE DOES NOT ACCUMULATE DOWN THE CHAIN.  The child's
+                # ORIGIN follows the parent's scaled frame - a squashing torso
+                # does drag its head down - but the child's own axes are
+                # rebuilt from the accumulated ROTATION and its OWN scale, so
+                # the squash does not shrink the child as well.  See this
+                # method's NOTE ON SCALE.
+                origin = parent_matrix.apply(pos)
+                cc, ss = math.cos(rot[i]), math.sin(rot[i])
+                out[i] = Mat2D(cc * scale * fh, ss * scale * fh,
+                                -ss * across * fv, cc * across * fv,
+                                origin.x, origin.y)
         return out  # type: ignore[return-value]
+
+    def dynamic_angles(self, frame: float, exporter: "Exporter") -> dict[int, float]:
+        """Simulated angle for every bone whose dynamics switch is on AT
+        `frame`, or {} when the feature is disabled or no bone uses it.
+
+        The switch is `bone_dynamics` AND `angle_dynamics` - see
+        Bone.dynamics_on for why both, and for what changed between format
+        versions.  It is made of keyframed Bool channels, not constants, and
+        it is asked per frame: `BoneDynamics.animeproj`'s `Main` bone turns
+        dynamics ON at frame 1 and OFF again at frame 29.  Smart Bone action
+        poses on it are honoured too (via Exporter.eval), because that same
+        document registers a "JumpCycle" pose on the `bone_dynamics` of all
+        six of its rabbit-ear bones.
+
+        UNVERIFIED INFERENCE, off unless `--bone-dynamics` is passed.  Moho
+        gives three numbers per bone (`spring_force`, `damping_force`,
+        `torque_force`) and nothing else: not the equation, not the units of
+        those numbers, not the integrator, not the initial conditions.
+
+        THE MODEL.  A bone with dynamics is a pendulum hanging off its
+        parent, with inertia in WORLD space.  Writing `pw` for the parent's
+        world angle and `x` for this bone's own local angle, the bone's world
+        angle is `pw + x`, and a damped spring pulling that world angle back
+        to where the keyframes say it should be expands to
+
+            x'' = spring * (keyed - x) - damping * (x' + pw') - pw''
+
+        Each term earns its place:
+
+          - `spring * (keyed - x)` and `-damping * x'` are the original
+            model, and are all that survives when the parent holds still.
+          - `-damping * pw'` and `-pw''` are what make the feature work at
+            all.  They are the parent's own world rotation arriving as a
+            driving force, so a bone whose OWN angle never changes still
+            swings when its parent turns.
+
+        UNITS are per FRAME, not per second.  Read as per-second, a spring of
+        2 and a damping of 1 make an oscillator so slack that the parent's
+        rotation drags a bone 200 degrees off its keyed angle and holds it
+        there; read per frame the same rig gives a smooth 3 / 13 / 27 degree
+        gradient from ear base to ear tip.  This is a fit, not a decoding -
+        but Moho is a frame-based program and the per-second reading is not
+        merely less accurate, it is unusable.
+
+        `torque_force` is still read and still NOT used, and this time it was
+        tried properly rather than assumed unusable.  A pendulum whose
+        suspension point accelerates sideways does swing, so the obvious
+        reading is a pivot-acceleration term
+        `- torque * (pivot_acceleration . across) / length`, which is also
+        the only candidate that would make a bone react to a parent that
+        merely TRANSLATES.  Two independent checks rejected it:
+
+          - On `BoneDynamics.animeproj` it spiked the ear tip to 81 degrees
+            off its keyed angle on one frame with neighbours at 40 and -21,
+            against a smooth 3 / 13 / 27 degree base-to-tip gradient without
+            it.
+          - Swept against Moho's own render of `Bandit.mohoproj` in BOTH
+            signs - +0.001 to +1.0 and -0.01 to -3.0 - it never improved the
+            match at any scale, and got monotonically worse away from zero
+            (tail base vertical error 18.06 px at 0, 20.68 px at -1.0,
+            25.71 px at -3.0).  The sign was worth testing because the
+            reference's tail lags the body by half a period, which reads as
+            anti-phase; it is not a sign error.
+
+        So it stays out, and the consequence is stated plainly rather than
+        hidden: a bone whose parent only translates still does not move.
+        That is exactly `Bandit.mohoproj`, whose root bone never rotates, so
+        `--bone-dynamics` remains a no-op there.
+
+        WHY THE REWRITE.  The previous model pulled the bone toward its own
+        keyed angle and nothing else, so a bone whose `anim_angle` never
+        moves could never move.  Measured across the corpus, that is exactly
+        what real rigs do with the feature:
+
+            document                dynamic bones   own anim_angle moves
+            BoneDynamics.animeproj        7                 0
+            Rabbit.animeproj              7                 0
+            AddBone.animeproj            21                 0
+            ControlBones.animeproj        2                 0
+            WhatIsBone.animeproj         52                16
+            Bandit.mohoproj               2                 0
+
+        In `BoneDynamics.animeproj` - the tutorial file for this very
+        feature - all six ear bones hold a constant `anim_angle`, `anim_pos`
+        and `anim_scale`; what moves is their grandparent `Main` (`anim_pos`
+        x -1.56..1.10, y -0.32..1.43, the jump) and `TorsoA` (angle 250..307
+        degrees, scale 0.61..1.16).  The ears flop because they lag the
+        parent's world motion.  Under the old model `--bone-dynamics` was a
+        measured no-op on five of the six documents that use the feature.
+
+        WHAT IS STILL GUESSED.  The units of all three forces, the
+        integrator, and the initial conditions.  `pw` is
+        taken from the KEYED pose, not from the parent's own simulated
+        angle, so a chain lags its parent's keyframes rather than its
+        parent's lag - one order short of a full chain solve, chosen because
+        it keeps the cost at one extra world-matrix build per frame instead
+        of one per bone per sub-step.
+
+        HOW FAR IT IS CHECKED - AND IT FAILS.  `BoneDynamics.animeproj` now
+        has a Moho render (`moho/BoneDynamics/`, 29 frames, scored by `make
+        check-reference`), and it is the one document that can test this: 6
+        of its 7 dynamic bones are the two rabbit ears, no dynamic bone's own
+        angle moves, and no bone subscribes to wind.  Turning the feature on
+        makes the ears WORSE, not better - mean positional error 60.6 px ->
+        62.6 px on the right ear, 65.2 -> 66.0 on the left.  So the model is
+        not merely unverified, it is measurably not an improvement.
+
+        Read that with care, though, because the baseline is bad too: with
+        dynamics OFF those ears are already ~60 px out, against 0.3-3.5 px
+        for every layer of the other two reference documents.  Something
+        else in that rig is wrong as well, and until it is found the dynamics
+        signal is swamped.  Ruled out so far: scale inheritance (fixed
+        separately, and it did improve the ears from ~78 px to ~60 px),
+        the four `squash_stretch_scaling` cross-axis formulas, the four
+        falloffs, and control bones (its three control drivers barely move).
+        The skin weights themselves were checked point by point and are
+        sane - each ear point is 95%+ dominated by its nearest bone.
+
+        Cost note: the state at frame F depends on every frame before it, so
+        this simulates start_frame..F on each call, now with one keyed
+        world-matrix build per frame on top.  Results are cached per
+        (skeleton, frame, Smart Bone context) by the caller's own
+        Exporter._skin_data, which is what keeps that from being quadratic in
+        practice.
+
+        Args:
+          frame: the frame to report angles for.
+          exporter: supplies the settings flag, the document (start frame,
+            fps) and the active Smart Bone context for channel evaluation.
+
+        Returns:
+          {bone index: angle in radians} for the bones simulated at `frame`.
+          Callers fall back to the keyed `anim_angle` for any bone absent
+          from the mapping.
+        """
+        if not exporter.settings.bone_dynamics:
+            return {}
+        # Candidates: every bone whose switch is EVER on, on the main timeline
+        # or inside a Smart Bone action pose.  This is only a cheap prefilter -
+        # whether the switch is on at any given frame is asked again below,
+        # per frame, because it is a keyframed Bool channel and not a constant.
+        candidates = [i for i, b in enumerate(self.bones) if b.dynamics_ever_on]
+        if not candidates:
+            return {}
+        document = exporter.document
+        start = float(document.start_frame)
+        stop = float(frame)
+        on_at_stop = [i for i in candidates
+                      if self.bones[i].dynamics_on(stop, exporter)]
+        if not on_at_stop:
+            return {}
+        if stop <= start:
+            return {i: exporter.eval(self.bones[i].anim_angle, start) for i in on_at_stop}
+        fps = float(document.fps) or 24.0
+        x = {i: exporter.eval(self.bones[i].anim_angle, start) for i in candidates}
+        v = {i: 0.0 for i in candidates}
+        parents = {i: self.bones[i].parent for i in candidates}
+        # Sub-stepping keeps the explicit integrator stable for a stiff spring;
+        # 4 steps a frame is comfortably inside the stability limit for every
+        # spring/damping pair present in the corpus.
+        substeps = 4
+        h = 1.0 / substeps
+        # Three consecutive keyed poses are kept so the parent's world angular
+        # velocity and acceleration, and the bone's own pivot acceleration,
+        # are available as plain second differences.
+        previous = self._keyed_world_state(start - 1.0, exporter, candidates, parents)
+        current = self._keyed_world_state(start, exporter, candidates, parents)
+        f = start
+        while f < stop - 1e-9:
+            f = min(f + 1.0, stop)
+            following = self._keyed_world_state(f, exporter, candidates, parents)
+            step = f - (f - 1.0)                      # always 1.0; kept for clarity
+            # The switch is asked once per frame, not once per sub-step: it is
+            # keyframed at whole frames, so sub-stepping it would only cost
+            # time.  A bone whose dynamics is OFF this frame is pinned to its
+            # keyed angle with zero velocity, so it follows the keys exactly
+            # and re-enters the simulation from rest when it turns back on.
+            for i in candidates:
+                bone = self.bones[i]
+                target = exporter.eval(bone.anim_angle, f)
+                if not bone.dynamics_on(f, exporter):
+                    x[i], v[i] = target, 0.0
+                    continue
+                # Parent world rotation, as a velocity and an acceleration in
+                # radians per second.  Zero for a root bone, and zero whenever
+                # the parent holds still - which is what makes this a strict
+                # superset of the old own-angle-only model.
+                # Differences are wrapped into (-pi, pi] before use: atan2
+                # jumps by 2*pi at the branch cut, and an unwrapped jump would
+                # read as an enormous angular acceleration and fling the bone.
+                back = _wrap_angle(current.angle[i] - previous.angle[i])
+                forward = _wrap_angle(following.angle[i] - current.angle[i])
+                parent_rate = (forward + back) / (2.0 * step)
+                parent_accel = (forward - back) / (step * step)
+                for _ in range(substeps):
+                    accel = (bone.spring_force * (target - x[i])
+                             - bone.damping_force * (v[i] + parent_rate)
+                             - parent_accel)
+                    v[i] += accel * h
+                    x[i] += v[i] * h
+            previous, current = current, following
+        return {i: x[i] for i in on_at_stop}
+
+    def _keyed_world_state(self, frame: float, exporter: "Exporter",
+                            candidates: Sequence[int],
+                            parents: dict[int, int]) -> "KeyedWorldState":
+        """The keyed (no-dynamics) world angle of each candidate's PARENT, the
+        candidate's own world angle, and its pivot, at `frame`.
+
+        "Keyed" is the point: this is the pose the animator actually drew, so
+        it can be built without knowing any simulated angle and therefore
+        without recursing into dynamic_angles.  See that method's WHAT IS
+        STILL GUESSED note for what taking the parent's keyed rotation rather
+        than its simulated one costs.
+
+        A root bone (`parent < 0`) reports a parent angle of 0: there is
+        nothing above it to be dragged by.
+        """
+        matrices = self._world_matrices(frame, exporter, {})
+        angle: dict[int, float] = {}
+        world: dict[int, float] = {}
+        pivot: dict[int, tuple[float, float]] = {}
+        for i in candidates:
+            parent = parents[i]
+            angle[i] = (math.atan2(matrices[parent].b, matrices[parent].a)
+                        if parent >= 0 else 0.0)
+            world[i] = math.atan2(matrices[i].b, matrices[i].a)
+            pivot[i] = (matrices[i].e, matrices[i].f)
+        return KeyedWorldState(angle, world, pivot)
 
     def _ik_pairs(self, frame: float, exporter: "Exporter") -> dict[int, tuple[int, int]]:
         """bone1 index -> (bone2 index, target index) for every bone2 whose
@@ -2184,6 +2903,27 @@ class Layer:
         return self._raw.get("switch_keys")
 
     @property
+    def timing_offset(self) -> int:
+        """Frames by which Moho shifts this layer's own animation in time.
+
+        NOT applied - and deliberately so.  Zero on 839 of the 842 layers in
+        the sample; the only three that set it (`Rabbit.animeproj`'s
+        `ProsBox`, `PROS` and `T I  PS`, all 45) have **no animated channel
+        anywhere in their subtree**, verified by re-evaluating their geometry
+        at frames 1/10/20/29 and getting identical output, and 45 is past the
+        end of that document's own 1-29 frame range anyway.
+
+        So nothing here exercises it, which means the sign (does a positive
+        offset delay the animation or advance it?), the scope (the layer
+        alone, or its descendants too?) and the interaction with an animated
+        ANCESTOR are all unverifiable against this corpus.  Implementing it
+        would be three guesses at once with no test that could fail, so it is
+        read and counted (see moho2lottie.py's "timing_offset" warning)
+        rather than guessed at.
+        """
+        return self._raw.get("timing_offset", 0) or 0
+
+    @property
     def physics_dynamic(self) -> bool:
         """True when Moho moves this BoneLayer's whole rig with its own
         rigid-body physics simulation (wind/gravity) rather than any
@@ -2193,20 +2933,37 @@ class Layer:
         since neither this module nor moho2lottie.py runs a physics
         simulation.
 
-        `physics.enabled` and `.static` alone are NOT enough to tell this
-        apart from an ordinary keyframed rig: every layer in every one of
-        this repository's 19 sample documents carries `physics.enabled ==
-        true, physics.static == false` (902 layers checked directly) - it is
-        a per-layer default Moho always writes, not a sign that anything is
-        actually being simulated. The real, specific signal is a non-zero
-        `wind`/`gravity` *strength* on the owning `BoneLayer` (only that
-        layer kind carries either field): checked across the same corpus,
-        exactly one `BoneLayer` - `Bandit.mohoproj`'s top-level "Bandit" -
-        combines `physics.enabled` with a non-zero force (`wind.strength ==
-        100.0`), and it is exactly the layer whose keyframed bone channels
-        (all ending by frame 41-90) do not account for the screen-spanning
-        motion Moho's own render shows across the document's full 25-127
-        frame range."""
+        THREE things have to line up, because the first two are defaults Moho
+        writes everywhere and mean nothing on their own:
+
+        1. `physics.enabled` and not `.static`.  True on EVERY layer of every
+           sample document (902 layers checked directly), so this only rules
+           out a layer that has been explicitly switched off.
+        2. A non-zero `wind`/`gravity` *strength* on the owning `BoneLayer`
+           (only that layer kind carries either field).  Also a default: a
+           format-1045 re-save of `SketchBone.animeproj` from Moho Pro 14.4 -
+           a document that uses no physics whatsoever - writes
+           `wind.strength = 100.0` on ALL FIVE of its `BoneLayer`s.
+        3. At least one bone that actually SUBSCRIBES, via `wind_dynamics`.
+           This is the part that discriminates, and it is false on all 28
+           bones of `Bandit.mohoproj` and all 94 of `SketchBone`.
+
+        The result is that nothing in this corpus is physics-driven, which is
+        a correction, not a gap.  This property used to fire for
+        `Bandit.mohoproj`'s top-level "Bandit" layer on the strength of
+        condition 2 plus an observation - "its keyframed bone channels do not
+        account for the screen-spanning motion Moho's own render shows across
+        frames 25-127".  They do account for it.  The channels were being
+        read wrongly: Moho's cycle ACCUMULATES (see Channel._cycle_value),
+        and once it does, this exporter tracks Moho's own 103 exported frames
+        to within 0.73 px of horizontal travel over a 2430 px march.  There
+        is no unexplained motion left to attribute to physics.
+
+        `wind_dynamics` exists only from format 1045, so on an older file
+        condition 3 can never be met.  That is the safe direction: those
+        files predate the field, and nothing in them shows unexplained
+        motion either.
+        """
         if self.skeleton is None:
             return False
         physics = self._raw.get("physics") or {}
@@ -2217,7 +2974,9 @@ class Layer:
             vals = (self._raw.get(field) or {}).get("strength", {}).get("val") or []
             return any(v != 0 for v in vals)
 
-        return _any_nonzero("wind") or _any_nonzero("gravity")
+        if not (_any_nonzero("wind") or _any_nonzero("gravity")):
+            return False
+        return any(_channel_ever_true(b.wind_dynamics) for b in self.skeleton.bones)
 
     def local_matrix(self, frame: float, exporter: "Exporter") -> Mat2D:
         """This layer's own transform, mapping a point in ITS OWN local
@@ -3123,12 +3882,14 @@ class BrushStampOutliner:
 BoneWeightFalloff = Callable[[float, float], float]
 
 BONE_WEIGHT_FALLOFFS: dict[str, BoneWeightFalloff] = {
-    # Each takes (distance_to_bone_segment, bone.strength).  See the module
-    # docstring's BONE DEFORMATION section: "inv_d2" is the one actually used
-    # (RenderSettings.bone_weight_falloff default); the others are recorded
-    # because they were tried during development and could not be told apart
-    # from "inv_d2" by any available reference - not because they are known to
-    # be equally valid.
+    # Each takes (distance_to_bone_segment, bone.strength).  "inv_d2" is the
+    # default (RenderSettings.bone_weight_falloff).  The four are no longer
+    # indistinguishable: scored against Moho's own reference frames they
+    # separate clearly, and they DISAGREE between the two documents that have
+    # one - inv_d2 wins SketchBone (34.15 total against linear's 43.58) while
+    # linear wins Bandit's many-bone layers.  So none of them is Moho's real
+    # function and the default is the best of four, not a decoding.  See the
+    # module docstring's BONE DEFORMATION section for the table.
     "inv_d2":  lambda d, strength: 1.0 / max(d, 1e-6) ** 2,
     "linear":  lambda d, strength: max(0.0, 1.0 - d / strength) if strength > 0 else 0.0,
     "cut_d2":  lambda d, strength: (1.0 / max(d, 1e-6) ** 2
@@ -3211,6 +3972,27 @@ class Skinner:
             acc = acc + bone.rest_to_pose.apply(p).scaled(w)
             total += w
         return acc.scaled(1.0 / total) if total > 0 else p
+
+
+def _wrap_angle(radians: float) -> float:
+    """`radians` mapped into (-pi, pi].
+
+    Used on DIFFERENCES between two angles read out of a matrix with atan2.
+    Two poses a degree apart can straddle the branch cut and read as 2*pi
+    apart, which as an angular acceleration would be enormous - see
+    Skeleton.dynamic_angles.
+    """
+    return (radians + math.pi) % (2.0 * math.pi) - math.pi
+
+
+@dataclass(frozen=True)
+class KeyedWorldState:
+    """One frame of the keyed (no-dynamics) pose, as Skeleton.dynamic_angles
+    needs it: per candidate bone, its PARENT's world angle, its own world
+    angle, and its own world pivot.  See Skeleton._keyed_world_state."""
+    angle: dict[int, float]                    # parent's world angle, radians
+    world: dict[int, float]                    # this bone's world angle, radians
+    pivot: dict[int, tuple[float, float]]      # this bone's world origin
 
 
 @dataclass(frozen=True)
@@ -3352,6 +4134,7 @@ class RenderSettings:
     bone_weight_falloff: str = "inv_d2"          # key into BONE_WEIGHT_FALLOFFS
     smooth_bone_joints: bool = False    # --smooth-joints; Exporter._effective_subset
     point_bone_binding: bool = False    # --point-bones; Exporter._geometry_and_mapper
+    bone_dynamics: bool = False         # --bone-dynamics; Skeleton.dynamic_angles
     forced_mask_containers: frozenset[str] = field(default_factory=frozenset)  # --mask-container
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0
@@ -3477,7 +4260,37 @@ class Exporter:
 
     def _active_smart_bones(self, bone_layer: Layer, frame: float) -> list[ActiveAction]:
         """Which of `bone_layer`'s own dial bones are active, and at what
-        pose-frame - see the module docstring's SMART BONES section."""
+        pose-frame - see the module docstring's SMART BONES section.
+
+        A dial only ever drives ITS OWN action - the one named after the bone,
+        or that action's "X 2" opposite-direction variant.  The candidate scan
+        below is restricted to those two names, which matters because a dial
+        bone's `anim_angle` is routinely registered in OTHER actions as well:
+        it is an ordinary bone that ordinary animation can move, so an action
+        that poses the whole rig records it like any other bone.
+
+        `Bandit.mohoproj` is where that shows.  It has four dial bones
+        (`EyeBlink`, `SquashStretch`, `EyeMovement`, `HeadTurn`) and a plain
+        stored animation called `Walk` - no bone is named `Walk`, so it is not
+        a dial at all - and all four dials carry a `Walk` pose on their own
+        `anim_angle` alongside their own.  Scanning every registered action
+        and keeping whichever pose best bracketed the dial's current angle
+        picked `Walk` whenever its span happened to be wider (e.g.
+        `EyeMovement` at frame 60: own span 0.7854, `Walk` span 1.6183, and
+        the angle sits inside both), so a phantom `Walk` action went active
+        with a pose frame that lurched between 25, 44, 46, 15.9 and 6.07 and
+        then pinned at 50 for thirty straight frames.
+
+        Measured against the 103 frames Moho itself exported to
+        `moho/Bandit/svg/`, on the muzzle's horizontal travel (2430 px over
+        the range): mean error 144.38 px before, 5.27 px after.
+
+        Bandit is the only document in the corpus where this changes
+        anything - checked directly, no dial bone in `SketchBone`,
+        `WhatIsBone`, `AddBone` or `ControlBones` registers a foreign action
+        on its own angle - so the Smart Bone behaviour verified against
+        `moho/SketchBone/ears/` and `moho/SketchBone/hand/` is untouched.
+        """
         names = bone_layer.action_names
         skeleton = bone_layer.skeleton
         out: list[ActiveAction] = []
@@ -3486,12 +4299,13 @@ class Exporter:
         for bone in skeleton.bones:
             if bone.name not in names:
                 continue
+            own = (bone.name, bone.name + " 2")
             angle_channel = Channel.of(bone.anim_angle)
             current = angle_channel.eval_raw(frame)      # deliberately NOT eval() - see module docstring
             best_action: Optional[ActionRef] = None
             best_key: Optional[tuple[float, float]] = None
             for action in angle_channel.actions:
-                if action.name not in names:
+                if action.name not in own or action.name not in names:
                     continue
                 values = action.pose.val
                 lo, hi = min(values), max(values)
@@ -4945,6 +5759,13 @@ def main() -> None:
                              "parent and children instead - see Exporter._effective_subset. "
                              "A heuristic (no sample document records whether Moho's own option "
                              "is on), hence off by default")
+    parser.add_argument("--bone-dynamics", action="store_true",
+                        help="simulate Moho's per-bone spring/damping secondary "
+                             "motion (bone_dynamics). UNVERIFIED: the file gives the "
+                             "force numbers but not the equation, units or "
+                             "integrator, and no reference render in this repo "
+                             "exercises it cleanly - see Skeleton.dynamic_angles. "
+                             "Off by default")
     parser.add_argument("--point-bones", action="store_true",
                         help="honour Moho's per-POINT bone binding "
                              "(mesh.points[].parent). Measured MUCH worse than "
@@ -4964,7 +5785,8 @@ def main() -> None:
                               brush_raster=args.brush_raster,
                               brush_raster_supersample=args.brush_raster_supersample,
                               smooth_bone_joints=args.smooth_joints,
-                              point_bone_binding=args.point_bones)
+                              point_bone_binding=args.point_bones,
+                              bone_dynamics=args.bone_dynamics)
     document = load_document(args.project)
     exporter = Exporter(document, settings)
 

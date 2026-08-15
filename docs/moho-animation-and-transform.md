@@ -149,7 +149,7 @@ visibly wrong.
 `when[i]`, `val[i]` and `interp[i]` are **always the same length** (confirmed on
 all channels, no exceptions). `interp[i]` describes the segment **leaving**
 keyframe `i`, so the last entry describes nothing — except when it carries the
-cycle marker (see [§ 3.4](#34-v1--v2-and-the-cycle-marker-on-the-last-keyframe)).
+cycle marker (see [§ 3.4](#34-v1--v2-and-the-cycle-marker)).
 
 Each `interp` entry has a fixed shape:
 
@@ -203,7 +203,7 @@ Those are exactly the values you get from a 4-bit field using bits 1, 2, 4 and
 | `4` | `im` values `5` and `7` total 520 entries; **471** of them are the **last** entry of their channel, and they are the only entries carrying the unusual `v1`/`v2` pairs listed below | **Inference:** bit 4 means "this keyframe carries a cycle setting" |
 | `1`, `2` | `im == 3` (bits 1+2) occurs 151,877 times, and 151,875 of those are on single-keyframe channels | **Not decoded** |
 
-### 3.4 `v1` / `v2`, and the cycle marker on the last keyframe
+### 3.4 `v1` / `v2`, and the cycle marker
 
 **Confirmed.** The pair `(0.1, 0.5)` appears on **601,344 of 604,139** entries —
 it is the untouched default and carries no information. `(-1.0, -1.0)` appears
@@ -220,16 +220,92 @@ final keyframe:
 | `(23.0, -1.0)` | 26 |
 | `(15.0, -1.0)` | 2 |
 
-**Inference:** this is Moho's *cycle* setting, stored on the last key of a
-cyclic channel — `v1` looks like an absolute frame to jump back to (`-1` when
-unused) and `v2` like a repeat count (`-1000000` for "forever"). The evidence is
-positional (last keyframe) and contextual (only on animated rig channels such as
-`Bandit.mohoproj`'s walk cycle); the exact meaning of each number is **not
-confirmed**.
+**Inference, now decoded well enough to use.** This is Moho's *cycle* setting:
+past the marked keyframe the channel does not hold its last value, it jumps
+back and replays an earlier stretch of its own timeline. `v1` and `v2` are the
+same setting entered two different ways, and only one of them is ever in use —
+the other holds a negative sentinel (`-1`, or `-1000000`):
 
-Consequence for any tool that ignores `interp`: a cycled channel is **not**
-cycled. Past the last keyframe the value is clamped instead of repeating. In
-`Bandit.mohoproj` the walk cycle stops at frame 41 rather than looping.
+| Slot | When used | Meaning |
+|---|---|---|
+| `v1 >= 0` | the animator entered a **relative** frame count | resume at `when[i] - v1` |
+| `v2 >= 0` | the animator entered an **absolute** frame | resume at `v2` |
+
+"Resume at `R`" means frame `end + 1` takes the value of frame `R`, so the
+loop period is `end - R + 1` frames.
+
+**The cycle ACCUMULATES — it replays the motion, not the numbers.** Each
+repeat adds `value(end) - value(R - 1)` on top, so a walk cycle walks
+somewhere instead of walking on the spot. That delta is zero for a seamless
+loop, which is the common case and why the distinction is invisible on most
+channels.
+
+This is the best-validated inference in the whole repository, because it is
+the only one measured against frames **Moho itself exported**.
+`Bandit.mohoproj`'s root bone `B1` carries `anim_pos` keyed over frames 25–41
+with the marker on 41, and its x gains `+0.710093` document units — 383.45 px
+— every 16-frame repeat. Predicting the character's position from that and
+comparing against the 103 frames in `moho/Bandit/svg/`:
+
+| Model | mean \|error\| | max \|error\| |
+|---|---|---|
+| **accumulating** | **3.3 px** | **8.4 px** |
+| plain replay | 1025.7 px | 2299.4 px |
+
+over a march of 2437 px. A plain replay leaves the character walking on the
+spot; the reference walks it clean across the frame. Only numeric and
+`{x, y[, z]}` values accumulate — a colour, bool or string has no meaningful
+"one period's worth of change" and replays unchanged.
+
+**The marker must be ignored inside a Smart Bone action pose.** Moho writes it
+there too — `Bandit.mohoproj` carries the same `(v1=15, end=41)` cycle on
+`bones[0].anim_pos.actions[0].pose` as on the channel itself — but an action
+is a pose library indexed by a dial, not a timeline that plays, and a pose is
+read as an *offset*, so an accumulating cycle adds drift that never comes
+back. Honouring it moved that document's head and muzzle by a spurious 590 px
+across frames 44–80. See `Channel.without_cycles`.
+
+**How this was checked.** Only five of the 19 sample documents use cycles, and
+between them only four distinct `(v1, v2, keyframe)` combinations. For each
+one, the frame the channel really loops back to was found empirically, by
+looking for the earlier frame whose value **equals** the value at the marked
+keyframe — which is what a seamless loop makes true, and what animators build.
+Scored over every cycling channel of each document, one candidate wins clearly:
+
+| Document | `v1` | `v2` | marked keyframe | winning frame `A` |
+|---|---|---|---|---|
+| `Bandit.mohoproj` | 15 | -1000000 | 41 | 25 (92 of 94 channels) |
+| `TransformBoneTool.animeproj` | 23 | -1 | 25 | 1 (8 of 10) |
+| `WhatIsBone.animeproj` | -1 | 2 | 28 | 1 (212 of 217) |
+| `OffsetBoneTool.animeproj` | -1 | 2 | 24 | 1 (32 of 32) |
+| `BoneStrengthTool.animeproj` | -1 | 1 | 24 | 0 (too few numeric channels to discriminate) |
+
+Both readings land exactly **one frame later** than that winner
+(`41 - 15 = 26` against `A = 25`; `v2 = 2` against `A = 1`), in every
+document. That off-by-one is the point: the stored number is the frame the
+channel *resumes at*, not the loop's first frame. Because `value(A) ==
+value(end)` on a seamless loop, replaying `[A + 1, end]` and replaying
+`[A, end]` give the same motion, which is why both descriptions fit — the
+stored one is used directly.
+
+A second check supports it: with the cycle applied, the value step across the
+wrap (`end → end + 1`) is never the largest step in the channel, on any of the
+four documents. A wrong resume frame would show up there as a jump.
+
+**Not confirmed:** the repeat count. Nothing in the data distinguishes
+"repeat forever" from "repeat N times" — the sentinel `-1000000` is a plausible
+"forever", but `-1` is used in the same slot elsewhere, so both are read here
+simply as "this slot is unused". Cycles are therefore treated as running
+forever, or until the channel's next keyframe when the marker is not on the
+last one (17 channels in `WhatIsBone.animeproj` are like that: a cycle on
+frame 28 with a further keyframe at 227).
+
+**Consequence for any tool that ignores `interp`:** a cycled channel is **not**
+cycled. Past the marked keyframe the value is clamped instead of repeating —
+`Bandit.mohoproj`'s walk stops at frame 41 and `WhatIsBone.animeproj`'s at
+frame 28, both far short of their documents' own end frames.
+`moho2svg.py`'s `Channel` reads the marker (see `Channel._parse_cycles`), so
+that no longer applies to this repository's exporters.
 
 ### 3.5 `b` — the Bezier timing handles, decoded
 
@@ -279,8 +355,8 @@ entire animation; offsetting makes a flat pose the no-op it clearly is.
 Verified against Moho's own arms-only render (`moho/SketchBone/hand/`): arm
 mask IoU over 120 frames 11.5% -> 16.1%, whole-frame pixel difference -6.4%.
 Frame 0 is unchanged (dials sit at rest, so the offset is zero), so the
-tracked reference SVGs stay byte-identical. Only numeric and `{x,y,z}` vector
-channels are offset; colour/bool/string poses still replace.
+exported SVGs stay byte-identical to the pre-change output. Only numeric and
+`{x,y,z}` vector channels are offset; colour/bool/string poses still replace.
 
 `Channel.eval_raw` ignores `interp` completely and interpolates with a
 **monotone cubic** between the two bracketing keyframes, clamped at both ends.
@@ -317,7 +393,10 @@ Consequences, in order of practical importance:
 2. **Approximate between keyframes.** Linear motion instead of eased motion.
    The visible size of the error depends on the segment, and it is largest on
    long segments with strong easing.
-3. **No cycling.** See [§ 3.4](#34-v1--v2-and-the-cycle-marker-on-the-last-keyframe).
+3. **Cycling is applied**, from the marker decoded in
+   [§ 3.4](#34-v1--v2-and-the-cycle-marker). The repeat *count* is still not
+   decoded, so a cycle runs until the channel's next keyframe, or forever when
+   the marker sits on the last one.
 4. **`split` is ignored** — the parent `Vec2`/`Vec3` arrays are read instead.
    Only one channel in the whole sample uses `split` (an `anim_pos` in
    `Bandit.mohoproj`), and its split curve matches the parent, so nothing is
@@ -467,8 +546,8 @@ bones, `0` on 586.
 Only 28 bones in the whole sample ever move `anim_scale` off `1.0`, and 9 of
 those are `scaling_mode == 0` (in `Rabbit`, `BoneDynamics`, `BoneStrengthTool`
 and `OffsetBoneTool`), so those are the only places the correction is
-observable. None of them is a tracked reference document, which is why
-`make gen` stays byte-identical.
+observable. None of them appears in the sample documents whose exports are
+checked byte-identical, which is why the exported SVGs do not change.
 
 ### 5.4 Rigid and flexible binding
 

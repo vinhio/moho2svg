@@ -127,22 +127,68 @@ Tất cả 40+ trường bone, nhóm theo mục đích. "Được dùng" nghĩa 
 `ik_lock`, `ik_global_angle`, `ik_parent_target`, `ignored_by_ik`,
 `bone_enable_arc_solver`, `anim_parent`.
 
-**Hành vi tỷ lệ (không dùng)**
+**Hành vi tỷ lệ**
 
-`scaling_mode`, `squash_stretch_scaling`, `max_auto_scaling`.
+`anim_scale` **không tích luỹ xuống chuỗi bone** — giải mã từ
+`BoneDynamics.animeproj` đối chiếu bản render của chính Moho. Gốc của bone con
+được đặt bằng ma trận đầy đủ (có scale) của bone cha, nên một thân đang squash
+vẫn kéo cái đầu xuống; nhưng trục riêng của bone con được dựng lại từ góc xoay
+tích luỹ và scale của **chính nó**, nên cú squash không bóp nhỏ con theo.
 
-**Physics / dynamics (không dùng)**
+Tài liệu đó squash `TorsoA` xuống `anim_scale = 0.61` ở frame 1. Nhân ma trận
+theo kiểu thường làm tai thỏ co từ 130 px (chiều cao nghỉ, và cũng là của Moho)
+xuống 83.5 px — gần đúng 130 × 0.61 — trong khi Moho giữ nguyên 130. Sửa xong
+thì mọi bộ đối chứng khác cũng tốt lên (sai số dọc, trung bình / lớn nhất):
 
-`bone_dynamics`, `angle_dynamics`, `pos_dynamics`, `scale_dynamics`,
-`wind_dynamics`, `torque_force`, `spring_force`, `damping_force`, và các biến
-thể `pos_` / `scale_` của ba trường lực, cộng `physics_radius`,
-`physics_return_to_zero`, `physics_motor_speed`, `physics_torque`,
-`physics_lock_tip`.
+| Layer | Trước | Sau |
+|---|---|---|
+| `Bandit` `Muzzle` | 2.65 / 5.92 px | **0.85 / 2.05 px** |
+| `Bandit` `BellyTexture` | 2.84 / 6.26 px | **0.68 / 1.66 px** |
+| `SketchBone` `kafasi` | 2.35 / 10.94 px | **1.53 / 2.08 px** |
+| `SketchBone` `kulak-sol` | 4.47 / 20.20 px | **3.20 / 6.68 px** |
+| `SketchBone` `cizgiler-sag` | 2.20 / 9.51 px | **1.64 / 3.49 px** |
+
+
+`scaling_mode` — **được dùng**, và đã được giải mã là công tắc "Squash and
+stretch scaling" (xem [§ 2.3](#23-từ-bone-đến-ma-trận)). `max_auto_scaling` —
+được dùng, như chặn trên cho tự giãn IK. `squash_stretch_scaling` — một độ
+lớn (`1.0` trên 831 trong 850 bone), vẫn không dùng.
+
+**Physics / dynamics**
+
+`bone_dynamics` và `angle_dynamics` — **được dùng** cùng nhau làm công tắc
+bật/tắt phía sau `--bone-dynamics`, cùng với `spring_force` và
+`damping_force` (xem [§ 3.5](#35-bone-dynamics-physics-lò-xo)).
+
+Không dùng: `torque_force`, `pos_dynamics`, `scale_dynamics`,
+`wind_dynamics`, các biến thể `pos_` / `scale_` của ba trường lực, ba trường
+`*_control_delay`, cộng `physics_radius`, `physics_return_to_zero`,
+`physics_motor_speed`, `physics_torque`, `physics_lock_tip`.
+
+Mọi thứ từ `angle_dynamics` trở đi chỉ tồn tại từ **format 1045**; file ở
+1021/1038 chỉ mang một bộ ba lực và một công tắc duy nhất.
 
 **Trạng thái editor (không dùng)**
 
-`selected`, `hidden`, `shy`, `bone_label_showing`, `bone_tags`, `flip_h`,
-`flip_v`, `angle_weight`, `pos_weight`, `scale_weight`.
+`selected`, `hidden`, `shy`, `bone_label_showing`, `bone_tags`,
+`angle_weight`, `pos_weight`, `scale_weight`.
+
+**`flip_h` / `flip_v` — được dùng (đính chính một khẳng định "trạng thái editor" trước đây)**
+
+Các channel bool phản chiếu mọi thứ bone điều khiển, được áp dụng bởi
+`Skeleton.world_matrices` đúng cách `Layer.local_matrix` áp dụng các flip của
+riêng *một layer*: `flip_h` đảo dấu cột đầu tiên của ma trận (trục hướng riêng
+của bone, trục mà `anim_scale` tỷ lệ), `flip_v` đảo cột thứ hai.
+
+Hiếm nhưng có thật: đúng **một** bone khắp 19 tài liệu mẫu từng đặt một trong
+hai — `B23` của `SketchBone.animeproj`, mắt cá chân trái điều khiển layer bàn
+chân `ayak-sol` qua `flexi_bone_subset` của nó, được keyframe `flip_h` `False`
+tại frame 0 → `True` tại frame 44 (một người làm hoạt ảnh xoay bàn chân giữa
+chừng bước đi thay vì vẽ lại nó). Trong khi thứ này từng bị xếp vào trạng thái
+editor và bị bỏ qua, bàn chân đó render chỉ về phía sau so với hướng di chuyển
+của chính nó trong suốt nửa sau của bước đi. Sửa nó cắt sai số pixel của bàn
+chân so với các frame tham chiếu đi **51.9%** (đo trên cả 120 frame của
+`moho/SketchBone/`).
 
 **Trường hợp đặc biệt: `offset`** — xem [§ 3.7](#37-offset-công-cụ-offset-bone).
 Nó được liệt kê dưới "trạng thái editor" trong
@@ -342,25 +388,82 @@ Chín trường, ba nhóm ba: `angle_control_parent` / `angle_control_scale` /
 
 ### 3.5 Bone dynamics (physics lò xo)
 
-- **Đã xác nhận**: `bone_dynamics` là `true` trên **115 trong 850 bone**, khắp
-  6 tài liệu — `WhatIsBone` (52), `Bandit` (28, tức mọi bone trong file),
-  `AddBone` (21), `BoneDynamics` (6), `Rabbit` (6), `ControlBones` (2). Nó là
-  một **channel** `Bool` và được keyframe trong `BoneDynamics.animeproj` (14
-  channel có nhiều hơn một key khắp mẫu).
-  `angle_dynamics` là `true` trên 2 bone trong `Bandit.mohoproj`; các dynamics
-  `pos_`, `scale_` và `wind_` là `false` khắp nơi.
-- **Ảnh hưởng của việc bỏ qua**: **đã vận hành và nhìn thấy được.** Moho cộng
-  chuyển động lò xo lên trên pose đã key lúc phát lại. Một công cụ xuất chỉ
-  đọc channel render pose đã key không có follow-through hay overlap, và sai
-  số lớn dần theo khoảng cách tới một keyframe.
-- Các lực tạo hình nó: `spring_force`, `damping_force`, `torque_force` (22
-  bone của Bandit dùng chung `2.0 / 1.0 / 2.0`, 6 cái được chỉnh riêng).
+**Công tắc gồm hai trường, và cả hai phải bật**
+
+**Đã xác nhận.** Moho bản mới tách cài đặt này ra: `bone_dynamics` là công
+tắc tổng của từng bone, còn `angle_dynamics` nói rằng kênh góc có tham gia.
+Trường thứ hai chỉ tồn tại từ format 1045, cùng với `pos_dynamics`,
+`scale_dynamics`, `wind_dynamics` và các trường
+`*_spring_force` / `*_damping_force` / `*_torque_force` / `*_weight` /
+`*_control_delay` riêng của chúng.
+
+Không trường nào một mình là công tắc. `SketchBone` có mặt trong tập mẫu này
+**hai lần** — bản gốc 2016 (`.animeproj`, format 1038) và bản lưu lại từ Moho
+Pro 14.4 (`.mohoproj`, format 1045) của **cùng một tài liệu**:
+
+| Trường | Bản gốc 1038 | Bản lưu lại 1045 |
+|---|---|---|
+| `bone_dynamics` | false trên cả 94 bone | false trên cả 94 bone |
+| `angle_dynamics` | trường không tồn tại | **true trên cả 94 bone** |
+
+Vậy `angle_dynamics` chỉ là giá trị mặc định của trường mới: chính đường nâng
+cấp của Moho đặt nó true trên mọi bone của một tài liệu không hề dùng
+dynamics. Còn `bone_dynamics` một mình cũng sai ở format mới theo hướng ngược
+lại — `Bandit.mohoproj` có nó true trên **cả 28 bone**, gồm các dial Smart
+Bone `EyeBlink`, `HeadTurn`, `SquashStretch` và `EyeMovement`, trong khi
+`angle_dynamics` chỉ true trên 2 bone.
+
+Do đó `moho2svg.py` đọc công tắc là `bone_dynamics AND angle_dynamics`, coi
+`angle_dynamics` vắng mặt là true — xem `Bone.dynamics_on`. Số bone theo cách
+đọc đó:
+
+| Tài liệu | Format | Số bone | Dynamics bật |
+|---|---|---|---|
+| `WhatIsBone.animeproj` | 1038 | 216 | 52 |
+| `AddBone.animeproj` | 1038 | 188 | 21 |
+| `BoneDynamics.animeproj` | 1038 | 17 | 7 |
+| `Rabbit.animeproj` | 1021 | 15 | 7 |
+| `ControlBones.animeproj` | 1038 | 29 | 2 |
+| `Bandit.mohoproj` | 1045 | 28 | 2 |
+| `SketchBone` (cả hai bản) | 1038 / 1045 | 94 | 0 |
+
+**Nó là channel có keyframe, và Smart Bone điều khiển được**
+
+**Đã xác nhận.** `bone_dynamics` là một **channel** `Bool`, không phải một
+cờ. Bone `Main` của `BoneDynamics.animeproj` có `when = [0, 1, 29]`,
+`val = [False, True, False]` — dynamics chỉ chạy trong khoảng frame 1–28.
+Cùng tài liệu đó đăng ký một **action pose** tên `JumpCycle` trên
+`bone_dynamics` của cả sáu bone tai thỏ, nên một dial Smart Bone cũng bật tắt
+được tính năng này.
+
+**Các lực**
+
+`spring_force`, `damping_force`, `torque_force`. Bộ ba mặc định là
+`2.0 / 1.0 / 2.0`. Chuỗi tai của `BoneDynamics.animeproj` được chỉnh dần từ
+gốc ra ngọn, và `torque_force` — trường duy nhất mà công cụ xuất không dùng —
+lại biến thiên mạnh nhất:
+
+| Bone | `spring_force` | `damping_force` | `torque_force` |
+|---|---|---|---|
+| `RearA` / `LEarA` (gốc) | 2.0 | 1.0 | 0.1 |
+| `REarB` / `LEarB` (giữa) | 1.95 | 3.0 | 0.45 |
+| `REarC` / `LEarC` (ngọn) | 0.8 | 4.4 | 1.9 |
+
+**Ảnh hưởng của việc bỏ qua, và của cách xấp xỉ hiện tại**
+
+**Đã vận hành và nhìn thấy được.** Moho cộng chuyển động lò xo lên trên pose
+đã key lúc phát lại. Một công cụ xuất chỉ đọc channel render pose đã key
+không có follow-through hay overlap.
+
+`--bone-dynamics` cài một lò xo giảm chấn kéo mỗi bone về góc đã key của
+chính nó, và hóa ra đó là nguồn dẫn động sai — xem
+[§ 8](#8-các-khoảng-trống-xếp-theo-khả-năng-lộ-ra).
 
 ### 3.6 Hành vi tỷ lệ
 
 | Trường | Quan sát | Ghi chú |
 |---|---|---|
-| `scaling_mode` | `0` trên 586 bone, `2` trên 264 | **Chưa giải mã.** Giải thích hợp lý nhất cho tỷ lệ bone bất đối xứng được giữ trong `Skeleton.world_matrices` ([§ 2.3](#23-từ-bone-đến-ma-trận)). |
+| `scaling_mode` | `0` trên 586 bone, `2` trên 264 | **Đã giải mã: đây là công tắc "Squash and stretch scaling" theo từng bone của Moho.** `2` = bật (chỉ tỷ lệ dọc theo bone), `0` = tắt (tỷ lệ đều thông thường). Phát hiện trong rig `kafasi` của `SketchBone.animeproj`, nơi hai bone đỡ mỗi tai (`B2`/`B3`, `B4`/`B5`) là `2` và bone thứ ba trong cùng `flexi_bone_subset` (`B20`, `B19`) là `0` — khớp với điều panel ràng buộc bone của chính Moho hiển thị. `Skeleton.world_matrices` giờ chỉ áp dụng sự bất đối xứng cho `2`. |
 | `squash_stretch_scaling` | `1.0` trên 831 bone; cũng có `0.41`, `0.61`, `0.7`, `2.0`, `10.0` | Một bone bị tỷ lệ nén/dãn bao nhiêu theo chiều dài của nó. |
 | `max_auto_scaling` | `1.0` trên 804 bone; lên tới `10.0` | Chặn trên cho việc tự giãn (IK stretch). |
 
@@ -404,7 +507,65 @@ Bỏ qua cả ba chỉ an toàn khi `anim_scale` vẫn ở `1.0`, điều đúng
 | Góc độc lập | không rõ | có thể sai góc child | 45 bone, 10 tài liệu |
 | `offset` | không rõ | có thể dời trọng số bind | 5 bone, 1 tài liệu |
 | `anim_parent` (đổi cha) | n/a | không — 850/850 khớp `parent` tĩnh | không bao giờ được keyframe |
-| họ `scaling_mode` | n/a | hành vi tỷ lệ không rõ | 264 bone dùng chế độ `2` |
+| các độ lớn `squash_stretch_scaling`, `max_auto_scaling` | n/a | chi tiết độ lớn tỷ lệ | bản thân `scaling_mode` giờ đã được giải mã và dùng |
+
+### Hình dạng falloff không phải là đòn bẩy — đã đo
+
+Falloff trọng số của bind mềm đã bị gắn cờ từ đầu là một heuristic chưa được
+kiểm chứng, với lý do kho tài liệu chưa bao giờ vận hành một điểm thực sự nằm
+giữa hai bone. `moho/SketchBone/ears/` — bản render tách rời của chính Moho
+cho hai cái tai, mà mesh của chúng mỗi cái blend ba bone — là tham chiếu đầu
+tiên làm điều đó. Chấm điểm silhouette IoU qua 40 frame trên một họ có tham
+số `strength^a / d^p`, cộng một falloff Hermite kiểu region:
+
+| falloff | tai | tay |
+|---|---|---|
+| `1 / d` | 74.38% | 85.88% |
+| `1 / d²` (mặc định) | 74.32% | 85.88% |
+| `1 / d³` | 74.32% | 85.88% |
+| `strength² / d` | 74.51% | 85.88% |
+| `hermite(d / strength)` | **74.67%** | 85.88% |
+
+Cả họ chỉ trải rộng **0.4%** trên tai và **giống hệt từng bit trên tay** — mỗi
+layer tay đặt tên một bone duy nhất, nên `Skinner.deform` chuẩn hóa trọng số đi
+hoàn toàn và không falloff nào có thể có tác dụng ở đó. Vậy sai số tai còn lại
+**không** nằm trong hàm trọng số, và tinh chỉnh nó sẽ là khớp nhiễu. Điều này
+xác nhận nghi ngờ ban đầu về mặt định lượng thay vì gỡ bỏ nó: falloff vẫn chưa
+được kiểm chứng, nhưng giờ người ta biết nó không phải là nơi sai số còn lại
+trú ngụ.
+
+Sai số còn lại của tai giờ được xác định là **sụp đổ thể tích của
+linear-blend skinning**, từ việc so DIỆN TÍCH silhouette thay vì vị trí. Qua
+các frame 74-80 của `moho/SketchBone/ears/` diện tích tai của Moho gần như
+không đổi (27,065 / 27,100 / 27,087 / 27,625 px, trong 2%) trong khi của chúng
+ta dao động 10% (22,709 / 21,411 / 24,485 / 26,296) và nhỏ hơn suốt cả chặng.
+Đó là dấu hiệu của việc lấy trung bình các *vị trí* đã blend: khi hai bone xoay
+rời nhau, trung bình có trọng số của các ảnh của chúng rơi vào bên trong cung,
+nên mesh co lại một lượng thay đổi theo góc giữa hai bone. Nó cũng giải thích
+vì sao không hàm trọng số nào giúp được — hiện tượng sai nằm trong phương pháp
+blend, không phải trong các trọng số.
+
+Hai blend bảo toàn diện tích đã được thử và **không cái nào chấp nhận được**,
+cả hai đều đổi độ chính xác vị trí lấy độ chính xác diện tích:
+
+| blend | tai IoU | tỷ lệ diện tích tai | tay IoU |
+|---|---|---|---|
+| linear blend (hiện tại) | **75.97%** | 0.965 | **88.21%** |
+| xoay theo trung bình trên vòng tròn + tịnh tiến trung bình | 75.72% | 0.977 | — |
+| blend tâm xoay | 70.62% | 0.980 | 86.88% |
+
+Cả hai đẩy tỷ lệ diện tích về 1.0, xác nhận chẩn đoán, và cả hai đều có điểm
+kém hơn nhìn tổng thể, nên linear blend được giữ. Đóng khoảng trống này đúng
+cách nghĩa là tìm ra sơ đồ Moho thực sự dùng (hành vi của nó bảo toàn diện
+tích *và* đúng vị trí, điều không cái nào trong hai cái này đạt được).
+
+Điều vẫn chưa được giải thích là cạnh dưới của tai vung xa hơn của Moho. Đã bị
+loại trừ bằng đo lường tới giờ: hình dạng falloff (ở trên), mọi trường ràng
+buộc bone (tất cả ở mặc định trên sáu bone tai — không có control parents,
+không giới hạn góc, không dynamics, `anim_parent` chỉ phản chiếu `parent`),
+`scaling_mode` (đã giải mã, nhưng những bone đó không bao giờ tỷ lệ), bind
+điểm-theo-bone (hai cách đọc, cả hai tệ hơn nhiều), và ngữ nghĩa
+`flexi_bone_subset` (bỏ subset đạt 72.27%, tệ hơn việc tôn trọng nó ở 74.32%).
 
 ---
 
@@ -590,8 +751,127 @@ Chỉ sau cả sáu, hình học riêng của mesh (curves, tái dựng Bezier) 
 | Bind mềm + `flexi_bone_subset` + cổng `strength` | đã cài đặt, falloff là một heuristic |
 | Biến dạng trong không gian riêng của bone layer, ở mọi độ sâu lồng | đã cài đặt |
 | Smart Bone dial điều khiển actions | đã cài đặt |
-| Ràng buộc bone, control bones, IK, dynamics, `scaling_mode`, `offset`, `anim_parent` | đọc vào mô hình, **không bao giờ áp dụng** |
+| 2-bone Target IK (`target_bone`) + tự giãn (`scaling_mode`/`max_auto_scaling`) | đã cài đặt — xem `Skeleton._solve_ik_pair` |
+| `flip_h` / `flip_v` của bone | đã cài đặt — xem `Skeleton.world_matrices` |
+| Ràng buộc bone, control bones, dynamics, `offset`, `anim_parent` | đọc vào mô hình, **không bao giờ áp dụng** |
 | `binding_mode`, `grandpa_bone`, `flexi_bone_elbow`, `bones_groups` | bị bỏ qua |
+
+### 7.1 Kiểm toán: trường nào chưa được đọc mà vẫn có thể quan trọng
+
+Mọi trường bên dưới đã được kiểm tra với cả 19 tài liệu mẫu, để tách "chưa đọc
+và vô hại ở đây" khỏi "chưa đọc và là một khoảng trống thật". Ghi lại các kết
+quả âm tính cũng quan trọng như các kết quả dương tính: nó ngăn cùng một
+trường bị điều tra lại về sau.
+
+| Trường | Ở đâu | Phát hiện |
+|---|---|---|
+| `anim_parent` | bone | **Thừa ở đây.** Không bao giờ được hoạt ảnh, và không bao giờ khác `parent` tĩnh, trên bất kỳ bone nào trong 19 tài liệu — kể cả `ReparentBone.animeproj`, thứ mà toàn bộ chủ đề là đổi cha. |
+| `angle_/pos_/scale_control_parent` | bone | Không được đặt trên bone nào của `SketchBone.animeproj`. Có thật nơi khác (`ControlBones.animeproj`), vẫn chưa được áp dụng. |
+| `flexi_bone_elbow` | layer | `False` trên cả 101 layer mang nó. Cái tên gợi ý việc làm mịn khớp mà công cụ này thiếu, nhưng không mẫu nào bật nó, nên không thể quan sát tác dụng của nó. |
+| `binding_mode` | skeleton | Hầu như hằng số: `1` trên 63 trong 64 skeleton, `2` trên một (`OffsetBoneTool.animeproj`'s "Happy Dance"). Không phải công tắc theo layer. |
+| `mesh.points[].parent` | mesh point | **Bind điểm-theo-bone — một tính năng thật, chưa cài đặt.** Xem bên dưới. |
+| `mesh.groups` | mesh | Nhóm điểm. Rỗng trên tất cả trừ 10 mesh (`ReparentBone` / `SelectandReparentBoneTool` tay và chân, `Closed`). Vẫn chưa đọc. |
+| `layer.timing_offset` | layer | Dời toàn bộ hoạt ảnh của một layer theo thời gian. `0` trên 839 layer, `45` trên 3 — `ProsBox`, `PROS` và `T I  PS` của `Rabbit.animeproj`. **Đính chính một khẳng định trước đây ở đây rằng ba cái đó "lệch nhịp 45 frame":** chúng không lệch, vì cả ba hoàn toàn tĩnh — không channel nào được hoạt ảnh trong toàn bộ cây con của chúng, được xác nhận bằng cách đánh giá lại hình học của chúng tại các frame 1/10/20/29 và nhận đầu ra giống hệt — và 45 vượt quá khoảng 1–29 của chính tài liệu đó. Được đọc và đếm, cố ý không áp dụng: với không gì hoạt ảnh một layer như vậy, dấu (trễ hay sớm?), phạm vi (cây con hay không?) và hành vi dưới một tổ tiên được hoạt ảnh đều không kiểm chứng được, nên áp dụng nó sẽ là ba cú đoán đồng thời mà không có kiểm thử nào có thể thất bại. |
+
+**Bind điểm-theo-bone (`mesh.points[].parent`) được dùng rộng hơn nhiều so
+với một bản sửa trước đây của bảng này từng khẳng định.** `MeshPoint._build`
+chỉ đọc `position` và `width`, nên trường này bị loại bỏ hoàn toàn. Phân bố
+của giá trị trên toàn kho: `-2` trên 7,365 điểm (dùng bind của chính layer),
+`-1` trên 551, và **một chỉ số bone cụ thể trên khoảng 4,000 điểm rải khắp
+119 mesh**. `Bandit.mohoproj` dựa nhiều vào nó — `Leg_F` bind 9 trong 28 điểm
+của nó vào bone 11, `Ears` bind cả 20 điểm khắp các bone 2/20/21/22/23, và
+`Body`, `BlueSpot`, `YellowSpot`, `Back_Texture` mỗi cái ghim một phần chính
+chúng. Các mesh đó hiện biến dạng theo bind của layer thay vì theo sự gán
+từng-điểm rõ ràng của nghệ sĩ.
+
+Nó **không** phải thứ xé tách cánh tay của `SketchBone.animeproj`: mọi điểm
+của `kol-sol-ust`/`kol-sol-alt`/`kol-sag-ust`/`kol-sag-alt` là `-2`, và tài
+liệu đó dùng bind điểm trên chỉ 2 mesh (cả hai tai, mỗi cái 5 điểm vào bone
+0). Vết xé ở tay đến từ việc bind `flexi_bone_subset` một-bone là cứng — xem
+`Exporter._effective_subset`.
+
+**Đã cài đặt, đã đo, và để TẮT** (`--point-bones`,
+`RenderSettings.point_bone_binding`). Tôn trọng một bone theo-điểm đòi hỏi
+biến dạng `mesh.points` *trước* `CurveGeometry.build` thay vì biến dạng các
+control point đã hoàn thành sau đó, vì một tay cầm Bezier không thuộc về bất
+kỳ điểm đơn lẻ nào nên không có bone nào để đi theo. `Exporter._geometry_and_mapper`
+chọn thứ tự đó chỉ cho một mesh thực sự dùng trường này, vì hai thứ tự không
+thể hoán đổi — tái dựng tay cầm giao hoán với một phép biến đổi đồng dạng
+nhưng không giao hoán với các transform tỷ lệ không đều của layer và sự mang
+tỷ lệ bone bất đối xứng của `Skeleton.world_matrices`. (Chuyển *mọi* mesh làm
+dịch chuyển các SVG xuất ra của cả năm tài liệu mẫu, riêng `SketchBone.svg`
+36,119 dòng.)
+
+Đọc trường này theo kiểu "điểm này đi theo bone đó một cách cứng nhắc" rồi đo
+**tệ hơn nhiều**, nên nó không được bật:
+
+| mesh (tai của SketchBone) | err% bỏ qua trường | err% tôn trọng nó |
+|---|---|---|
+| `kulak-sol/kulak-sol` | 16.0% | **48.4%** |
+| `kulak-sag/kulak-sol` | 13.8% | **38.5%** |
+
+Khác biệt toàn-frame đi **sai hướng 78.9%**.
+
+Giả thuyết "nhầm skeleton" sau đó được kiểm thử và **bị bác bỏ**. Chỉ
+`SketchBone.animeproj` phân biệt được hai cách đọc — tai của nó nằm dưới
+`kafasi` (21 bone) bên trong `cat_boy` (42), trong khi `Bandit.mohoproj` có
+một bone layer duy nhất nên cả hai cách đọc trùng nhau ở đó. Chấm trên cùng
+vùng tai qua 30 frame:
+
+| nơi chỉ số được phân giải | sai số vùng tai | khác biệt toàn-frame |
+|---|---|---|
+| trường bị bỏ qua | **14.5%** | **851,143** |
+| skeleton trong cùng (`kafasi`) | 40.7% | 1,522,999 |
+| skeleton ngoài cùng (`cat_boy`) | 49.4% | 1,587,490 |
+
+Vậy không phải nhầm skeleton: **cả hai** cách đọc cứng đều tệ hơn nhiều so với
+bỏ qua trường. Giá trị *là* một chỉ số bone — 123 trong 4,400 điểm được bind
+giữ một số lớn hơn số điểm của chính mesh của chúng (`Ears` của Bandit lưu
+20–23 cho một mesh 20 điểm), điều loại trừ một chỉ số điểm — nên thứ sai là
+cách đọc *cứng*, không phải không gian chỉ số.
+
+Điều còn chưa kiểm thử: một điểm được bind có thể vẫn blend với các điểm lân
+cận, với bone được đặt tên chỉ bị ép vào trọng số thay vì chiếm lấy điểm; hoặc
+hành vi có thể bị chặn bởi `skeleton.binding_mode`. Cỗ máy vẫn được nối phía
+sau `--point-bones` nhưng tắt, nên một lần thử thứ ba bắt đầu từ các phép đo
+này thay vì từ một cú đoán.
+| `mesh.shape_order` / `anim_shape_order` | mesh | Được điều tra hai lần; **bị bỏ qua một cách đúng đắn** — xem bên dưới. |
+
+**`shape_order` là một sổ đăng ký ID, không phải thứ tự z — đã xác nhận, đính
+chính một bản sửa trước đây của phần này.** Nó là một channel `String` chứa
+các *ID* của shape. Nó bằng thứ tự file của `mesh.shapes` trong 565 trong 614
+mesh, và **khác trong 49** — `Bandit.mohoproj` (5/21), `IndependentAngle` /
+`MaximumIKStrethching` / `TargetBone` (12/28 mỗi cái), `OffsetBoneTool` (6/19),
+`BoneDynamics` / `Rabbit` (1 mỗi cái). Một bản sửa trước đây đọc điều đó là
+"49 mesh bị vẽ sai thứ tự z". **Điều đó sai.** Trong **47 trong 49** danh sách
+ID tăng nghiêm ngặt trong khi thứ tự file thì không, đó là vẻ ngoài của một sổ
+đăng ký chứ không phải của một thứ tự z do nghệ sĩ chọn (`Arm_B`: lưu
+`"1|6|7|9|10"`, thứ tự file `10|9|6|1|7`, gần như đảo ngược); 2 ngoại lệ,
+`Leg_F`/`Leg_F 2` của Bandit, cũng gần tăng. Sắp xếp lại theo nó cũng làm vỡ
+nhóm `combo_mode`, thứ được xây từ sự liền kề trong thứ tự file — render
+Bandit theo cách đó abort thay vì vẽ. Cả hai phát hiện khớp với thí nghiệm
+độc lập được ghi trong chính docstring của `moho2svg.py`. `Mesh.draw_order()`
+giờ nêu quy tắc ở một nơi duy nhất. `SketchBone.animeproj` không bị ảnh hưởng
+theo cách nào (0/82), và `anim_shape_order` là `false` trên cả 614 mesh, nên
+không tài liệu mẫu nào hoạt ảnh thứ tự z của nó.
+
+**Vết xé khớp giữa hai nửa bị bind cứng KHÔNG được giải thích bởi bất kỳ
+trường chưa đọc nào.** Một layer có `flexi_bone_subset` đặt tên đúng một bone
+biến dạng cứng nhắc (`Skinner.deform` chuẩn hóa theo trọng số đơn, nên falloff
+triệt tiêu). `SketchBone.animeproj` bind từng nửa cánh tay theo cách đó -
+`kol-sol-ust`→bone 13, `kol-sol-alt`→bone 14, `kol-sag-ust`→15,
+`kol-sag-alt`→16 - nên khi khuỷu tay cong, hai nửa xoay quanh các trục khác
+nhau và tách rời nhau. Đo trên các đường viền được render: khe hở giữa
+`kol-sol-ust` và `kol-sol-alt` giữ ở 1-9 px tới frame 51, rồi nhảy lên 40 px tại
+frame 56 và ổn định quanh 26 px, bám chính xác cú vung 41.5 độ của chính bone
+14 giữa các keyframe của nó tại frame 49 và 55. Bản thân skeleton vẫn vững
+suốt (đầu bone 13 tới gốc bone 14 là hằng số 7.8 px), và không nửa nào được
+hoạt ảnh điểm, hoạt ảnh transform layer, hay được tỷ lệ không cứng - nên đây
+là mô hình bind, không phải các bone. "Smooth Joint for Bone Pair" của chính
+Moho là tính năng sẽ blend qua một khớp như vậy, và **không tìm thấy trường
+lưu trữ nào cho nó**: cuộc kiểm toán ở trên loại trừ mọi ứng viên. Đóng khoảng
+trống này nghĩa là phát minh một phép blend, điều mà falloff đã bị gắn cờ là
+chưa được kiểm chứng cho ([§ 2.4](#24-một-điểm-thực-sự-bị-biến-dạng-thế-nào)).
 | `parent_bone == -3` | rơi về bind mềm, chưa xác nhận |
 | Smart Warp / distortion layers | **không cài đặt, không phát hiện** |
 | Nhóm điểm, curve profiles, `start_percent` / `end_percent` | bị bỏ qua |
@@ -602,16 +882,115 @@ Chỉ sau cả sáu, hình học riêng của mesh (curves, tái dựng Bezier) 
 
 1. **Bone dynamics** — bật trong 6 trên 19 tài liệu, được đánh giá lúc phát
    lại, ảnh hưởng mọi frame xa một key. Khoảng trống thật lớn nhất trong mẫu
-   này.
-2. **Smart Warp** — vô hình ở đây (0 file), nhưng một tài liệu dùng nó sẽ mất
+   này. **Đã cài đặt phía sau `--bone-dynamics`, tắt theo mặc định** — xem
+   `Skeleton.dynamic_angles`.
+
+   Bone được mô hình hoá như một con lắc có quán tính trong không gian
+   **world**. Với `pw` là góc world của bone cha và `x` là góc local của
+   chính bone:
+
+   ```
+   x'' = spring·(keyed − x) − damping·(x' + pw') − pw''
+   ```
+
+   Hai số hạng `pw` mới là điểm mấu chốt. Bản trước chỉ kéo bone về góc đã
+   key của chính nó, nên một bone có `anim_angle` không bao giờ đổi thì không
+   bao giờ động đậy — mà trên toàn tập mẫu đó lại là trường hợp thường gặp:
+
+   | Tài liệu | Dynamics bật | `anim_angle` riêng có đổi | Giờ có phản ứng |
+   |---|---|---|---|
+   | `BoneDynamics.animeproj` | 7 | **0** | có, ±27.5° |
+   | `Rabbit.animeproj` | 7 | **0** | có, ±21.7° |
+   | `WhatIsBone.animeproj` | 52 | 16 | có, ±63.7° |
+   | `AddBone.animeproj` | 21 | **0** | không |
+   | `ControlBones.animeproj` | 2 | **0** | không |
+   | `Bandit.mohoproj` | 2 | **0** | không |
+
+   `BoneDynamics.animeproj` cho thấy vì sao phải viết lại. Cả sáu bone tai
+   giữ nguyên `anim_angle`, `anim_pos` và `anim_scale`; thứ chuyển động là
+   bone ông nội `Main` (`anim_pos` x −1.56…1.10, y −0.32…1.43 — cú nhảy) và
+   `TorsoA` (góc 250°…307°). **Tai vẫy vì nó trễ so với chuyển động world của
+   bone cha.**
+
+   Ba tài liệu còn "không" là những tài liệu có bone dynamics treo dưới một
+   bone cha chỉ **tịnh tiến**. Muốn chúng phản ứng thì cần số hạng gia tốc
+   điểm treo — đúng vai trò tự nhiên của `torque_force` — và điều đó đã được
+   thử rồi bác bỏ bằng bằng chứng, hai lần: nó làm ngọn tai của
+   `BoneDynamics.animeproj` vọt lên 81° ở một frame, và khi quét từ 0.001 tới
+   1.0 đối chiếu bản render của chính Moho cho `Bandit.mohoproj` thì không
+   lần nào cải thiện, còn ở 1.0 làm chóp đuôi tệ đi (sai số dọc 32.15 px →
+   35.76 px). Nên `torque_force` vẫn được đọc mà không dùng.
+
+   **Đơn vị tính theo frame, không theo giây.** Đọc theo giây thì spring 2 và
+   damping 1 tạo ra một dao động lỏng tới mức chuyển động xoay của bone cha
+   kéo bone lệch 200° khỏi góc đã key rồi giữ nguyên ở đó. Đây là một phép
+   khớp, không phải giải mã.
+
+   **Cái đuôi của Bandit chính là hình dạng của khoảng trống này.** Mọi layer
+   của tài liệu đó bám bản render của chính Moho trong khoảng 0.3–2.8 px, trừ
+   hai layer ở đuôi, lệch 18 px (gốc) tới 32 px (ngọn) theo phương dọc — mà
+   hai bone đuôi lại đúng là hai bone duy nhất có dynamics. Trong bản đối
+   chứng, nhịp nhún của đuôi là bản sao nhịp nhún của thân, **trễ 4 frame**
+   (tương quan chéo 0.93 tại đó, so với −0.91 tại độ trễ 0) và **biên độ tăng
+   dần xuống chuỗi** (độ lệch chuẩn 6.7 px ở mõm, 10.0 ở gốc đuôi, 15.1 ở
+   ngọn). Trễ cộng với khuếch đại chính là dao động cộng hưởng. Chuyện bind đã
+   được loại trừ riêng: cả 28 kiểu gắn cứng, 5 subset và cả 4 falloff đều để
+   lại sai số dọc chênh nhau chưa tới 2 px.
+
+   **Giờ đã có bài kiểm, và nó trượt.** `moho/BoneDynamics/` (29 frame, bản
+   xuất của chính Moho) là ca sạch: 6 trong 7 bone dynamics là hai tai thỏ,
+   không bone dynamics nào tự đổi góc, không bone nào đăng ký gió. Bật
+   `--bone-dynamics` làm tai **tệ đi**: sai số vị trí trung bình 60.6 px →
+   62.6 px (tai phải), 65.2 → 66.0 (tai trái). Mô hình không chỉ là chưa kiểm
+   chứng — nó đo được là **không cải thiện**, và đó là lý do vẫn để tắt.
+
+   Nhưng phải đọc kỹ: nền cũng đang tệ. Khi tắt dynamics, hai tai đó đã lệch
+   sẵn ~60 px, so với 0.3–3.5 px của mọi layer trong hai tài liệu đối chứng
+   còn lại — nên còn thứ khác sai trong rig đó, và tín hiệu dynamics bị lấn
+   át. Đã loại trừ: kế thừa scale (đã sửa riêng — đưa tai từ ~78 px xuống
+   ~60 px), bốn công thức trục ngang của `squash_stretch_scaling`, bốn hàm
+   falloff, control bones (ba bone điều khiển của nó gần như đứng yên), và
+   chính trọng số skin (kiểm từng điểm — mỗi điểm tai đều bị bone gần nhất áp
+   đảo trên 95 %).
+
+   Chi phí: trạng thái tại frame F phụ thuộc mọi frame trước nó, nên mỗi lần
+   gọi mô phỏng từ frame bắt đầu. Đo từ đầu tới cuối trên một bản xuất Lottie
+   đầy đủ — `Bandit` 6s → 9s, `WhatIsBone` ~35s → 1m45s. Moho cộng chuyển động
+   phụ kiểu lò xo/tắt dần lên trên pose đã key, nên bỏ qua nó khiến chuyển
+   động đọc như *gắt hơn* so với Moho, chứ không phải bớt gắt hơn. Control bones
+   (`angle_/pos_/scale_control_parent`) được đặt trên 9 bone khắp 4 trong số
+   các tài liệu đó. **Không cái nào được dùng ở bất kỳ đâu trong
+   `SketchBone.animeproj`** — cả năm skeleton của nó (`cat_boy` 42 bone,
+   `kafasi` 21, `el-sol` 11, `el-sag` 11, `Sketch` 9) có không cái nào của mỗi
+   loại, nên không cái nào giải thích được hành vi tai của rig đó.
+2. **Hình dạng falloff của bind mềm** — bốn ứng viên giờ đã **phân biệt
+   được**, và chúng mâu thuẫn nhau. Chấm bằng `make check-reference` (tổng sai
+   số vị trí trung bình trên các layer mỗi tài liệu chạm tới được):
+
+   | Falloff | SketchBone, 10 layer | Bandit `TailBase` dx | Bandit `Belly` dy |
+   |---|---|---|---|
+   | `inv_d2` (mặc định) | **34.15** | 8.25 px | 3.02 px |
+   | `cut_d2` | 35.54 | 6.38 px | 3.02 px |
+   | `hermite` | 41.53 | 2.02 px | 1.62 px |
+   | `linear` | 43.58 | **1.89 px** | **1.59 px** |
+
+   Nhóm có tầm ảnh hưởng hữu hạn thắng mọi layer Bandit trộn nhiều bone, và
+   thua mọi layer SketchBone tương đương (`kuyruk` 2.37 → 6.24 px, `golge`
+   6.48 → 10.47 px). **Vậy không cái nào trong bốn là hàm thật của Moho.**
+   `inv_d2` vẫn là mặc định vì thắng trên bộ đối chứng rộng hơn — 10 layer so
+   với 3, và ở format mới hơn.
+
+   Điều này cũng giải thích vì sao trước đây không phân biệt được: một layer
+   mà một bone áp đảo sẽ cho kết quả *y hệt* dưới cả bốn. `Tip` của `Bandit`,
+   chỉ bind vào hai bone, đúng là ca đó.
+
+3. **Smart Warp** — vô hình ở đây (0 file), nhưng một tài liệu dùng nó sẽ mất
    toàn bộ biến dạng một cách im lặng. Phát hiện thì rẻ; hỗ trợ thì không.
-3. **Hoạt ảnh `end_percent`** — không được vận hành ở đây, phổ biến trong sản
+4. **Hoạt ảnh `end_percent`** — không được vận hành ở đây, phổ biến trong sản
    xuất.
-4. **Control bones** — nhỏ trong mẫu này, nhưng mất trắng nơi được dùng.
-5. **IK với target di chuyển** — thường được bake, đôi khi không.
-6. **Góc độc lập (`fixed_angle`)** — 45 bone; ảnh hưởng chưa kiểm chứng.
-7. **Hình dạng falloff của bind mềm** — ảnh hưởng mọi layer mềm một chút; chỉ
-   nhìn thấy nơi hai bone chồng mạnh.
+5. **Control bones** — nhỏ trong mẫu này, nhưng mất trắng nơi được dùng.
+6. **IK với target di chuyển** — thường được bake, đôi khi không.
+7. **Góc độc lập (`fixed_angle`)** — 45 bone; ảnh hưởng chưa kiểm chứng.
 8. **`offset`, `binding_mode == 2`, `parent_bone == -3`, `scaling_mode`** —
    chưa giải mã, mỗi cái được quan sát ở đúng một chỗ hẹp.
 

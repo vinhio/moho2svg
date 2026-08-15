@@ -154,7 +154,7 @@ những giá trị tàn dư đó cho mọi frame trước key thật kế tiếp
 `when[i]`, `val[i]` và `interp[i]` **luôn cùng độ dài** (đã xác nhận trên mọi
 channel, không ngoại lệ). `interp[i]` mô tả đoạn **rời khỏi** keyframe `i`, nên
 mục cuối cùng không mô tả gì — trừ khi nó mang marker vòng lặp (xem
-[§ 3.4](#34-v1--v2-và-marker-vòng-lặp-trên-keyframe-cuối)).
+[§ 3.4](#34-v1--v2-và-marker-vòng-lặp)).
 
 Mỗi mục `interp` có một hình dạng cố định:
 
@@ -208,7 +208,7 @@ lựa chọn theo từng keyframe do animator làm, không phải cài đặt to
 | `4` | các giá trị `im` `5` và `7` tổng cộng 520 mục; **471** trong số đó là mục **cuối** của channel chúng, và là các mục duy nhất mang các cặp `v1`/`v2` bất thường liệt kê bên dưới | **Suy luận:** bit 4 nghĩa là "keyframe này mang một cài đặt vòng lặp" |
 | `1`, `2` | `im == 3` (bit 1+2) xuất hiện 151,877 lần, và 151,875 trong số đó nằm trên các channel một-keyframe | **Chưa giải mã** |
 
-### 3.4 `v1` / `v2`, và marker vòng lặp trên keyframe cuối
+### 3.4 `v1` / `v2`, và marker vòng lặp
 
 **Đã xác nhận.** Cặp `(0.1, 0.5)` xuất hiện trên **601,344 trong 604,139 mục** —
 nó là mặc định không bị đụng tới và không mang thông tin. `(-1.0, -1.0)` xuất
@@ -225,16 +225,95 @@ của một channel:
 | `(23.0, -1.0)` | 26 |
 | `(15.0, -1.0)` | 2 |
 
-**Suy luận:** đây là cài đặt *vòng lặp (cycle)* của Moho, lưu trên key cuối
-của một channel tuần hoàn — `v1` trông như một frame tuyệt đối để nhảy về
-(`-1` khi không dùng) và `v2` như một số lần lặp (`-1000000` cho "vô hạn").
-Bằng chứng mang tính vị trí (keyframe cuối) và ngữ cảnh (chỉ trên các channel
-rig được hoạt ảnh như chu kỳ đi bộ của `Bandit.mohoproj`); ý nghĩa chính xác
-của từng con số **chưa được xác nhận**.
+**Suy luận, giờ đã giải mã đủ để dùng.** Đây là cài đặt *vòng lặp (cycle)* của
+Moho: qua keyframe được đánh dấu, channel không giữ giá trị cuối của nó, nó
+nhảy về và phát lại một đoạn sớm hơn trên chính timeline của nó. `v1` và `v2`
+là cùng một cài đặt được nhập theo hai cách khác nhau, và chỉ một trong hai
+được dùng tại một thời điểm — cái còn lại giữ một sentinel âm (`-1`, hoặc
+`-1000000`):
 
-Hệ quả cho bất kỳ công cụ nào bỏ qua `interp`: một channel có vòng lặp **không
-được** lặp. Qua keyframe cuối, giá trị bị kẹp thay vì lặp lại. Trong
-`Bandit.mohoproj`, chu kỳ đi bộ dừng ở frame 41 thay vì lặp.
+| Slot | Khi được dùng | Ý nghĩa |
+|---|---|---|
+| `v1 >= 0` | animator nhập một số **tương đối** của frame | tiếp tục tại `when[i] - v1` |
+| `v2 >= 0` | animator nhập một frame **tuyệt đối** | tiếp tục tại `v2` |
+
+"Tiếp tục tại `R`" nghĩa là frame `end + 1` lấy giá trị của frame `R`, nên chu
+kỳ lặp dài `end - R + 1` frame.
+
+**Vòng lặp CỘNG DỒN — nó phát lại chuyển động, không phải các con số.** Mỗi
+lần lặp cộng thêm `value(end) - value(R - 1)`, nên một chu kỳ đi bộ thật sự đi
+được tới đâu đó thay vì đi tại chỗ. Delta đó bằng 0 với một vòng lặp liền
+mạch, vốn là trường hợp phổ biến, và đó là lý do phân biệt này vô hình trên
+hầu hết channel.
+
+Đây là suy luận được kiểm chứng tốt nhất trong cả repo, vì nó là cái duy nhất
+được đo đối chiếu với các frame do **chính Moho xuất ra**. Bone gốc `B1` của
+`Bandit.mohoproj` mang `anim_pos` có key trên frame 25–41 với marker ở 41, và
+x của nó tăng thêm `+0.710093` đơn vị tài liệu — 383.45 px — mỗi lần lặp 16
+frame. Dự đoán vị trí nhân vật từ đó rồi so với 103 frame trong
+`moho/Bandit/svg/`:
+
+| Mô hình | \|sai số\| trung bình | \|sai số\| lớn nhất |
+|---|---|---|
+| **cộng dồn** | **3.3 px** | **8.4 px** |
+| phát lại nguyên giá trị | 1025.7 px | 2299.4 px |
+
+trên một quãng đi 2437 px. Phát lại nguyên giá trị khiến nhân vật đi tại chỗ;
+bản đối chứng cho nó đi thẳng qua khung hình. Chỉ giá trị số và vector
+`{x, y[, z]}` mới cộng dồn — màu, bool hay chuỗi không có khái niệm "lượng
+thay đổi của một chu kỳ" nên được phát lại nguyên vẹn.
+
+**Marker phải bị bỏ qua bên trong action pose của Smart Bone.** Moho cũng ghi
+nó ở đó — `Bandit.mohoproj` mang đúng vòng lặp `(v1=15, end=41)` trên
+`bones[0].anim_pos.actions[0].pose` y như trên chính channel — nhưng một action
+là một thư viện tư thế do dial đánh chỉ số, không phải timeline chạy, và pose
+được đọc như một *offset*, nên vòng lặp cộng dồn sẽ thêm một độ trôi không bao
+giờ quay lại. Tôn trọng nó làm đầu và mõm của tài liệu đó lệch giả 590 px
+suốt frame 44–80. Xem `Channel.without_cycles`.
+
+**Cách điều này được kiểm tra.** Chỉ năm trong 19 tài liệu mẫu dùng vòng lặp,
+và giữa chúng chỉ có bốn tổ hợp `(v1, v2, keyframe)` khác nhau. Với mỗi tổ
+hợp, frame mà channel thực sự lặp về được tìm theo kinh nghiệm, bằng cách tìm
+frame sớm hơn có giá trị **bằng** giá trị tại keyframe được đánh dấu — điều mà
+một vòng lặp liền mạch làm cho đúng, và điều các animator dựng nên. Chấm điểm
+trên mọi channel có vòng lặp của từng tài liệu, một ứng viên thắng rõ ràng:
+
+| Tài liệu | `v1` | `v2` | keyframe được đánh dấu | frame thắng `A` |
+|---|---|---|---|---|
+| `Bandit.mohoproj` | 15 | -1000000 | 41 | 25 (92 trên 94 channel) |
+| `TransformBoneTool.animeproj` | 23 | -1 | 25 | 1 (8 trên 10) |
+| `WhatIsBone.animeproj` | -1 | 2 | 28 | 1 (212 trên 217) |
+| `OffsetBoneTool.animeproj` | -1 | 2 | 24 | 1 (32 trên 32) |
+| `BoneStrengthTool.animeproj` | -1 | 1 | 24 | 0 (quá ít channel số để phân biệt) |
+
+Cả hai cách đọc đều rơi chính xác **muộn hơn một frame** so với người thắng đó
+(`41 - 15 = 26` so với `A = 25`; `v2 = 2` so với `A = 1`), trong mọi tài liệu.
+Độ lệch một frame đó chính là điểm mấu chốt: con số được lưu là frame mà channel
+*tiếp tục tại*, không phải frame đầu của vòng lặp. Vì `value(A) == value(end)`
+trên một vòng lặp liền mạch, phát lại `[A + 1, end]` và phát lại `[A, end]` cho
+cùng một chuyển động, đó là lý do cả hai mô tả đều khớp — con số được lưu được
+dùng trực tiếp.
+
+Một kiểm tra thứ hai hỗ trợ điều đó: khi áp vòng lặp, bước giá trị qua chỗ
+quấn lại (`end → end + 1`) không bao giờ là bước lớn nhất trong channel, trên
+bất kỳ tài liệu nào trong bốn tài liệu. Một frame tiếp tục sai sẽ hiện ra ở đó
+như một cú nhảy.
+
+**Chưa xác nhận:** số lần lặp. Không có gì trong dữ liệu phân biệt "lặp vô
+hạn" với "lặp N lần" — sentinel `-1000000` là một "vô hạn" hợp lý, nhưng `-1`
+được dùng trong cùng slot ở nơi khác, nên cả hai đều được đọc ở đây đơn giản
+là "slot này không được dùng". Vòng lặp do đó được xử lý như chạy vô hạn, hoặc
+đến keyframe kế tiếp của channel khi marker không nằm trên key cuối (17 channel
+trong `WhatIsBone.animeproj` như vậy: một vòng lặp trên frame 28 với một
+keyframe nữa ở 227).
+
+**Hệ quả cho bất kỳ công cụ nào bỏ qua `interp`:** một channel có vòng lặp
+**không được** lặp. Qua keyframe được đánh dấu, giá trị bị kẹp thay vì lặp lại
+— chu kỳ đi bộ của `Bandit.mohoproj` dừng ở frame 41 và của
+`WhatIsBone.animeproj` dừng ở frame 28, cả hai đều ngắn hơn rất nhiều so với
+frame cuối của chính tài liệu của chúng. `Channel` của `moho2svg.py` đọc marker
+(xem `Channel._parse_cycles`), nên điều đó không còn áp dụng cho các exporter
+của kho lưu trữ này.
 
 ### 3.5 `b` — tay nắm thời gian Bezier, đã giải mã
 
@@ -272,10 +351,45 @@ số ít keyframe trong 19 tài liệu này dùng nó tường minh; mọi thứ
 
 ### 3.6 Thay vào đó `moho2svg.py` làm gì
 
-`Channel.eval_raw` bỏ qua `interp` hoàn toàn và nội suy **tuyến tính** giữa hai
-keyframe bao quanh, kẹp ở cả hai đầu:
+**Pose của Smart Bone được áp như một OFFSET, không phải thay thế** (được thêm
+trong `Channel.eval` / `_pose_offset`). Một pose đóng góp
+`pose(action_frame) - pose(first_action_keyframe)` lên trên giá trị timeline
+chính của chính channel. Điều này chỉ hiện ra trên một channel được hoạt ảnh
+trên timeline chính *và* được đăng ký trong một action, và `SketchBone.animeproj`
+có đúng điều đó: dial `govde-don` của nó lưu một pose phẳng `[160.7, 160.7]`
+trên bone `B16`, bằng góc nghỉ của bone đó, trong khi chính `B16` quét 126.3
+-> 222.4 độ. Cách thay thế đóng băng cả cánh tay `kol-sag-ust` ở 160.7 độ cho
+toàn bộ hoạt ảnh; cách offset làm một pose phẳng thành no-op mà nó rõ ràng là
+vậy. Đã kiểm chứng với render chỉ phần cánh tay của chính Moho
+(`moho/SketchBone/hand/`): mask IoU của cánh tay qua 120 frame là 11.5% ->
+16.1%, khác biệt pixel toàn frame là -6.4%. Frame 0 không đổi (các dial nằm ở
+trạng thái nghỉ, nên offset bằng không), nên các SVG xuất ra vẫn
+byte-identical so với đầu ra trước thay đổi. Chỉ các channel số và vector
+`{x,y,z}` bị offset; pose màu/bool/chuỗi vẫn thay thế.
 
-- số → nội suy tuyến tính;
+`Channel.eval_raw` bỏ qua `interp` hoàn toàn và nội suy bằng **monotone cubic**
+giữa hai keyframe bao quanh, kẹp ở cả hai đầu. (Một phiên bản trước nội suy
+**tuyến tính**; điều đó không còn đúng nữa — xem `Channel._segment`.) Đường
+cong easing của chính Moho không thể khôi phục từ file (`interp.t` là 0 trên
+602,784 trong 604,139 mục với một enum chưa giải mã), nên hình dạng được suy
+ra bằng cách chấm điểm đầu ra render so với render chỉ phần cánh tay của chính
+Moho cho `SketchBone.animeproj` (`moho/SketchBone/hand/`, 120 frame):
+
+| phép nội suy | IoU mọi frame | IoU frame 44–54 |
+|---|---|---|
+| tuyến tính | 84.55% | 60.88% |
+| smoothstep ease | 79.50% | 65.67% |
+| Catmull-Rom | 82.20% | 78.59% |
+| **monotone cubic** | **85.76%** | **81.84%** |
+
+Frame 44–54 là cửa sổ phân biệt: chúng nằm *giữa* các keyframe cánh tay của rig
+đó (43, 49, 55), nơi phép tuyến tính đạt ~89% **tại** mỗi keyframe nhưng sụp
+xuống 45–65% giữa chúng — pose đúng, đường cong sai. Trên toàn bộ hoạt ảnh,
+điều này cắt khác biệt pixel toàn frame đi **43.3%**. Nó vẫn là một đường cong
+được suy ra, không phải được giải mã. Frame 0 không bị đụng tới, nên các SVG xuất ra
+vẫn byte-identical so với trước thay đổi.
+
+- số → nội suy monotone-cubic;
 - `{x,y}`, `{x,y,z}`, `{r,g,b,a}` → tuyến tính theo từng thành phần;
 - chuỗi và boolean → bám vào keyframe bên trái (không nội suy), là lựa chọn
   đúng duy nhất cho tên của switch-layer hay cờ hiển thị.
@@ -288,7 +402,10 @@ Hệ quả, theo thứ tự quan trọng thực tế:
 2. **Xấp xỉ giữa các keyframe.** Chuyển động tuyến tính thay vì chuyển động
    eased. Kích thước nhìn thấy được của sai số phụ thuộc vào đoạn, và lớn nhất
    trên các đoạn dài với easing mạnh.
-3. **Không lặp.** Xem [§ 3.4](#34-v1--v2-và-marker-vòng-lặp-trên-keyframe-cuối).
+3. **Vòng lặp được áp dụng**, từ marker đã giải mã trong
+   [§ 3.4](#34-v1--v2-và-marker-vòng-lặp). Số *lần* lặp vẫn chưa được giải mã,
+   nên một vòng lặp chạy đến keyframe kế tiếp của channel, hoặc vô hạn khi
+   marker nằm trên key cuối.
 4. **`split` bị bỏ qua** — các mảng `Vec2`/`Vec3` cha được đọc thay thế. Chỉ
    một channel trong toàn bộ mẫu dùng `split` (một `anim_pos` trong
    `Bandit.mohoproj`), và đường cong split của nó khớp với cha, nên hiện tại
@@ -418,14 +535,26 @@ các bone cha được giải trước các bone con bất kể thứ tự danh 
 Ma trận cục bộ khi cài đặt chỉ tỷ lệ cột đầu tiên:
 
 ```
-local = Mat2D(cos·scale, sin·scale, -sin, cos, pos.x, pos.y)
+local = Mat2D(cos·scale, sin·scale, -sin·across, cos·across, pos.x, pos.y)
 ```
 
-Sự bất đối xứng đó **được giữ có chủ đích**. Nó khớp với mọi render tham chiếu
-sẵn có, và không mẫu nào dùng một bone có `anim_scale` xa `1.0` theo cách có
-thể phân biệt tỷ lệ bất đối xứng với tỷ lệ đều. `scaling_mode` (quan sát thấy
-`0` và `2`) là một giải thích hợp lý và **chưa được giải mã**. Đừng "sửa" điều
-này nếu không có bằng chứng tham chiếu mới.
+`across` là `1` cho một bone có `scaling_mode == 2` (chỉ tỷ lệ dọc theo bone)
+và bằng `scale` cho mọi bone khác (tỷ lệ đều thông thường).
+
+**`scaling_mode` giờ đã được giải mã**, sửa một phiên bản trước vốn gọi sự bất
+đối xứng là chưa giải thích được và cảnh báo không nên đụng vào. Nó là công tắc
+**"Squash and stretch scaling"** theo từng bone của Moho, và chỉ tỷ lệ một trục
+chính là điều squash-and-stretch nghĩa là gì. Bằng chứng là rig đầu `kafasi`
+của `SketchBone.animeproj`: hai bone mang mỗi tai (`B2`/`B3` và `B4`/`B5`) có
+`scaling_mode == 2`, trong khi bone thứ ba trong `flexi_bone_subset` của chính
+mỗi tai (`B20`, `B19`) có `0` — đúng sự phân chia mà bảng bone constraints của
+Moho hiển thị cho rig đó. Trên toàn bộ mẫu: `2` trên 264 bone, `0` trên 586.
+
+Chỉ 28 bone trong toàn bộ mẫu từng đưa `anim_scale` ra khỏi `1.0`, và 9 trong
+số đó là `scaling_mode == 0` (trong `Rabbit`, `BoneDynamics`, `BoneStrengthTool`
+và `OffsetBoneTool`), nên đó là những nơi duy nhất sự đính chính có thể quan
+sát được. Không tài liệu nào trong số chúng xuất hiện trong các tài liệu mẫu có đầu ra
+được kiểm byte-identical, đó là lý do các SVG xuất ra không đổi.
 
 ### 5.4 Bind cứng (rigid) và bind mềm (flexible)
 

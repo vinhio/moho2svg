@@ -58,6 +58,10 @@ WARNING_EXPLANATIONS = {
                              "stroke band back out of the mask so it stays "
                              "visible on top; this writer draws a plain "
                              "union mask instead, without that carve-out",
+    "timing_offset": "layer(s) carrying a non-zero timing_offset, which shifts "
+                     "their animation in time - not applied, because nothing in "
+                     "the sample corpus animates such a layer, so the sign and "
+                     "scope cannot be verified (see Layer.timing_offset)",
     "physics": "layer(s) driven by Moho's own rigid-body physics simulation "
                "(gravity/velocity/forces), which this exporter does not run - "
                "each renders at its rest pose on every sampled frame instead "
@@ -144,6 +148,8 @@ class LottieExporter:
         for _ancestors, layer in self.document.walk():
             if layer.physics_dynamic:
                 self.warnings["physics"] += 1
+            if layer.timing_offset:
+                self.warnings["timing_offset"] += 1
 
     def _build_layers(self, frames, include_hidden: bool = False) -> list:
         """One Lottie shape layer per Moho mesh layer, in Lottie draw order.
@@ -884,6 +890,10 @@ def main() -> None:
                              "between two limb halves that are each bound to a single bone, "
                              "but measured slightly WORSE against the reference frames "
                              "overall, so it is off by default")
+    parser.add_argument("--bone-dynamics", action="store_true",
+                        help="simulate Moho's per-bone spring/damping secondary motion. "
+                             "UNVERIFIED - see moho2svg.py's Skeleton.dynamic_angles. "
+                             "Off by default")
     parser.add_argument("--validate", action="store_true",
                         help="validate the output against lottie/lottie.schema.json "
                              "(needs the optional 'jsonschema' package)")
@@ -900,7 +910,8 @@ def main() -> None:
         # integer frames, so sampling anything finer would not add fidelity.
         frames = list(range(document.start_frame, document.end_frame + 1))
     exporter = LottieExporter(document,
-                               RenderSettings(smooth_bone_joints=args.smooth_joints))
+                               RenderSettings(smooth_bone_joints=args.smooth_joints,
+                                               bone_dynamics=args.bone_dynamics))
     lottie = exporter.export(frames, include_hidden=args.include_hidden)
 
     with open(args.out, "w", encoding="utf-8") as f:

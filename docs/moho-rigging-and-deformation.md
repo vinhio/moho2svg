@@ -128,18 +128,44 @@ All 40+ bone fields, grouped by what they are for. "Used" means
 
 **Scaling behaviour**
 
+`anim_scale` **does not accumulate down the bone chain** — decoded from
+`BoneDynamics.animeproj` against Moho's own render. A child's origin is placed
+with the parent's full, scaled matrix, so a squashing torso does drag its head
+down; but the child's own axes are rebuilt from the accumulated rotation and
+the child's *own* scale, so the squash does not shrink the child too.
+
+That document squashes `TorsoA` to `anim_scale = 0.61` at frame 1. Composing
+normally collapsed the rabbit's ear from 130 px tall — its rest height, and
+Moho's — to 83.5 px, almost exactly 130 × 0.61, while Moho keeps it at 130.
+Fixing it improved every other reference as well (vertical error, mean / max):
+
+| Layer | Before | After |
+|---|---|---|
+| `Bandit` `Muzzle` | 2.65 / 5.92 px | **0.85 / 2.05 px** |
+| `Bandit` `BellyTexture` | 2.84 / 6.26 px | **0.68 / 1.66 px** |
+| `SketchBone` `kafasi` | 2.35 / 10.94 px | **1.53 / 2.08 px** |
+| `SketchBone` `kulak-sol` | 4.47 / 20.20 px | **3.20 / 6.68 px** |
+| `SketchBone` `cizgiler-sag` | 2.20 / 9.51 px | **1.64 / 3.49 px** |
+
+
 `scaling_mode` — **used**, and decoded as the "Squash and stretch scaling"
 switch (see [§ 2.3](#23-from-bones-to-matrices)). `max_auto_scaling` — used,
 as the IK auto-stretch cap. `squash_stretch_scaling` — a magnitude (`1.0` on
 831 of 850 bones), still unused.
 
-**Physics / dynamics (not used)**
+**Physics / dynamics**
 
-`bone_dynamics`, `angle_dynamics`, `pos_dynamics`, `scale_dynamics`,
-`wind_dynamics`, `torque_force`, `spring_force`, `damping_force`, and the
-`pos_` / `scale_` variants of the three force fields, plus `physics_radius`,
-`physics_return_to_zero`, `physics_motor_speed`, `physics_torque`,
-`physics_lock_tip`.
+`bone_dynamics` and `angle_dynamics` — **used** together as the on/off switch
+behind `--bone-dynamics`, along with `spring_force` and `damping_force` (see
+[§ 3.5](#35-bone-dynamics-spring-physics)).
+
+Not used: `torque_force`, `pos_dynamics`, `scale_dynamics`, `wind_dynamics`,
+the `pos_` / `scale_` variants of the three force fields, the three
+`*_control_delay` fields, plus `physics_radius`, `physics_return_to_zero`,
+`physics_motor_speed`, `physics_torque`, `physics_lock_tip`.
+
+Everything from `angle_dynamics` onwards exists only from **format 1045**;
+files at 1021/1038 carry a single force triple and a single switch.
 
 **Editor state (not used)**
 
@@ -358,19 +384,76 @@ the same for `pos_` and `scale_`.
 
 ### 3.5 Bone dynamics (spring physics)
 
-- **Confirmed**: `bone_dynamics` is `true` on **115 of 850 bones**, across 6
-  documents — `WhatIsBone` (52), `Bandit` (28, i.e. every bone in the file),
-  `AddBone` (21), `BoneDynamics` (6), `Rabbit` (6), `ControlBones` (2). It is
-  a `Bool` **channel** and is keyframed in `BoneDynamics.animeproj` (14
-  channels have more than one key across the sample).
-  `angle_dynamics` is `true` on 2 bones in `Bandit.mohoproj`; `pos_`,
-  `scale_` and `wind_` dynamics are `false` everywhere.
-- **Effect of ignoring**: **exercised and visible.** Moho adds the spring
-  motion on top of the keyed pose at playback time. A channel-only exporter
-  renders the keyed pose with no follow-through or overlap, and the error
-  grows with distance from a keyframe.
-- The forces that shape it: `spring_force`, `damping_force`, `torque_force`
-  (22 of Bandit's bones share `2.0 / 1.0 / 2.0`, 6 are tuned individually).
+**The switch is two fields, and both must be on**
+
+**Confirmed.** Newer Moho splits the setting: `bone_dynamics` is the per-bone
+master switch, and `angle_dynamics` says the angle channel takes part. The
+second one only exists from format 1045, together with `pos_dynamics`,
+`scale_dynamics`, `wind_dynamics` and their own
+`*_spring_force` / `*_damping_force` / `*_torque_force` / `*_weight` /
+`*_control_delay` fields.
+
+Neither field alone is the switch. `SketchBone` is in this corpus **twice** —
+the 2016 original (`.animeproj`, format 1038) and a re-save from Moho Pro
+14.4 (`.mohoproj`, format 1045) of the same document:
+
+| Field | 1038 original | 1045 re-save |
+|---|---|---|
+| `bone_dynamics` | false on all 94 bones | false on all 94 bones |
+| `angle_dynamics` | field does not exist | **true on all 94 bones** |
+
+So `angle_dynamics` is just the default value of the new field: Moho's own
+upgrade path sets it true on every bone of a document that uses no dynamics
+at all. And `bone_dynamics` alone fails on the new format the other way —
+`Bandit.mohoproj` has it true on **all 28 bones**, including the Smart Bone
+dials `EyeBlink`, `HeadTurn`, `SquashStretch` and `EyeMovement`, while
+`angle_dynamics` is true on only 2.
+
+`moho2svg.py` therefore reads the switch as `bone_dynamics AND
+angle_dynamics`, treating a missing `angle_dynamics` as true — see
+`Bone.dynamics_on`. Bone counts under that reading:
+
+| Document | Format | Bones | Dynamics on |
+|---|---|---|---|
+| `WhatIsBone.animeproj` | 1038 | 216 | 52 |
+| `AddBone.animeproj` | 1038 | 188 | 21 |
+| `BoneDynamics.animeproj` | 1038 | 17 | 7 |
+| `Rabbit.animeproj` | 1021 | 15 | 7 |
+| `ControlBones.animeproj` | 1038 | 29 | 2 |
+| `Bandit.mohoproj` | 1045 | 28 | 2 |
+| `SketchBone` (both versions) | 1038 / 1045 | 94 | 0 |
+
+**It is a keyframed channel, and Smart Bones can drive it**
+
+**Confirmed.** `bone_dynamics` is a `Bool` **channel**, not a flag.
+`BoneDynamics.animeproj`'s `Main` bone has `when = [0, 1, 29]`,
+`val = [False, True, False]` — dynamics runs only over frames 1–28. The same
+document registers a `JumpCycle` **action pose** on the `bone_dynamics` of
+all six of its rabbit-ear bones, so a Smart Bone dial can switch the feature
+on and off as well.
+
+**The forces**
+
+`spring_force`, `damping_force`, `torque_force`. The default triple is
+`2.0 / 1.0 / 2.0`. `BoneDynamics.animeproj`'s ear chain is graded from base
+to tip, and `torque_force` — the one field the exporter does not use — varies
+most of all:
+
+| Bone | `spring_force` | `damping_force` | `torque_force` |
+|---|---|---|---|
+| `RearA` / `LEarA` (base) | 2.0 | 1.0 | 0.1 |
+| `REarB` / `LEarB` (middle) | 1.95 | 3.0 | 0.45 |
+| `REarC` / `LEarC` (tip) | 0.8 | 4.4 | 1.9 |
+
+**Effect of ignoring, and of the current approximation**
+
+**Exercised and visible.** Moho adds the spring motion on top of the keyed
+pose at playback time. A channel-only exporter renders the keyed pose with no
+follow-through or overlap.
+
+`--bone-dynamics` implements a damped spring pulling each bone toward its own
+keyed angle, which turns out to be the wrong driver — see
+[§ 8](#8-gaps-ranked-by-how-likely-they-are-to-show).
 
 ### 3.6 Scaling behaviour
 
@@ -421,6 +504,64 @@ time: 3 documents keyframe `anim_scale` on many bones (`Bandit` 25,
 | `offset` | unknown | possibly shifted binding weights | 5 bones, 1 doc |
 | `anim_parent` (reparenting) | n/a | none — 850/850 match static `parent` | never keyframed |
 | `squash_stretch_scaling`, `max_auto_scaling` magnitudes | n/a | scale magnitude detail | `scaling_mode` itself is now decoded and used |
+
+### The falloff shape is not the lever — measured
+
+The flexible-binding weight falloff has been flagged since the beginning as
+an unvalidated heuristic, on the grounds that the corpus never exercised a
+point genuinely straddling two bones. `moho/SketchBone/ears/` — Moho's own
+isolated render of the two ears, whose meshes each blend three bones — is the
+first reference that does. Scoring silhouette IoU over 40 frames across a
+parameterised family `strength^a / d^p`, plus a region-style Hermite falloff:
+
+| falloff | ears | arms |
+|---|---|---|
+| `1 / d` | 74.38% | 85.88% |
+| `1 / d²` (the default) | 74.32% | 85.88% |
+| `1 / d³` | 74.32% | 85.88% |
+| `strength² / d` | 74.51% | 85.88% |
+| `hermite(d / strength)` | **74.67%** | 85.88% |
+
+The whole family spans **0.4%** on the ears and is **bit-identical on the
+arms** — each arm layer names a single bone, so `Skinner.deform` normalises
+the weight away entirely and no falloff can matter there. So the residual ear
+error is **not** in the weight function, and tuning it would be fitting
+noise. This confirms the original suspicion quantitatively rather than
+removing it: the falloff remains unvalidated, but it is now known not to be
+where the remaining error lives.
+
+The ear's residual error is now identified as **linear-blend-skinning volume
+collapse**, from comparing silhouette AREA rather than position. Over frames
+74-80 of `moho/SketchBone/ears/` Moho's ear area is essentially constant
+(27,065 / 27,100 / 27,087 / 27,625 px, within 2%) while ours swings by 10%
+(22,709 / 21,411 / 24,485 / 26,296) and is smaller throughout. That is the
+signature of averaging blended *positions*: when two bones rotate apart the
+weighted mean of their images falls inside the arc, so the mesh contracts by
+an amount that varies with the inter-bone angle. It also explains why no
+weight function helped — the artifact is in the blend method, not the
+weights.
+
+Two area-preserving blends were tried and **neither is adoptable**, both
+trading position accuracy for area accuracy:
+
+| blend | ears IoU | ear area ratio | arms IoU |
+|---|---|---|---|
+| linear blend (current) | **75.97%** | 0.965 | **88.21%** |
+| circular-mean rotation + mean translation | 75.72% | 0.977 | — |
+| centre-of-rotation blend | 70.62% | 0.980 | 86.88% |
+
+Both move the area ratio toward 1.0, confirming the diagnosis, and both score
+worse overall, so the linear blend stays. Closing this properly means finding
+the scheme Moho actually uses (its behaviour is area-preserving *and*
+positionally correct, which neither of these is).
+
+What is still unexplained is the ear's lower edge swinging further than
+Moho's. Ruled out by measurement so far: falloff shape (above), every bone
+constraint field (all at defaults on the six ear bones — no control parents,
+no angle limits, no dynamics, `anim_parent` merely mirrors `parent`),
+`scaling_mode` (decoded, but those bones never scale), per-point bone binding
+(two readings, both far worse), and `flexi_bone_subset` semantics (dropping
+the subset scores 72.27%, worse than honouring it at 74.32%).
 
 ---
 
@@ -627,7 +768,7 @@ field being re-investigated later.
 | `binding_mode` | skeleton | Effectively constant: `1` on 63 of 64 skeletons, `2` on one (`OffsetBoneTool.animeproj`'s "Happy Dance"). Not a per-layer switch. |
 | `mesh.points[].parent` | mesh point | **Per-point bone binding — a real, unimplemented feature.** See below. |
 | `mesh.groups` | mesh | Point groups. Empty on all but 10 meshes (`ReparentBone` / `SelectandReparentBoneTool` hands and feet, `Closed`). Still unread. |
-| `layer.timing_offset` | layer | Shifts a layer's whole animation in time. `0` on 839 layers, **`45` on 3** — `Rabbit.animeproj`'s `ProsBox`, `PROS` and `T I  PS`. Those three are therefore 45 frames out of step in any animated export. Unread. |
+| `layer.timing_offset` | layer | Shifts a layer's whole animation in time. `0` on 839 layers, `45` on 3 — `Rabbit.animeproj`'s `ProsBox`, `PROS` and `T I  PS`. **Correcting an earlier claim here that those three are "45 frames out of step":** they are not, because all three are entirely static — zero animated channels in their whole subtree, confirmed by re-evaluating their geometry at frames 1/10/20/29 and getting identical output — and 45 is past that document's own 1–29 range. Read and counted, deliberately not applied: with nothing that animates such a layer, the sign (delay or advance?), the scope (subtree or not?) and the behaviour under an animated ancestor are all unverifiable, so applying it would be three simultaneous guesses with no test that could fail. |
 
 **Per-point bone binding (`mesh.points[].parent`) is used far more widely
 than an earlier revision of this table claimed.** `MeshPoint._build` reads
@@ -655,7 +796,7 @@ that order only for a mesh that actually uses the field, since the two orders
 are not interchangeable — handle reconstruction commutes with a similarity
 transform but not with the non-uniform scale layer transforms and
 `Skeleton.world_matrices`'s asymmetric bone scale carry. (Switching *every*
-mesh moved all five tracked SVGs, 36,119 lines in `SketchBone.svg` alone.)
+mesh moved all five sample documents' exported SVGs, 36,119 lines in `SketchBone.svg` alone.)
 
 Reading the field as "this point follows that bone rigidly" then measured
 **much worse**, so it is not enabled:
@@ -739,14 +880,116 @@ blend, which the falloff is already flagged as unvalidated for
 
 1. **Bone dynamics** — on in 6 of 19 documents, evaluated at playback,
    affects every frame away from a key. The largest real gap in this sample.
-2. **Smart Warp** — invisible here (0 files), but a document that uses it
+   **Implemented behind `--bone-dynamics`, off by default** — see
+   `Skeleton.dynamic_angles`.
+
+   The bone is modelled as a pendulum with inertia in **world** space. With
+   `pw` for the parent's world angle and `x` for the bone's own local angle:
+
+   ```
+   x'' = spring·(keyed − x) − damping·(x' + pw') − pw''
+   ```
+
+   The `pw` terms are the point. An earlier version pulled the bone toward
+   its own keyed angle and nothing else, so a bone whose `anim_angle` never
+   moves could never move — and across the corpus that is the normal case,
+   not the exception:
+
+   | Document | Dynamics on | Own `anim_angle` moves | Now responds |
+   |---|---|---|---|
+   | `BoneDynamics.animeproj` | 7 | **0** | yes, ±27.5° |
+   | `Rabbit.animeproj` | 7 | **0** | yes, ±21.7° |
+   | `WhatIsBone.animeproj` | 52 | 16 | yes, ±63.7° |
+   | `AddBone.animeproj` | 21 | **0** | no |
+   | `ControlBones.animeproj` | 2 | **0** | no |
+   | `Bandit.mohoproj` | 2 | **0** | no |
+
+   `BoneDynamics.animeproj` shows why the rewrite was needed. All six ear
+   bones hold a constant `anim_angle`, `anim_pos` and `anim_scale`; what
+   moves is their grandparent `Main` (`anim_pos` x −1.56…1.10, y −0.32…1.43
+   — the jump) and `TorsoA` (angle 250°…307°). **The ears flop because they
+   lag the parent's world motion.**
+
+   The three documents still at "no" are the ones whose dynamic bones hang
+   off a parent that only **translates**. Making those respond needs a
+   pivot-acceleration term, the natural role for `torque_force` — and that
+   was tried and rejected on evidence, twice: it spiked
+   `BoneDynamics.animeproj`'s ear tip to 81° on a single frame, and swept
+   from 0.001 to 1.0 against Moho's own render of `Bandit.mohoproj` it never
+   improved the match and at 1.0 made the tail tip worse (32.15 px → 35.76
+   px vertical error). So `torque_force` remains read and unused.
+
+   **Units are per frame, not per second.** Read as per-second, a spring of 2
+   and a damping of 1 make an oscillator so slack the parent's rotation drags
+   a bone 200° off its keyed angle and holds it there. This is a fit, not a
+   decoding.
+
+   **Bandit's tail is what the gap looks like.** Every layer of that document
+   tracks Moho's own render to 0.3–2.8 px except the two in the tail, which
+   sit 18 px (base) to 32 px (tip) off vertically — and the tail bones are
+   its only two with dynamics on. In the reference the tail's bob is a copy
+   of the body's, **lagged 4 frames** (cross-correlation 0.93 there against
+   −0.91 at zero lag) and **amplified down the chain** (6.7 px standard
+   deviation at the muzzle, 10.0 at the tail base, 15.1 at the tip). Lag plus
+   gain is a resonant oscillator. Binding was ruled out separately: all 28
+   rigid bindings, 5 subsets and all 4 falloffs leave that vertical error
+   within about 2 px of each other.
+
+   **It now has a test, and it fails.** `moho/BoneDynamics/` (29 frames,
+   Moho's own export) is the clean case: 6 of its 7 dynamic bones are the two
+   rabbit ears, no dynamic bone's own angle moves, no bone subscribes to
+   wind. Turning `--bone-dynamics` on makes the ears **worse**: mean
+   positional error 60.6 px → 62.6 px (right ear), 65.2 → 66.0 (left). The
+   model is not merely unverified — it is measurably not an improvement, and
+   that is why it stays off.
+
+   Read that with care: the baseline is bad too. With dynamics off those ears
+   are already ~60 px out, against 0.3–3.5 px for every layer of the other
+   two reference documents, so something else in that rig is wrong as well
+   and the dynamics signal is swamped. Ruled out so far: scale inheritance
+   (fixed separately — it did bring the ears from ~78 px to ~60 px), the four
+   `squash_stretch_scaling` cross-axis formulas, the four falloffs, control
+   bones (its three drivers barely move), and the skin weights themselves
+   (checked point by point — each ear point is 95 %+ dominated by its nearest
+   bone).
+
+   Cost: the state at frame F depends on every frame before it, so each call
+   simulates from the start frame. Measured end-to-end on a full Lottie
+   export — `Bandit` 6s → 9s, `WhatIsBone` ~35s → 1m45s. Moho adds
+   spring/damped secondary motion on top of the keyed pose, so ignoring it
+   makes motion read as *more* abrupt than Moho's, not less. Control bones
+   (`angle_/pos_/scale_control_parent`) are set on 9 bones across 4 of those
+   documents. **Neither is used anywhere in `SketchBone.animeproj`** — all
+   five of its skeletons (`cat_boy` 42 bones, `kafasi` 21, `el-sol` 11,
+   `el-sag` 11, `Sketch` 9) have zero of each, so neither can explain that
+   rig's ear behaviour.
+2. **Flexible-binding falloff shape** — the four candidate shapes are now
+   **distinguishable**, and they disagree. Scored with `make check-reference`
+   (sum of mean positional error over the layers each document can address):
+
+   | Falloff | SketchBone, 10 layers | Bandit `TailBase` dx | Bandit `Belly` dy |
+   |---|---|---|---|
+   | `inv_d2` (default) | **34.15** | 8.25 px | 3.02 px |
+   | `cut_d2` | 35.54 | 6.38 px | 3.02 px |
+   | `hermite` | 41.53 | 2.02 px | 1.62 px |
+   | `linear` | 43.58 | **1.89 px** | **1.59 px** |
+
+   The bounded-support shapes win every Bandit layer that blends many bones
+   and lose every comparable SketchBone layer (`kuyruk` 2.37 → 6.24 px,
+   `golge` 6.48 → 10.47 px). **So none of the four is Moho's actual
+   function.** `inv_d2` stays the default because it wins the broader
+   reference — 10 layers against 3, and the newer format.
+
+   This also explains why nothing distinguished them before: a layer where
+   one bone dominates scores *identically* under all four. `Bandit`'s `Tip`,
+   bound to just two bones, does exactly that.
+
+3. **Smart Warp** — invisible here (0 files), but a document that uses it
    loses the whole deformation silently. Detection is cheap; support is not.
-3. **`end_percent` animation** — not exercised here, common in production.
-4. **Control bones** — small in this sample, but a total miss where used.
-5. **IK with a moving target** — usually baked, occasionally not.
-6. **Independent angle (`fixed_angle`)** — 45 bones; effect unverified.
-7. **Flexible-binding falloff shape** — affects every flexible layer a
-   little; only visible where two bones overlap strongly.
+4. **`end_percent` animation** — not exercised here, common in production.
+5. **Control bones** — small in this sample, but a total miss where used.
+6. **IK with a moving target** — usually baked, occasionally not.
+7. **Independent angle (`fixed_angle`)** — 45 bones; effect unverified.
 8. **`offset`, `binding_mode == 2`, `parent_bone == -3`, `scaling_mode`** —
    undecoded, each observed in exactly one narrow place.
 
