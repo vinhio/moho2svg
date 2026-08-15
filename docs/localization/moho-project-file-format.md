@@ -242,9 +242,12 @@ dạng cùng một đối tượng "channel". Đây là cấu trúc lặp lại 
   nhận một cách trong suốt (`Channel` coi một scalar trần như một keyframe
   đơn).
 
-`moho2svg.py` đánh giá một channel bằng **nội suy tuyến tính giữa hai keyframe
+`moho2svg.py` đánh giá một channel bằng một **cubic đơn điệu giữa hai keyframe
 bao quanh**, kẹp ở cả hai đầu, bỏ qua hoàn toàn `interp`. Điều đó chính xác
-tại các keyframe và xấp xỉ giữa chúng.
+tại các keyframe và xấp xỉ giữa chúng. Hình dạng đường cong được suy ra bằng
+cách chấm điểm đầu ra render so với các frame của chính Moho, không phải được
+giải mã từ file — xem
+[`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 3.6.
 
 ### 5.2 Các loại channel và hình dạng phần tử `val`
 
@@ -287,8 +290,7 @@ khác không khớp chính xác; tổng `t == 0` thì không), và giải mã m�
 bảng: `b` hiện diện trên 182 mục, luôn đúng những mục có `im == 9`, và độ dài
 của nó bằng số thành phần của giá trị channel (1 cho `Val`, 2 cho `Vec2`, 3
 cho `Vec3`). Xem [`moho-animation-and-transform.md`](moho-animation-and-transform.md)
-§ 3 để biết phân tích đó, kể cả marker vòng lặp mang trên keyframe cuối của
-một channel.
+§ 3 để biết phân tích đó, kể cả marker vòng lặp mang trong `im`/`v1`/`v2`.
 
 ### 5.4 `split` — keyframes theo trục
 
@@ -489,11 +491,17 @@ trường không liên quan dùng chung tên `gravity` với **hình dạng khá
 (radian / độ lớn — quan sát thấy `direction: 4.712389` = 3π/2, tức hướng
 thẳng xuống); `GroupLayer.gravity` là `{x, y}` dưới dạng **các float thường**.
 `BoneLayer` cũng có một trường `wind` (`{direction, strength,
-turbulence_amplitude, turbulence_frequency}`, cũng là channels). Physics
-gravity/wind của bone hiếm — quan sát thấy trên đúng một `BoneLayer` trong
-toàn bộ mẫu (`Bandit.mohoproj`); physics gravity của group phổ biến (16
-`GroupLayer`, cả ba thế hệ định dạng). Không trường nào được `moho2svg.py`
-đọc.
+turbulence_amplitude, turbulence_frequency}`, cũng là channels).
+
+**Cả hai trường chỉ tồn tại từ format 1045**, và đó là lý do trước đây chúng
+trông có vẻ hiếm: lúc đếm lần đầu, `Bandit.mohoproj` là tài liệu 1045 duy
+nhất. Một bản lưu lại ở 1045 của `SketchBone.animeproj` từ Moho Pro 14.4 —
+tài liệu không hề dùng physics — mang `wind.strength = 100.0` trên **cả năm**
+`BoneLayer` của nó và `gravity = {x: 0, y: -10}` trên mọi `GroupLayer`. Vậy
+đây là giá trị mặc định theo từng layer mà Moho luôn ghi ra, không phải dấu
+hiệu có gì đang được mô phỏng. Cờ `wind_dynamics` trên từng bone nhiều khả
+năng mới là công tắc đăng ký (false trên mọi bone của cả hai tài liệu 1045),
+nhưng điều đó **chưa được giải mã**. Không trường nào được `moho2svg.py` đọc.
 
 **`SwitchLayer`** — `switch_keys` (một channel `String` có các mục `val` là
 **tên các layer con**) chọn con đang hoạt động; được dùng. Không dùng:
@@ -650,11 +658,12 @@ Hai giá trị mặc định đó được chọn dựa trên hai căn cứ:
   cách rõ rệt.
 
 **Chưa xác nhận đối chiếu với một bản xuất Moho của tài liệu `1021`** — không
-có SVG tham chiếu cho `Rabbit.animeproj` trong `svg/`, nên hình dạng tay nắm
-sinh ra là suy luận, không phải đo đạc. Chỉ xác nhận được rằng tài liệu bây
-giờ tải và xuất được mọi layer
-(`python3 moho2svg.py moho/Rabbit.animeproj --list`), và rằng việc tạo lại năm
-SVG tham chiếu được theo dõi cho ra file giống hệt từng byte.
+có SVG do Moho xuất làm tham chiếu cho `Rabbit.animeproj` (các SVG dưới
+`out/svg/ori/` là đầu ra của chính exporter này), nên hình dạng tay nắm sinh
+ra là suy luận, không phải đo đạc. Chỉ xác nhận được rằng tài liệu bây giờ
+tải và xuất được mọi layer
+(`python3 moho2svg.py moho/Rabbit.animeproj --list`), và rằng việc xuất lại
+các tài liệu mẫu cho ra SVG giống hệt từng byte.
 
 ### 7.4 Shapes và `edges`
 
@@ -1104,8 +1113,15 @@ Các trường bone **không** được dùng, nhóm theo cái chúng sẽ thay 
   gì — một khoảng trống **được khai thác**. Xem
   [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 6.
 - **Trạng thái editor**: `hidden`, `shy`, `selected`, `bone_label_showing`,
-  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`, `flip_h`,
-  `flip_v`.
+  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`.
+- **`flip_h` / `flip_v`** — các channel `Bool`, được một bản sửa cũ của tài
+  liệu này xếp là trạng thái editor. **Điều đó sai**: chúng phản chiếu mọi thứ
+  bone điều khiển, và giờ được áp dụng bởi `Skeleton.world_matrices` cùng cách
+  các flip riêng của một layer được áp dụng (mỗi cái phủ định một cột ma trận).
+  Được đặt trên đúng một bone trong mẫu 19-file — mắt cá `B23` của
+  `SketchBone.animeproj`, `False` → `True` tại frame 44 — nơi bỏ qua chúng làm
+  bàn chân `ayak-sol` trỏ ngược hướng trong nửa chu kỳ đi bộ. Xem
+  [`moho-rigging-and-deformation.md`](moho-rigging-and-deformation.md) § 3.
 - **`offset`** — một `Vec2` thường, được một bản sửa cũ của tài liệu này xếp
   là trạng thái editor. **Điều đó sai**: nó khác không trên 5 bones trong
   `OffsetBoneTool.animeproj` (bằng không trên 845 cái còn lại), nơi nó gần

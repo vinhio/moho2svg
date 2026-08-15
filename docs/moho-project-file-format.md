@@ -289,7 +289,7 @@ decodes part of the table: `b` is present on 182 entries, always exactly the
 ones with `im == 9`, and its length equals the number of components in the
 channel's value (1 for `Val`, 2 for `Vec2`, 3 for `Vec3`). See
 [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 3 for
-that analysis, including the cycle marker carried on a channel's last keyframe.
+that analysis, including the cycle marker carried in `im`/`v1`/`v2`.
 
 ### 5.4 `split` — per-axis keyframes
 
@@ -488,10 +488,17 @@ unrelated fields share the name `gravity` with **different shapes**:
 (radians / magnitude — observed `direction: 4.712389` = 3π/2, i.e. straight
 down); `GroupLayer.gravity` is `{x, y}` as **plain floats**. `BoneLayer` also
 has a `wind` field (`{direction, strength, turbulence_amplitude,
-turbulence_frequency}`, also channels). Bone-physics gravity/wind is rare —
-observed on exactly one `BoneLayer` in the whole sample (`Bandit.mohoproj`);
-group-physics gravity is common (16 `GroupLayer`s, all three format
-generations). Neither is read by `moho2svg.py`.
+turbulence_frequency}`, also channels).
+
+**Both fields only exist from format 1045**, which is why they looked rare:
+`Bandit.mohoproj` was the only 1045 document when they were first counted. A
+1045 re-save of `SketchBone.animeproj` from Moho Pro 14.4 — a document using
+no physics at all — carries `wind.strength = 100.0` on **all five** of its
+`BoneLayer`s and `gravity = {x: 0, y: -10}` on every `GroupLayer`. So these
+are per-layer defaults Moho always writes, not a sign that anything is being
+simulated. The per-bone `wind_dynamics` flag is the more likely subscription
+switch (false on every bone of both 1045 documents), but that is **not
+decoded**. Neither field is read by `moho2svg.py`.
 
 **`SwitchLayer`** — `switch_keys` (a `String` channel whose `val` entries are
 **child layer names**) selects the active child; used. Not used:
@@ -646,11 +653,12 @@ Those two defaults are chosen on two grounds:
   offset values, each the single most common value by a wide margin.
 
 **Not confirmed against a Moho export of a `1021` document** — there is no
-reference SVG for `Rabbit.animeproj` in `svg/`, so the handle shape this
+Moho-exported reference SVG for `Rabbit.animeproj` (the SVGs under
+`out/svg/ori/` are this exporter's own output), so the handle shape this
 produces is reasoned, not measured. Confirmed only that the document now
 loads and exports every layer
-(`python3 moho2svg.py moho/Rabbit.animeproj --list`), and that regenerating
-the five tracked reference SVGs leaves them byte-identical.
+(`python3 moho2svg.py moho/Rabbit.animeproj --list`), and that re-exporting
+the sample documents leaves the SVGs byte-identical.
 
 ### 7.4 Shapes and `edges`
 

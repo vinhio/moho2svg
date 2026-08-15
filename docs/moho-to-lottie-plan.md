@@ -12,6 +12,24 @@
 
 ---
 
+## Makefile restructure (2026-08-15)
+
+After this plan was completed, the Makefile was restructured. The aggregate
+targets `gen`, `gen-med`, `gen-fast`, `gen-raster` and `gen-lottie` no
+longer exist, and neither does `make styles.brushes` (brush textures are now
+copied with `cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/`
+instead of symlinked). Output moved under `out/`: `svg/` → `out/svg/ori/`,
+`svg-med/` → `out/svg/med/`, `svg-fast/` → `out/svg/fast/`, `svg-raster/` →
+`out/svg/raster/`, `lottie-out/` → `out/lottie/`; nothing under `out/` is
+tracked. Every export is built by a pattern rule with the output file as the
+target (`make out/svg/ori/Bandit.svg`), `make svg-all` and `make lottie-all`
+cover every project under `moho/`, `make check-lottie` depends on the three
+sample exports, and `make format/moho/NAME` writes `moho/NAME.json`. The
+historical `make gen` commands in the task steps and run logs below refer to
+the old Makefile and are kept as a record.
+
+---
+
 ## Progress
 
 This table is the single place to read overall status. Each task's own steps

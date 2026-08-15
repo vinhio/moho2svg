@@ -104,19 +104,19 @@ thuộc về cách tổ chức của bản checkout này:
 - `moho/` — bản sao cục bộ các file nguồn `.mohoproj`/`.animeproj` dùng để phát
   triển và kiểm tra hồi quy (bị gitignore — đây là các file gần như nhị phân,
   lớn, thuộc về các dự án Moho đang được kiểm thử, không thuộc về công cụ).
-- `svg/` — các SVG xuất ra tương ứng, được theo dõi trong git như đầu ra tham
-  chiếu.
-- `svg-fast/`, `svg-med/`, `svg-raster/` — bị gitignore, các bản xuất brush
-  hiệu năng thay thế của cùng các dự án (tương ứng: không có họa tiết brush,
-  mật độ dab giảm bớt, và một raster image cho mỗi shape). Xem
-  [§ 7](#7-họa-tiết-cọ-brush).
+- `out/svg/ori/` — bản xuất gốc (họa tiết brush đầy đủ); `out/svg/med/`,
+  `out/svg/fast/`, `out/svg/raster/` — các bản xuất brush hiệu năng thay thế
+  của cùng các dự án (tương ứng: mật độ dab giảm bớt, không có họa tiết brush,
+  và một raster image cho mỗi shape). Xem [§ 7](#7-họa-tiết-cọ-brush).
+- `out/lottie/` — các bản xuất Lottie (xem `moho-to-lottie-plan.md`).
 - `styles/Brushes/` — xem [Họa tiết cọ](#7-họa-tiết-cọ-brush) bên dưới.
 
-`make gen` tái tạo mọi SVG được theo dõi trong `svg/` từ file dự án tương ứng
-trong `moho/`; `make gen-fast`/`make gen-med`/`make gen-raster` làm tương tự
-vào `svg-fast/`/`svg-med/`/`svg-raster/` với, lần lượt, việc stamp brush bị
-tắt, mật độ dab giảm bớt (`BRUSH_SPACING_MUL`, mặc định 2), và nét brush raster
-theo từng shape (xem `Makefile`).
+Mọi thứ dưới `out/` đều bị gitignore. Makefile dựng bất kỳ bản xuất nào từ
+dòng lệnh — file đầu ra chính là target, ví dụ `make out/svg/ori/Bandit.svg`;
+`make svg-all` dựng mọi dự án dưới `moho/` ở cả bốn dạng svg và `make
+lottie-all` dựng bản xuất Lottie của mọi dự án. `out/svg/med/` giảm mật độ dab
+(`BRUSH_SPACING_MUL`, mặc định 2), `out/svg/fast/` tắt stamp brush,
+`out/svg/raster/` bake nét brush raster theo từng shape (xem `Makefile`).
 
 ## 6. Những điểm đặc biệt của masking
 
@@ -149,19 +149,17 @@ nhất cho các file này là chính bản cài đặt Moho, nó đi kèm mọi 
 dùng:
 
 ```bash
-make styles.brushes
+cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/
 ```
 
-Lệnh này symlink `styles/Brushes` tới thư mục brush đã cài của Moho (mặc định
-`/Applications/Moho.app/Contents/Resources/Support/Common/Brushes` trên
-macOS — sửa target `styles.brushes` trong Makefile nếu bản cài đặt của bạn ở
-nơi khác), nên không cần sao chép file thủ công. `styles/Brushes` bị gitignore,
-vì nó là symlink vào một bản cài đặt ứng dụng cục bộ, không phải nội dung kho
-lưu trữ.
+(điều chỉnh đường dẫn nếu bản cài đặt của bạn ở nơi khác). Lệnh này sao chép
+thư mục brush của Moho vào `styles/Brushes` — `cp` thường không copy được thư
+mục trên macOS, nên bắt buộc có `-R`. `styles/` là nội dung cục bộ không
+track, không phải phần của kho lưu trữ.
 
 Bất kỳ brush nào không phân giải được asset (kể cả khi `styles/Brushes` không
 tồn tại) sẽ rơi về một nét đều đặn đơn giản — không có gì thoái lui cho một
-checkout chưa chạy `make styles.brushes`.
+checkout chưa chạy lệnh sao chép.
 
 ### 7.1 Hiệu năng: cài Pillow
 
@@ -212,9 +210,10 @@ Hai cờ nữa quản lý khối lượng dab, độc lập với đường rend
   hơn, nhiều "chấm" hơn thay vì liên tục. `N=2`-`2.5` là điểm giữa hợp lý cho
   hầu hết tài liệu — vẫn là một mức giảm lớn, mà họa tiết vẫn đọc là liên tục
   ở kích thước xem bình thường.
-- **`--brush-dir ""`** (hoặc `make gen-fast`, làm chính xác điều này cho cả 5
-  dự án được theo dõi của kho này, ghi vào `svg-fast/` bị gitignore thay vì
-  `svg/`) tắt hoàn toàn việc stamp brush để có một preview nhanh, nhẹ — mọi nét
+- **`--brush-dir ""`** (hoặc pattern rule `out/svg/fast/%.svg`, làm chính
+  xác điều này cho bất kỳ dự án nào, ghi vào `out/svg/fast/` bị gitignore
+  thay vì `out/svg/ori/`) tắt hoàn toàn việc stamp brush để có một preview
+  nhanh, nhẹ — mọi nét
   có brush đều rơi về nét đơn giản hoặc (nếu tapered) ribbon của
   TaperedStrokeOutliner, cả hai đều rẻ cho mọi trình xem bất kể Pillow. Đã xác
   nhận trên SketchBone: 3.9 MB → 319 KB, và thời gian render giảm xuống dưới
@@ -277,8 +276,9 @@ web); ưu tiên đường per-dab `<use>` mặc định khi bản thân họa ti
 tới việc kết quả giữ vững thế nào khi phóng to hoặc in ở DPI cao — xem
 [§ 7.4](#74-đánh-đổi-zoomkhả-năng-co-giãn-giữa-ba-đường-render).
 
-`make gen-raster` chạy tùy chọn này cho cả 5 dự án được theo dõi của kho này,
-ghi vào `svg-raster/` bị gitignore.
+Pattern rule `out/svg/raster/%.svg` làm điều tương tự cho bất kỳ dự án nào
+(ví dụ `make out/svg/raster/Bandit.svg`), ghi vào `out/svg/raster/` bị
+gitignore.
 
 ### 7.3 Vì sao đường fallback tốn kém khi *xem*
 

@@ -104,19 +104,20 @@ tool itself, only of how this checkout is organized:
   for development and regression-checking (gitignored — these are large
   binary-ish files that belong to the Moho projects being tested, not to the
   tool).
-- `svg/` — the corresponding exported SVGs, tracked in git as reference
-  output.
-- `svg-fast/`, `svg-med/`, `svg-raster/` — gitignored, alternative brush-
-  performance exports of the same projects (no brush texture at all, thinned-
-  out dab density, and one raster image per shape, respectively). See
-  [§ 7](#7-brush-textures).
+- `out/svg/ori/` — original exports (full brush texture); `out/svg/med/`,
+  `out/svg/fast/`, `out/svg/raster/` — alternative brush-performance exports
+  of the same projects (thinned-out dab density, no brush texture at all, and
+  one raster image per shape, respectively). See [§ 7](#7-brush-textures).
+- `out/lottie/` — Lottie exports (see `moho-to-lottie-plan.md`).
 - `styles/Brushes/` — see [Brush textures](#7-brush-textures) below.
 
-`make gen` regenerates every tracked SVG in `svg/` from the corresponding
-project file in `moho/`; `make gen-fast`/`make gen-med`/`make gen-raster` do
-the same into `svg-fast/`/`svg-med/`/`svg-raster/` with, respectively, brush
-stamping disabled, thinned-out dab density (`BRUSH_SPACING_MUL`, default 2),
-and per-shape raster brush strokes (see the `Makefile`).
+Everything under `out/` is gitignored. The Makefile builds any export from
+the command line — the output file is the target, e.g.
+`make out/svg/ori/Bandit.svg`; `make svg-all` builds every project under
+`moho/` in all four svg forms and `make lottie-all` every project's Lottie
+export. `out/svg/med/` thins out dab density (`BRUSH_SPACING_MUL`, default
+2), `out/svg/fast/` disables brush stamping, `out/svg/raster/` bakes
+per-shape raster brush strokes (see the `Makefile`).
 
 ## 6. Masking quirks
 
@@ -148,19 +149,17 @@ for exactly how that name is resolved to a file). The simplest source for these 
 installation, which ships every brush it uses:
 
 ```bash
-make styles.brushes
+cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/
 ```
 
-This symlinks `styles/Brushes` to Moho's own installed brush folder (by
-default `/Applications/Moho.app/Contents/Resources/Support/Common/Brushes`
-on macOS — edit the `styles.brushes` Makefile target if your installation
-lives elsewhere), so no files need to be copied by hand. `styles/Brushes` is
-gitignored, since it is a symlink into a local application install, not
-repository content.
+(adjust the path if your installation lives elsewhere.) This copies Moho's
+brush folder into `styles/Brushes` — plain `cp` refuses to copy a directory
+on macOS, so the `-R` is required. `styles/` is untracked local content,
+not part of the repository.
 
 Any brush whose asset cannot be resolved (including when `styles/Brushes`
 does not exist at all) falls back to a plain uniform stroke — nothing
-regresses for a checkout that hasn't run `make styles.brushes`.
+regresses for a checkout that hasn't run the copy command.
 
 ### 7.1 Performance: install Pillow
 
@@ -213,9 +212,9 @@ path is active:
   than a continuous one. `N=2`-`2.5` is a reasonable middle ground for most
   documents — still a large cut, with the texture still reading as
   continuous at normal viewing sizes.
-- **`--brush-dir ""`** (or `make gen-fast`, which does exactly this for all
-  5 of this repo's tracked projects, writing to the gitignored `svg-fast/`
-  instead of `svg/`) disables brush stamping entirely for a quick,
+- **`--brush-dir ""`** (or the `out/svg/fast/%.svg` pattern rule, which does
+  exactly this for any project, writing to the gitignored `out/svg/fast/`
+  instead of `out/svg/ori/`) disables brush stamping entirely for a quick,
   lightweight preview — every brush-styled stroke falls back to a plain
   stroke or (if tapered) TaperedStrokeOutliner's ribbon, both cheap for any
   viewer regardless of Pillow. Confirmed on SketchBone: 3.9 MB → 319 KB, and
@@ -281,8 +280,9 @@ is the point and you are not size/speed-constrained. This also affects how
 the result holds up when zoomed in or printed at high DPI — see
 [§ 7.4](#74-zoom--scalability-trade-off-across-the-three-render-paths).
 
-`make gen-raster` runs this for all 5 of this repo's tracked projects,
-writing to the gitignored `svg-raster/`.
+The `out/svg/raster/%.svg` pattern rule does the same for any project
+(e.g. `make out/svg/raster/Bandit.svg`), writing to the gitignored
+`out/svg/raster/`.
 
 ### 7.3 Why the fallback path is expensive to *view*
 

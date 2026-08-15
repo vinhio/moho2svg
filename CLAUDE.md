@@ -20,6 +20,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   under `docs/`, mirroring the same filenames and structure. Their content is
   intentionally Vietnamese; every other file in this repository stays
   English.
+- `tmp/**` — scratch analysis notes, gitignored and never shipped. These are
+  written for this author to read, not for the repository, so they may be
+  Vietnamese when asked for in Vietnamese. Anything promoted out of `tmp/`
+  into a tracked location must be rewritten in English first (or placed under
+  `docs/localization/**` as a translation of an English original).
 
 
 ## What this is
@@ -54,12 +59,18 @@ Repository layout:
 - `moho2lottie.py` — the Lottie exporter (see above); reuses `moho2svg.py`
   as a library, adds no new third-party dependency (`jsonschema` is optional,
   used only by its own `--validate` flag).
-- `tools/` — verification scripts for `moho2lottie.py`:
-  `check_bezier_roundtrip.py` (the Lottie path builder agrees with the SVG
-  one) and `check_lottie_geometry.py` (an emitted Lottie file agrees with
-  what the pipeline computes directly, at any given frame — also accepts
-  `--require-gradients`/`--require-masks` to assert a feature was actually
-  exercised, not just silently skipped). Neither needs a Lottie player or a
+- `tools/` — verification scripts. `check_bezier_roundtrip.py` (the Lottie
+  path builder agrees with the SVG one) and `check_lottie_geometry.py` (an
+  emitted Lottie file agrees with what the pipeline computes directly, at any
+  given frame — also accepts `--require-gradients`/`--require-masks` to assert
+  a feature was actually exercised, not just silently skipped) both check this
+  repository against **itself**. `check_reference_frames.py` (`make
+  check-reference`) is the only one that checks it against an **outside
+  authority**: the 103 frames Moho 14.4 itself exported to `moho/track/Bandit/svg/`,
+  comparing per-group centroid travel over the document's full 25–127 range.
+  Reach for that one whenever a change touches how time or transforms are
+  read — it is what caught the channel-cycle and Smart Bone defects that every
+  self-consistent check had passed. None needs a Lottie player or a
   third-party package.
 - `docs/` — usage guide (`moho-exporting-svg.md`), file-format reference
   (`moho-project-file-format.md`), the animation/transform model
@@ -74,15 +85,16 @@ Repository layout:
   table — read this one for what is actually done versus still open).
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
   used for development/regression-checking.
-- `svg/` — the corresponding exported SVGs, tracked as reference output
-  (`make gen` regenerates them from `moho/`).
-- `svg-fast/` — gitignored, brush-free previews of the same projects
-  (`make gen-fast`) — see the performance note below.
-- `lottie-out/` — gitignored Lottie export output (`make gen-lottie` /
-  `check-lottie`), not tracked reference output.
-- `styles/Brushes/` — gitignored symlink to Moho's own installed brush
-  textures (`make styles.brushes` creates it), used to approximate textured
-  brush line styles — see `docs/moho-exporting-svg.md` § Brush textures.
+- `out/` — gitignored export output, regenerable by the Makefile pattern
+  rules: `out/svg/ori/` (original full-texture exports), `out/svg/med/`,
+  `out/svg/fast/` and `out/svg/raster/` (alternative brush-performance
+  previews — see the performance note below), and `out/lottie/` (Lottie
+  export output). Nothing under `out/` is tracked.
+- `styles/Brushes/` — untracked copy of Moho's own installed brush textures
+  (copy them with
+  `cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/`),
+  used to approximate textured brush line styles — see
+  `docs/moho-exporting-svg.md` § Brush textures.
 
 **A heavily brush-styled document can be very slow (or fail) to open in a
 browser/SVG viewer if Pillow is not installed** — not because of file size,
@@ -110,14 +122,16 @@ recovering most of the lost detail at 2x, near-parity with the per-dab
 <use> path at 3x, for a file size that grows roughly with N² while render
 time barely moves; 2.0 balances this against staying smaller/faster than
 `<use>` on every document tested; not noticeable at all on a softer texture
-like "yanak"). `make gen-raster` runs it for all 5 tracked projects into the
-gitignored `svg-raster/`.
+like "yanak"). Build the raster form of any project with
+`make out/svg/raster/<Project>.svg` (`make svg-all` covers every project in
+`moho/` in all four svg forms).
 
 Independent of which render path is active, two flags manage dab *volume*
 itself: `--brush-spacing-mul N` (thin out dab density, e.g. `N=4` cut
-SketchBone to 4,502 dabs at ~900px width; `make gen-med` uses this at
-`BRUSH_SPACING_MUL=2` by default) and `--brush-dir ""` / `make gen-fast`
-(disable brush stamping entirely, ~0.1s, on any of the three render paths).
+SketchBone to 4,502 dabs at ~900px width; the `out/svg/med/%.svg` rule uses
+this at `BRUSH_SPACING_MUL=2` by default) and `--brush-dir ""` (disable brush
+stamping entirely, ~0.1s, on any of the three render paths; the
+`out/svg/fast/%.svg` rule does exactly this).
 
 **`.mohobrush` files are ZIP archives, not images or a custom binary format**,
 despite the extension — confirmed by extracting and parsing all 101 shipped
@@ -179,10 +193,10 @@ python3 moho2lottie.py Project.mohoproj --out Project.json --frame 0 # a single 
 python3 moho2lottie.py Project.mohoproj --out Project.json --validate # + schema-validate the output (needs `pip install jsonschema`)
 ```
 
-`make gen-lottie` / `make check-lottie` run the same exporter against the
-tracked sample projects and the two scripts under `tools/` — see
-`docs/moho-to-lottie-plan.md` Task 8 for what `check-lottie` actually
-asserts.
+`make lottie-all` exports every project under `moho/`; `make check-lottie`
+builds the three sample projects' Lottie exports and runs the two scripts
+under `tools/` — see `docs/moho-to-lottie-plan.md` Task 8 for what
+`check-lottie` actually asserts.
 
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and

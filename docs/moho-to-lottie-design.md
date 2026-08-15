@@ -47,8 +47,10 @@ Success means all of the following:
 1. For every frame in the document's range, the Lottie file draws the same
    artwork that `python3 moho2svg.py --combined --frame N` draws today.
    "Same" is checked numerically, not by eye — see [§ 8](#8-verification).
-2. The five tracked reference SVGs in `svg/` still regenerate byte-identical
-   after the shared refactor in [§ 3](#3-changes-to-moho2svgpy).
+2. The exported SVGs still come out byte-identical to the pre-refactor
+   output after the shared refactor in
+   [§ 3](#3-changes-to-moho2svgpy) (the Makefile builds them into
+   `out/svg/ori/`).
 3. The output validates against `lottie/lottie.schema.json`.
 4. No new required third-party dependency.
 
@@ -79,7 +81,7 @@ Non-goals are listed in [§ 2.2](#22-out-of-scope-for-v1).
 | `ImageLayer` | 15 layers in one document. `moho2svg.py` already drops them because it is a vector-only exporter. Adding them means a raster asset pipeline, the same work that brush textures were excluded for. |
 | Boolean shape combination (`combo_mode`) | Only **16 shapes in all 19 documents** use a non-zero value (14 intersect, 2 union), all in `Bandit.mohoproj`. lottie-web's support for the `mm` merge element is poor. v1 draws these shapes with their plain outline and logs a warning naming each one. |
 | Smart Warp | Not decoded anywhere in this repository, and no sample document uses it. |
-| Cycle markers, `interp` easing | `moho2svg.py` itself ignores both (linear interpolation, no cycling). v1 inherits that behaviour rather than diverging from the renderer it is verified against. |
+| `interp` easing | `moho2svg.py` itself ignores it (monotone-cubic interpolation instead of Moho's own undecoded curve). v1 inherits that behaviour rather than diverging from the renderer it is verified against. Cycle markers used to be listed here too; they are now decoded and applied by `Channel` itself, so both exporters cycle - see `moho-animation-and-transform.md` § 3.4. |
 | Rigid-body physics (`physics.enabled` with `physics.static == false`) | `moho2svg.py` already ignores physics, on the stated assumption that "none of them affect a flat vector export of a single frame" - true for a single frame, but not for an animated Lottie export: `Bandit.mohoproj`'s own top-level `BoneLayer` is a dynamic physics body, and its keyframed channels alone (all ending by frame 41-90) do not account for the screen-spanning motion Moho's own render shows across its full 25-127 frame range. Neither module runs a physics simulation, so an affected layer renders at its rest pose on every sampled frame; v1 logs a counted warning naming each one instead of silently producing a static-looking layer. |
 
 Every exclusion must produce a **counted warning on stderr**, not silence. A
@@ -381,9 +383,11 @@ The plan therefore leans on checks that need neither.
 ### 8.1 The SVG regression gate
 
 After the `walk_render_tree` extraction in [§ 3.2](#32-one-shared-tree-walk),
-`make gen` must regenerate all five tracked SVGs **byte-identical**. This is a
-strong gate: it exercises the full walk, including the Smart Bone context
-ordering, across five real documents.
+the exported SVGs must stay **byte-identical** to the pre-extraction output.
+This is a strong gate: it exercises the full walk, including the Smart Bone
+context ordering, across five real documents. (The gate ran as `make gen` at
+the time; the Makefile now builds the same SVGs into the gitignored
+`out/svg/ori/`.)
 
 ### 8.2 The geometry equivalence check
 
@@ -422,14 +426,14 @@ in the schema at all.
 
 A small preview page loading a locally vendored `lottie-web` build, showing
 the animation beside `moho2svg.py`'s SVG at the same frame, closes that gap.
-The vendored player is gitignored, like `styles/Brushes/`.
+The vendored player is gitignored, like `out/` and `moho/`.
 
 ### 8.5 Make targets
 
-- `make gen-lottie` — export all tracked projects to `lottie-out/`
-  (gitignored at first; promoted to tracked reference output once the geometry
-  check passes consistently).
-- `make check-lottie` — run the geometry equivalence check of
+- `make lottie-all` — export every project under `moho/` to `out/lottie/`
+  (gitignored).
+- `make check-lottie` — build the sample projects' lottie exports and run
+  the geometry equivalence check of
   [§ 8.2](#82-the-geometry-equivalence-check) over a sample of frames.
 
 ---

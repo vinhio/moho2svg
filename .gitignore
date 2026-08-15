@@ -15,17 +15,8 @@ lottie/*
 !lottie/lottie.schema.json
 !lottie/schema
 
-# Symlink to the Moho app's installed brush textures (make styles.brushes)
-styles/Brushes
-svg/png/
-
-# Preview exports (make gen-med / gen-fast / gen-raster) - not tracked reference output
-svg-med/
-svg-fast/
-svg-raster/
-
-# Lottie export output (make gen-lottie / check-lottie) - not tracked reference output
-lottie-out/
+# Export output - every svg/lottie file is regenerable by the Makefile rules
+out/
 
 # Scratch analysis notes
 tmp/

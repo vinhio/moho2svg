@@ -33,6 +33,16 @@ the full reasoning and evidence behind every formula and constant, and
   a document with textured brush styles still exports correctly, but the
   result can be very slow (or fail) to open in a browser/SVG viewer. See
   [`docs/moho-exporting-svg.md` § 7](docs/moho-exporting-svg.md#7-brush-textures).
+- **Moho's brush textures, optional** (only needed for documents that use
+  textured brush strokes) — copy them from a local Moho install:
+
+  ```bash
+  cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/
+  ```
+
+  The exporter reads them from `styles/Brushes/` by default (`--brush-dir`
+  overrides). `-R` is required: plain `cp` refuses to copy a directory on
+  macOS.
 
 ## Quick start
 
@@ -79,17 +89,16 @@ reference, typical workflows, and the brush-texture render options
 
 - `moho2svg.py` — the tool itself; a single file, no build system.
 - `docs/` — usage guide and file-format reference (see above).
-- `Makefile` — `make gen` regenerates the tracked reference SVGs in `svg/`
-  from the project files in `moho/`; `make gen-fast`/`gen-med`/`gen-raster`
-  produce alternative brush-performance previews (see
-  [`docs/moho-exporting-svg.md` § 7](docs/moho-exporting-svg.md#7-brush-textures));
-  `make styles.brushes` symlinks `styles/Brushes/` to Moho's own installed
-  brush textures.
-- `moho/`, `styles/Brushes/`, `svg-fast/`, `svg-med/`, `svg-raster/`,
-  `tmp/` — gitignored local/generated content (source project files, a
-  symlink into a local Moho install, and various preview/scratch output);
-  not part of the tool itself.
-- `svg/` — exported SVGs tracked in git as reference output.
+- `Makefile` — pattern rules build any export by name from the command
+  line, e.g. `make out/svg/ori/Bandit.svg`; `make svg-all`/`make lottie-all`
+  build every project under `moho/` in every export form; `make check-lottie`
+  and `make check-reference` verify the exporters; `make format/moho/Bandit`
+  pretty-prints one project to `moho/Bandit.json`. Run `make` with no target
+  for the full list with examples.
+- `moho/`, `out/`, `tmp/` — gitignored local content (source project files,
+  all svg/lottie export output, scratch notes); not part of the tool itself.
+- `styles/Brushes/` — Moho's brush textures, copied in locally (see
+  Requirements); untracked, not part of the tool itself.
 
 ## Known limitations
 
