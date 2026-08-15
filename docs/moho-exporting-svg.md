@@ -154,8 +154,7 @@ cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/
 
 (adjust the path if your installation lives elsewhere.) This copies Moho's
 brush folder into `styles/Brushes` — plain `cp` refuses to copy a directory
-on macOS, so the `-R` is required. `styles/` is untracked local content,
-not part of the repository.
+on macOS, so the `-R` is required. `styles/` is tracked in the repository.
 
 Any brush whose asset cannot be resolved (including when `styles/Brushes`
 does not exist at all) falls back to a plain uniform stroke — nothing

@@ -154,8 +154,7 @@ cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/
 
 (điều chỉnh đường dẫn nếu bản cài đặt của bạn ở nơi khác). Lệnh này sao chép
 thư mục brush của Moho vào `styles/Brushes` — `cp` thường không copy được thư
-mục trên macOS, nên bắt buộc có `-R`. `styles/` là nội dung cục bộ không
-track, không phải phần của kho lưu trữ.
+mục trên macOS, nên bắt buộc có `-R`. `styles/` được track trong kho lưu trữ.
 
 Bất kỳ brush nào không phân giải được asset (kể cả khi `styles/Brushes` không
 tồn tại) sẽ rơi về một nét đều đặn đơn giản — không có gì thoái lui cho một

@@ -98,7 +98,7 @@ reference, typical workflows, and the brush-texture render options
 - `moho/`, `out/`, `tmp/` — gitignored local content (source project files,
   all svg/lottie export output, scratch notes); not part of the tool itself.
 - `styles/Brushes/` — Moho's brush textures, copied in locally (see
-  Requirements); untracked, not part of the tool itself.
+  Requirements); tracked with the repository, not part of the tool itself.
 
 ## Known limitations
 

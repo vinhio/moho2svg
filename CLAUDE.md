@@ -90,7 +90,8 @@ Repository layout:
   `out/svg/fast/` and `out/svg/raster/` (alternative brush-performance
   previews — see the performance note below), and `out/lottie/` (Lottie
   export output). Nothing under `out/` is tracked.
-- `styles/Brushes/` — untracked copy of Moho's own installed brush textures
+- `styles/Brushes/` — copy of Moho's own installed brush textures, tracked
+  in this repository
   (copy them with
   `cp -R /Applications/Moho.app/Contents/Resources/Support/Common/Brushes styles/`),
   used to approximate textured brush line styles — see
