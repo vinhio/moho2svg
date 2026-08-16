@@ -1465,3 +1465,166 @@ lottie-web beside `svg/Bandit.svg`. Until that happens, the exporter is
 verified to be *self-consistent with the SVG writer and schema-valid*, which
 is a strong claim, but not the same as *correct in a player*. Say so in any
 report of this work.
+
+**UPDATE - this has now happened once** (see "Post-plan addition: missing
+keyframe easing" below): `lottie-web` 5.13.0, loaded via a headless browser,
+against `out/lottie/Bandit.json`. Q1/Q2 above are STILL open - the session
+that did this was chasing a different, since-fixed defect and did not confirm
+either one - but the exercise is no longer entirely hypothetical: a real
+player has now rendered actual output from this exporter, at least once.
+
+### Post-plan addition: boolean shape combination (`combo_mode`)
+
+Listed as out of scope for v1 in the design doc's § 2.2 (16 shapes across
+the corpus, all in `Bandit.mohoproj`, `lottie-web`'s poor support for the
+`mm` merge element cited as the reason). Implemented afterward using a
+DIFFERENT Lottie primitive than the one the design doc rejected: not `mm`
+merge paths, but the SAME layer-level `masksProperties` mechanism Task 6
+already built for cross-layer masking - well-supported, unlike `mm`. A
+combo_mode==3 (intersect) shape is split out into its own Lottie layer,
+masked to the union of its own group's combo_mode 0/1 (base) members - see
+`LottieExporter._split_boolean_groups`/`_split_into_chunks`/
+`_group_mask_entries`, and `_combined_mask_properties` for the one case
+(a multi-member base group on a layer that ALSO carries a cross-layer
+mask) that cannot be expressed exactly with Lottie's sequential mask-mode
+chaining and falls back to a counted warning instead. Verified: bounding
+box of the previously-unclipped fill no longer escapes its group's base
+union (confirmed directly on `Leg_F`'s `S5`/`S6`, the shapes that
+motivated this work - their fills used to bleed up to ~90px past the
+leg's own outline), `tools/check_lottie_geometry.py` updated to model the
+same layer-splitting rule and passes, and every other sample document
+(none of which uses combo_mode) produces byte-identical output to before
+this change.
+
+### Post-plan addition: missing keyframe easing (`i`/`o`)
+
+Found while trying to independently verify the `combo_mode` fix above in an
+actual player, since a report of layers vanishing partway through the
+animation (`Head_DarkBlue`, `Head_DarkBlue 2`, `Eye_Upper`, `Eye_Back`, from
+frame 86 on) could not be reproduced through geometry/mask-math analysis
+alone - the raw per-frame fill and mask bounding boxes, visible-area ratios
+(rasterized fill ∩ mask), and mask-source winding signs all stayed exactly
+where expected straight through frame 86 with nothing resembling a cliff.
+That absence of any anomaly in the data was itself the signal to stop
+reasoning about geometry and go look at an actual renderer.
+
+Loaded `out/lottie/Bandit.json` in `lottie-web` 5.13.0 (`renderer: 'svg'`)
+via a headless browser: EVERY `<path>` in the DOM - not just the four
+reported layers, not just frames past 86 - had no `d` attribute at all,
+fill or mask alike, at every frame checked including frame 0. Isolated to a
+hand-built two-keyframe Lottie file with no connection to this codebase:
+`lottie-web` renders nothing at all for an `"a": 1` (animated) property
+whose keyframes omit `i`/`o` (temporal easing) - not merely wrong
+interpolation, no value at any frame - even though `properties/base-keyframe`
+in `lottie.schema.json` marks both optional, and this writer's own
+`--validate` already passed without them. `LottieExporter._path_property`,
+`_scalar_property` and `_point_property` (and therefore
+`_finalize_mask`/`_group_mask_entries`, which build their entries through
+`_path_property`) had never emitted either field - a gap present since Task
+4 first added keyframing, undetected until now because nothing in this
+project had loaded its output in a real player before.
+
+Fixed by a new `LottieExporter._keyframes` helper adding LINEAR easing
+(`LINEAR_EASE_OUT = {"x":[0],"y":[0]}`, `LINEAR_EASE_IN = {"x":[1],"y":[1]}`)
+to every keyframe but the last, used by all three property builders.
+Linear is not merely a safe default: every keyframe already sits at its own
+exact per-integer-frame sample, so a straight line between two already-exact
+points is the correct interpolation, not an approximation of one. Verified:
+re-loaded the same document in the same player after the fix - every
+checked frame (0, 61 i.e. absolute 86, 111) now renders with real path data
+throughout, `Head_DarkBlue`/`Eye_Upper`/`Eye_Back` included; schema
+validation and `tools/check_lottie_geometry.py` still pass for all three
+sample documents; a from-scratch export of a document with NO animated
+combo_mode (`SketchBone.animeproj`) confirms the fix is purely additive
+(new `i`/`o` keys only, no existing field changed).
+
+This is unrelated to the `combo_mode` fix above and would have affected
+every animated property this exporter has ever emitted, in any document,
+in any real player that enforces easing the way `lottie-web` does - not
+something the original bug report's specific four layers or frame-86 cutoff
+pointed to on its own. Whether it fully explains that original report is
+still open; it is, at minimum, the first real defect this exporter's output
+has ever been confirmed to trigger in an actual Lottie player, and it fully
+explains why a real player would show broken output where every geometry-
+level check in this repository kept passing.
+
+### Post-plan addition: the three gaps the `combo_mode`/masking work left open
+
+Three narrower gaps were left after the `combo_mode` and `i`/`o` easing
+fixes above - all three are now closed:
+
+1. **combo_mode==1 (union) stroke merging.** A union member's own outline
+   used to redraw the boundary it shares with its group's other base
+   members - visible as a spurious seam line down the middle of what
+   should read as one shape (Leg_F's S1/S2). Fixed via a new masked chunk
+   per outline-bearing base member, one per `LottieExporter._split_into_
+   chunks`' new `"union_exclude"` kind: `_combo_mode_union_mask_
+   properties` builds a padded bounding box, subtracts every OTHER base
+   member's fill (mode "s"), then adds back each one's own outline as a
+   filled band at the group's stroke width (mode "a") - the Lottie
+   counterpart of `ShapeGroupRenderer._mask_subtraction` in
+   `moho2svg.py`, band included (the "so the two ends meet instead of
+   stopping short at the crossing" refinement, not just the coarser
+   box-minus-fill version). The band itself is built once per qualifying
+   shape in `_accumulate_frame`/`_prepare_union_band_widths`, using
+   `TaperedStrokeOutliner.build_bezier` at the GROUP's (not the
+   individual member's) stroke width - matching Moho's own "every union
+   member's outline uses the base member's line style" rule.
+2. **combo_mode==3 group whose base needs >1 shape, on a cross-masked
+   layer.** Previously fell back to the cross-layer mask alone
+   (`combo_mode_unclippable`), dropping the intra-group intersect - not
+   reachable with Lottie's flat sequential masksProperties list (see
+   `_combined_mask_properties`'s own docstring for why: a lone "i" entry
+   can only narrow the running region once, and nothing after it can
+   reconstruct "intersect with a union of several shapes"). Made EXACT,
+   not just narrower, via `_nested_group_mask_layer`: the combo_mode==3
+   chunk's own content is wrapped in a precomposition asset, masked
+   INSIDE it by its own exact group union (`_group_mask_entries`, always
+   correct regardless of member count), while the cross-layer mask
+   applies to the OUTER layer that references that precomp - two
+   independent masking passes composed by nesting, a standard Lottie/AE
+   technique unrelated to the `mm` merge-path operator the design doc's
+   § 2.2 rejected combo_mode support over in the first place. Verified
+   structurally with a synthetic multi-shape-base + cross-mask scenario
+   (hand-built, since NO document in this repository's corpus actually
+   exercises the combination - Bandit.mohoproj's own Eye_Upper/Eye_Back
+   both happen to have single-shape bases) - the resulting JSON has the
+   right shape (asset + precomp-referencing layer with `masksProperties`),
+   though the full document fails `lottie.schema.json`'s own asset
+   `oneOf` on an UNRELATED pre-existing schema looseness: confirmed a
+   genuine After-Effects-exported precomp asset in this repo's own
+   `lottie/examples/CoolPickleWalk.pretty.json` fails the identical check
+   (no discriminator distinguishes "precomposition" from "sound" when an
+   asset carries only fields neither schema marks `required`) - not
+   something introduced here. `combo_mode_unclippable` no longer exists;
+   there is no remaining case where this exporter gives up on combo_mode.
+3. **mask_stroke_exclusion.** A cross-layer mask source's own outline
+   (`masking == 2`) used to contribute only its bare fill to the mask,
+   unlike the SVG writer's `Exporter._mask_element` (which carves the
+   source's own stroke band back OUT of the mask so it stays visible on
+   top of whatever it masks - see the module docstring's MASKING
+   section). Fixed by extending `Exporter._mask_source_shapes_bezier`
+   itself (moho2svg.py, shared with any future Lottie-shaped consumer) to
+   return each source's exclusion band as filled geometry too
+   (`TaperedStrokeOutliner.build_bezier` at that source's own uniform
+   stroke width - the same restriction `_mask_source_shapes`'s SVG
+   version already applies: brush-styled or tapered outlines are still
+   skipped, unconfirmed geometry for those). `LottieExporter.
+   _finalize_mask` appends these bands as "s" (subtract) entries after
+   the sources' own "a" (union) entries, mirroring `_mask_element`'s own
+   "fill painted white, then the source's own stroke painted black on
+   top" order - independent of paint order either way, exactly like the
+   SVG fix. The `mask_stroke_exclusion` warning is repurposed (was: "not
+   implemented"; now: "band came back empty" - an anomaly that should not
+   fire for any non-degenerate outline) rather than removed, since a
+   silently-empty exclusion is still worth surfacing if it ever happens.
+
+Verified: `make check-lottie` (bezier roundtrip + geometry checks for all
+three sample documents, `tools/check_lottie_geometry.py` itself updated to
+model the same `"union_exclude"` chunk-splitting rule) and `make
+check-reference` (SVG side, untouched by any of this) both still pass;
+schema validation passes on the real `Bandit.json` (37 layers, 0 assets -
+item 2's precomp path stays dormant for every document in this corpus);
+`SketchBone.animeproj` (no combo_mode at all) produces byte-identical
+layer/asset counts to before this work, confirming zero effect on
+documents these fixes do not apply to.

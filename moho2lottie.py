@@ -16,9 +16,47 @@ docs/moho-to-lottie-design.md for why, and for what that costs in file size.
 Deliberately out of scope for this exporter (see docs/moho-to-lottie-design.md
 section 2.2, and the corresponding counted warnings on stderr at the end of
 an export): brush-textured strokes (drawn as a plain uniform stroke
-instead), boolean shape combination via combo_mode (drawn as a plain,
-unclipped outline), ImageLayer, Smart Warp, and layers driven by Moho's own
+instead), ImageLayer, Smart Warp, and layers driven by Moho's own
 rigid-body physics simulation (rendered at their rest pose on every frame).
+
+Boolean shape combination (`combo_mode`) IS implemented, EXACTLY, for every
+case observed in this repository's corpus (see
+LottieExporter._split_boolean_groups/_split_into_chunks):
+
+  - combo_mode==3 (intersect): split into its own Lottie layer, clipped
+    with `masksProperties` to the union of its own group's combo_mode 0/1
+    (base) members' geometry - the Lottie counterpart of
+    ShapeGroupRenderer._mask_union in moho2svg.py. When that base union
+    needs more than one shape AND the layer ALSO carries a cross-layer
+    mask (Moho's `masking`/`group_mask`), a flat sequential masksProperties
+    list cannot express "intersect with a union of several shapes" at all -
+    see _combined_mask_properties's own docstring - so
+    _nested_group_mask_layer composes the two constraints exactly instead,
+    via a precomposition (two independent masking passes, nested, rather
+    than one flat list trying to express both).
+  - combo_mode==1 (union): a member's FILL needs no special handling
+    (moho2svg.py's own _render_shape does not clip a union member's fill
+    either). Its STROKE is excluded from redrawing the boundary shared
+    with every OTHER base member in its group - the Lottie counterpart of
+    ShapeGroupRenderer._mask_subtraction - via its own masked chunk (see
+    _combo_mode_union_mask_properties); the exclusion band that avoids a
+    notch right at the seam is built once per qualifying shape in
+    _accumulate_frame/_prepare_union_band_widths.
+
+The one remaining approximation is on the CROSS-layer masking side, not
+combo_mode: Exporter._mask_source_shapes_bezier's own exclusion band
+(_finalize_mask, item 3 in the same body of work) is skipped, with a
+counted warning, only if TaperedStrokeOutliner.build_bezier itself returns
+nothing for a non-degenerate source outline - not expected to ever fire.
+
+Every animated (`"a": 1`) property this writer emits - shape paths, stroke
+widths, gradient points, mask paths - carries linear `i`/`o` keyframe
+easing (see LottieExporter._keyframes). Confirmed the hard way, outside
+this codebase, that lottie-web renders NOTHING for an animated property
+whose keyframes omit it (not merely the wrong interpolation - no value at
+any frame), even though the schema marks both fields optional. See
+_keyframes's own docstring for the reproduction and why linear is the
+exact right choice here, not just a safe default.
 """
 
 import argparse
@@ -46,18 +84,22 @@ SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # docstring's "deliberately out of scope" paragraph for the reasoning behind
 # each one.
 WARNING_EXPLANATIONS = {
-    "combo_mode": "shape(s) with boolean combination (combo_mode != 0) drawn "
-                  "as a plain, unclipped outline",
+    "combo_mode_unknown": "shape(s) with an unrecognised combo_mode (not "
+                          "0/1/3) drawn as a plain replace shape instead - "
+                          "matches moho2svg.py's own ShapeGroupRenderer."
+                          "_render_shape fallback",
     "brush": "shape(s) with a textured brush outline drawn as a plain "
              "uniform stroke instead",
     "gradient_too_few_stops": "gradient fill(s) with fewer than 2 stops drawn "
                               "as a flat colour instead (matches "
                               "Exporter._build_gradient's own SVG fallback)",
-    "mask_stroke_exclusion": "masked layer(s) whose mask source has its own "
-                             "outline - the SVG writer carves that source's "
-                             "stroke band back out of the mask so it stays "
-                             "visible on top; this writer draws a plain "
-                             "union mask instead, without that carve-out",
+    "mask_stroke_exclusion": "mask source(s) with a nonzero exclude-width whose "
+                             "exclusion band came back empty from "
+                             "TaperedStrokeOutliner.build_bezier - unexpected "
+                             "for a non-degenerate, non-tapered, non-brush "
+                             "outline; that source's own stroke may paint over "
+                             "by whatever it masks instead of staying carved out "
+                             "(see LottieExporter._finalize_mask)",
     "timing_offset": "layer(s) carrying a non-zero timing_offset, which shifts "
                      "their animation in time - not applied, because nothing in "
                      "the sample corpus animates such a layer, so the sign and "
@@ -84,6 +126,14 @@ LINE_CAPS = {"butt": 1, "round": 2, "square": 3}
 # and any ring-shaped fill would fill in solid the same way.
 FILL_RULE_EVEN_ODD = 2
 
+# Linear (no-ease) keyframe easing, in Lottie's normalised time/value space
+# (properties/easing-handle: x runs 0->1 across the segment's own time span,
+# y runs 0->1 across its own value span) - see LottieExporter._keyframes for
+# why every animated property this writer emits needs this on every
+# non-final keyframe, not just an optional nicety.
+LINEAR_EASE_OUT = {"x": [0], "y": [0]}
+LINEAR_EASE_IN = {"x": [1], "y": [1]}
+
 
 def identity_transform() -> dict:
     """Lottie's neutral transform: no anchor, no move, no rotation, full
@@ -107,6 +157,17 @@ class LottieExporter:
         self.document = document
         self.exporter = Exporter(document, settings)
         self.warnings: Counter = Counter()
+        # Precomposition assets - see _nested_group_mask_layer for the one
+        # case that needs one (a combo_mode==3 group mask that itself needs
+        # more than one shape, on a layer that ALSO carries a cross-layer
+        # mask). Empty for every document that never hits that case, which
+        # is every sample document in this repository except Bandit.mohoproj.
+        self._assets: list = []
+        self._asset_counter: int = 0
+
+    def _next_asset_id(self) -> int:
+        self._asset_counter += 1
+        return self._asset_counter
 
     def export(self, frames, include_hidden: bool = False) -> dict:
         """Return the Lottie document as a plain dict.
@@ -128,7 +189,7 @@ class LottieExporter:
             "op": float(self.document.end_frame + 1),
             "w": int(self.document.width),
             "h": int(self.document.height),
-            "assets": [],
+            "assets": self._assets,
             "layers": layers,
         }
 
@@ -227,6 +288,7 @@ class LottieExporter:
         accumulators: dict = {}               # id(layer) -> list of per-shape accumulators
         mask_data: dict = {}                  # id(layer) -> {"has_mask": bool|None, "per_frame": [...]}
         active_frames: dict = {}              # id(layer) -> frame VALUES it was a "mesh" event on
+        union_band_widths: dict = {}          # id(layer) -> {id(shape): stroke_width_px}
         for frame in frames:
             mask_stack: list = []
             for item in walk_render_tree(self.exporter, frame, include_hidden):
@@ -248,8 +310,10 @@ class LottieExporter:
                     accumulators[lid] = []
                     mask_data[lid] = {"has_mask": None, "per_frame": []}
                     active_frames[lid] = []
+                    union_band_widths[lid] = self._prepare_union_band_widths(item.layer.mesh, frame)
                 active_frames[lid].append(frame)
-                self._accumulate_frame(item, frame, accumulators[lid], first_time)
+                self._accumulate_frame(item, frame, accumulators[lid], first_time,
+                                       union_band_widths[lid])
 
                 active_mask = mask_stack[-1] if mask_stack else None
                 applies = (not item.exempt) and active_mask is not None
@@ -278,12 +342,9 @@ class LottieExporter:
             for start, end in self._windows(layer_frames):
                 window_frames = layer_frames[start:end]
                 window_accs = self._slice_accumulators(accumulators[lid], start, end)
-                shapes = self._finalize_shapes(layer, window_accs, window_frames)
-                if not shapes:
-                    continue
-                mask_properties = None
+                cross_mask = None
                 if info["has_mask"]:
-                    mask_properties = self._finalize_mask(
+                    cross_mask = self._finalize_mask(
                         layer, info["per_frame"][start:end], window_frames)
                 # A single-frame preview export (`--frame N`, len(frames) ==
                 # 1) is a still, not a window: it should hold for the whole
@@ -296,7 +357,53 @@ class LottieExporter:
                     ip, op = self.document.start_frame, self.document.end_frame + 1
                 else:
                     ip, op = window_frames[0], window_frames[-1] + 1
-                collected.append(self._shape_layer(layer.name, shapes, ip, op, mask_properties))
+
+                # One Moho mesh layer normally becomes one Lottie layer, but
+                # a combo_mode==3 (intersect) group, or a combo_mode 0/1
+                # (union) group with more than one member, each split it
+                # into several - see _split_boolean_groups/_split_into_
+                # chunks for the three chunk kinds this produces. The
+                # common case (no combo_mode anywhere in this mesh)
+                # produces exactly one "plain" chunk covering the whole
+                # layer, same as before this split existed.
+                groups = self._split_boolean_groups(window_accs)
+                chunks = self._split_into_chunks(groups)
+                multi = len(chunks) > 1
+                for chunk_index, chunk in enumerate(chunks):
+                    kind = chunk["kind"]
+                    if kind == "union_exclude":
+                        member = chunk["member"]
+                        name0 = member["name"]
+                        shapes = [self._finalize_outline_group(layer, member, window_frames, name0)]
+                        mask_properties = self._combo_mode_union_mask_properties(
+                            layer, member, chunk["others"], window_frames, cross_mask)
+                    else:
+                        shapes = self._finalize_shapes(
+                            layer, chunk["accs"], window_frames,
+                            skip_outline=chunk.get("skip_outline", frozenset()))
+                        if not shapes:
+                            continue
+                        if kind == "clip":
+                            mask_properties = self._combined_mask_properties(
+                                layer, cross_mask, chunk["base"], window_frames)
+                        else:                                  # "plain"
+                            mask_properties = cross_mask
+                    # "#N" rather than " N" - a space-separated digit suffix
+                    # could collide with another Moho layer's own name (e.g.
+                    # this mesh's own combo_mode split of "Leg_F" landing on
+                    # chunk index 2 must not produce the string "Leg_F 2",
+                    # which is a DIFFERENT layer's actual name in this same
+                    # document).
+                    name = f"{layer.name}#{chunk_index}" if multi else layer.name
+                    if kind == "clip" and mask_properties is None:
+                        # _combined_mask_properties's own "needs nesting"
+                        # signal - see _nested_group_mask_layer.
+                        group_entries = self._group_mask_entries(
+                            layer, chunk["base"], window_frames)
+                        collected.append(self._nested_group_mask_layer(
+                            shapes, group_entries, cross_mask, ip, op, name))
+                        continue
+                    collected.append(self._shape_layer(name, shapes, ip, op, mask_properties))
         collected.reverse()                  # Moho back-to-front -> Lottie front-to-back
         for index, layer in enumerate(collected, start=1):
             layer["ind"] = index
@@ -376,28 +483,352 @@ class LottieExporter:
         The exclude-width carve-out Exporter._mask_element applies on the
         SVG side (a mask source's own stroke band is cut back OUT of the
         mask so it stays visible on top of whatever the mask clips - see
-        Exporter._mask_source_shapes's own docstring) is NOT reproduced
-        here. Lottie's mask model has only filled shapes, no "stroke this
-        path as a mask" primitive, so replicating it would mean building a
-        uniform-width stroke-band polygon per masked source - a project of
-        its own for a narrow effect, measured at 16 of 180 mask source
-        shapes (9%) across this repository's sample documents. Counted
-        (mask_stroke_exclusion), not silently dropped.
+        Exporter._mask_source_shapes's own docstring) IS reproduced here:
+        Exporter._mask_source_shapes_bezier already built each source's
+        exclusion band as filled Lottie geometry (self.tapered_outliner.
+        build_bezier at that source's own uniform stroke width), since
+        Lottie's mask model has only filled shapes, no "stroke this path
+        as a mask" primitive the way an SVG <mask> does. Every source's own
+        FILL entries (mode "a", union) come first, exactly matching the SVG
+        writer's own paint order ("each source shape's fill is painted
+        white... then... painted AFTER, so it wins" - Exporter._mask_element),
+        then every source's own exclusion band is appended (mode "s",
+        subtract), carving that band back OUT of the accumulated union
+        regardless of layer order - the same "independent of paint order"
+        property _mask_element gets from painting the band ON TOP in SVG.
         """
-        for beziers, exclude_width in per_frame_sources[0]:
-            if exclude_width > 0:
-                self.warnings["mask_stroke_exclusion"] += 1
-
-        # per_frame_sources[f] is a list of (beziers, exclude_width) - one
-        # per mask-source SHAPE.  Flatten to one list of subpath dicts per
-        # frame, dropping exclude_width (already counted above).
-        per_frame_flat = [[subpath for beziers, _exclude in sources for subpath in beziers]
+        n_sources = len(per_frame_sources[0])
+        # per_frame_sources[f] is a list of (beziers, exclude_width,
+        # exclude_band) - one per mask-source SHAPE, all captured while
+        # walking `layer`'s ancestor chain (see _build_layers).  Flatten
+        # every source's FILL beziers to one list of subpath dicts per
+        # frame first, exactly as before this fix - the union region a
+        # source's exclusion band later carves into is unchanged.
+        fill_per_frame = [[subpath for beziers, _ew, _eb in sources for subpath in beziers]
                            for sources in per_frame_sources]
-        self._assert_stable(layer, "<mask>", "mask", per_frame_flat)
+        self._assert_stable(layer, "<mask>", "mask", fill_per_frame)
+        entries = self._mask_entries(fill_per_frame, frames)
 
-        return [{"inv": False, "mode": "a", "pt": self._path_property(list(per_subpath), frames),
+        for i in range(n_sources):
+            _beziers0, exclude_width0, band0 = per_frame_sources[0][i]
+            if exclude_width0 <= 0:
+                continue
+            if not band0:
+                # Only reachable if TaperedStrokeOutliner.build_bezier
+                # itself returned nothing for a non-degenerate, non-tapered,
+                # non-brush outline - not expected, but a silently-dropped
+                # exclusion would be worse than a counted one; see
+                # WARNING_EXPLANATIONS.
+                self.warnings["mask_stroke_exclusion"] += 1
+                continue
+            band_per_frame = [sources[i][2] or [] for sources in per_frame_sources]
+            self._assert_stable(layer, f"<mask exclusion {i}>", "mask exclusion band",
+                                band_per_frame)
+            entries += self._mask_entries(band_per_frame, frames, mode="s")
+        return entries
+
+    def _mask_entries(self, per_frame_flat: list, frames, mode: str = "a") -> list:
+        """One Lottie masksProperties entry per subpath in `per_frame_flat`
+        (one flattened subpath list per frame - see _finalize_mask and
+        _group_mask_entries, its two callers), all sharing `mode`."""
+        return [{"inv": False, "mode": mode, "pt": self._path_property(list(per_subpath), frames),
                  "o": {"a": 0, "k": 100}, "x": {"a": 0, "k": 0}}
                 for per_subpath in zip(*per_frame_flat)]
+
+    def _group_mask_entries(self, layer, base_accs: list, frames) -> list:
+        """masksProperties entries (mode "a", i.e. union) built from
+        `base_accs`' own already-collected fill geometry - the Lottie
+        counterpart of ShapeGroupRenderer._mask_union in moho2svg.py: a
+        combo_mode==3 shape is clipped to the union of its OWN group's
+        combo_mode 0/1 (base) members, not to the whole mesh or to any
+        cross-layer mask (see _split_boolean_groups/_split_into_chunks for
+        how a mesh's shapes are partitioned into these groups, and
+        _combined_mask_properties for combining this with an ALSO-active
+        cross-layer mask, if any).
+        """
+        per_frame_flat = [
+            [subpath for acc in base_accs for subpath in acc["fill_per_frame"][f]]
+            for f in range(len(frames))]
+        self._assert_stable(layer, "<combo_mode group>", "group mask", per_frame_flat)
+        return self._mask_entries(per_frame_flat, frames)
+
+    def _prepare_union_band_widths(self, mesh, frame0) -> dict:
+        """{id(shape): stroke_width_px} for every raw `Shape` (moho2svg.py's
+        Shape, not an accumulator dict - accumulators do not exist yet the
+        first time this runs) that is a combo_mode 0/1 (base) member of a
+        boolean-combination group with MORE THAN ONE base member.
+
+        `_accumulate_frame` consults this to decide which shapes need an
+        extra `union_band_per_frame` entry (that shape's own outline as
+        FILLED band geometry, at the width computed here) alongside their
+        ordinary fill/outline geometry - material `_combo_mode_union_mask_
+        properties` later uses to exclude ONE base member's stroke from
+        redrawing the boundary shared with ANOTHER, matching
+        ShapeGroupRenderer._flush's own combo_mode 0/1 handling in
+        moho2svg.py (a union member's outline is clipped to exclude every
+        other base member's fill, using the GROUP's style - not each
+        member's own - since Moho renders every union member's outline
+        with the base member's line style; see moho2svg.py's BOOLEAN SHAPE
+        COMBINATIONS section, "the *combined* outline is stroked using the
+        styling of the group's first (base) member, not its own"). Hence
+        one width per GROUP here, taken from the group's first/base member
+        and applied to every member's own band, not each member's
+        individual line_width.
+
+        Computed directly from `mesh.shapes`' own STATIC combo_mode (never
+        varies by frame - see _accumulate_frame's docstring) and evaluated
+        once at `frame0` (style never animates in this corpus - the same
+        assumption _new_accumulator itself already makes for every other
+        style field), ahead of any per-frame accumulation - mirrors
+        _split_boolean_groups' own grouping rule, just on raw Shape objects
+        instead of already-built accumulator dicts.
+        """
+        exp = self.exporter
+        result: dict = {}
+        base: list = []
+        clip: list = []
+
+        def flush():
+            if len(base) > 1:
+                base_shape = base[0]
+                widths = self._point_widths(mesh, base_shape.edges, frame0)
+                point_width = widths[0] if widths else 1.0
+                line_width = exp.eval(base_shape.style.line_width, frame0)
+                width_px = exp._stroke_width_px(line_width, point_width)
+                for shape in base:
+                    result[id(shape)] = width_px
+
+        for shape in mesh.shapes:
+            if not shape.edges:
+                continue
+            combo_mode = shape.combo_mode if shape.combo_mode in (0, 1, 3) else 0
+            if combo_mode == 0 and (base or clip):
+                flush()
+                base, clip = [], []
+            (clip if combo_mode == 3 else base).append(shape)
+        flush()
+        return result
+
+    def _split_boolean_groups(self, accs: list) -> list:
+        """Partition one mesh's shape accumulators (in file order) into
+        contiguous boolean-combination groups, exactly like
+        ShapeGroupRenderer's own grouping in moho2svg.py: a combo_mode==0
+        shape starts a new group, combo_mode 1/3 shapes join the group in
+        progress (see _new_accumulator for why combo_mode is guaranteed to
+        already be one of 0/1/3 here). Returns [(base_accs, clip_accs), ...]
+        per group - base_accs are combo_mode 0/1 members (drawn plainly,
+        never clipped), clip_accs are combo_mode==3 members (drawn clipped
+        to base_accs' own union - see _group_mask_entries).
+        """
+        groups: list = []
+        base: list = []
+        clip: list = []
+        for acc in accs:
+            if acc["combo_mode"] == 0 and (base or clip):
+                groups.append((base, clip))
+                base, clip = [], []
+            if acc["combo_mode"] == 3:
+                clip.append(acc)
+            else:
+                base.append(acc)
+        if base or clip:
+            groups.append((base, clip))
+        return groups
+
+    @staticmethod
+    def _split_into_chunks(groups: list) -> list:
+        """A list of chunk dicts, in file order, from `_split_boolean_groups`'
+        own output - one of:
+
+          {"kind": "plain", "accs": [...], "skip_outline": frozenset(...)}
+          {"kind": "clip", "accs": [...], "base": [...]}
+          {"kind": "union_exclude", "member": acc, "others": [...]}
+
+        Each chunk becomes one Lottie layer - see _build_layers, which
+        appends these in this same file order so the existing
+        Moho-back-to-front -> Lottie-front-to-back `collected.reverse()`
+        still produces the right z-order between them, exactly as it
+        already did back when one Moho layer was always exactly one Lottie
+        layer.
+
+        Consecutive groups with no combo_mode==3 member and no multi-member
+        base merge into one "plain" chunk (no masking needed at all). A
+        group WITH a combo_mode==3 member gets its own "clip" chunk for
+        those members (needing a group mask built from the base - see
+        _group_mask_entries/_combined_mask_properties); a base's FILL is
+        never clipped by this, only a combo_mode==3 member's is, matching
+        moho2svg.py's own _render_shape.
+
+        A group whose base has MORE THAN ONE member additionally gets one
+        "union_exclude" chunk per base member that has its own outline -
+        see _combo_mode_union_mask_properties for what it excludes and
+        why. `skip_outline` on the surrounding "plain" chunk names exactly
+        those members, so _finalize_shapes still emits their FILL there
+        (never clipped) while their OUTLINE moves to its own masked chunk.
+        Both a "clip" and any "union_exclude" chunks for the SAME group are
+        placed together, right after that group's own contribution to the
+        current "plain" chunk (which is flushed first) - approximating
+        ShapeGroupRenderer._flush's own SVG timing (every group's fills
+        painted immediately, in file order, then that SAME group's
+        outlines - base and combo_mode==3 members alike - painted together
+        once the group closes) without tracking file order at finer grain
+        than "this group's own contribution" for either kind.
+        """
+        chunks: list = []
+        plain_run: list = []
+        skip_outline: set = set()
+
+        def flush_plain():
+            nonlocal plain_run, skip_outline
+            if plain_run:
+                chunks.append({"kind": "plain", "accs": plain_run,
+                               "skip_outline": frozenset(skip_outline)})
+            plain_run, skip_outline = [], set()
+
+        for base, clip in groups:
+            plain_run.extend(base)
+            group_exclusions: list = []
+            if len(base) > 1:
+                for member in base:
+                    if member["outline_kind"] is not None:
+                        skip_outline.add(id(member))
+                        others = [m for m in base if m is not member]
+                        group_exclusions.append((member, others))
+            if clip or group_exclusions:
+                flush_plain()
+            if clip:
+                chunks.append({"kind": "clip", "accs": clip, "base": base})
+            for member, others in group_exclusions:
+                chunks.append({"kind": "union_exclude", "member": member, "others": others})
+        flush_plain()
+        return chunks
+
+    def _combo_mode_union_mask_properties(self, layer, member_acc: dict, other_accs: list,
+                                          frames, cross_mask) -> list:
+        """masksProperties excluding a combo_mode 0/1 (union) member's own
+        stroke from redrawing the boundary it shares with its group's
+        OTHER base members - the Lottie counterpart of ShapeGroupRenderer.
+        _mask_subtraction in moho2svg.py.
+
+        Same recipe as that SVG method, built from data _accumulate_frame/
+        _prepare_union_band_widths already collected:
+          1. A padded bounding box covering `member_acc`'s own fill and
+             every one of `other_accs`' fills, as the starting region -
+             mode "a" normally, or "i" to narrow `cross_mask`'s own already-
+             accumulated region if this layer ALSO carries a cross-layer
+             mask (see _combined_mask_properties for the same "i"-after-"a"
+             technique - exact here regardless of how many cross_mask
+             entries there are, since the box is always a SINGLE shape, not
+             a union of several like the case that method has to fall back
+             on).
+          2. Each other member's own fill subtracted out of it (mode "s") -
+             punches a hole whose edge exactly follows each other member's
+             boundary.
+          3. Each other member's own outline, already built as filled band
+             geometry at the group's stroke width in its own accumulator's
+             `union_band_per_frame` (see _prepare_union_band_widths), added
+             back on top (mode "a") - restores a stroke-width-wide band
+             right at the hole's edge, so `member_acc`'s own stroke meets
+             the neighbour's instead of stopping one stroke-width short
+             at the crossing - see _mask_subtraction's own docstring for
+             why that band exists at all.
+        """
+        padding = self.exporter.settings.mask_padding
+        box_per_frame_flat = []
+        for f in range(len(frames)):
+            subpaths = list(member_acc["fill_per_frame"][f])
+            for acc in other_accs:
+                subpaths += acc["fill_per_frame"][f]
+            xs = [v[0] for b in subpaths for v in b["v"]]
+            ys = [v[1] for b in subpaths for v in b["v"]]
+            x0, y0 = min(xs) - padding, min(ys) - padding
+            x1, y1 = max(xs) + padding, max(ys) + padding
+            box_per_frame_flat.append([{"v": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                                         "i": [[0, 0], [0, 0], [0, 0], [0, 0]],
+                                         "o": [[0, 0], [0, 0], [0, 0], [0, 0]], "c": True}])
+
+        entries = list(cross_mask) if cross_mask else []
+        box_mode = "i" if cross_mask else "a"
+        entries += self._mask_entries(box_per_frame_flat, frames, mode=box_mode)
+        for acc in other_accs:
+            fill_flat = [acc["fill_per_frame"][f] for f in range(len(frames))]
+            entries += self._mask_entries(fill_flat, frames, mode="s")
+        for acc in other_accs:
+            band_flat = [acc["union_band_per_frame"][f] for f in range(len(frames))]
+            self._assert_stable(layer, acc["name"], "union exclusion band", band_flat)
+            entries += self._mask_entries(band_flat, frames, mode="a")
+        return entries
+
+    def _combined_mask_properties(self, layer, cross_mask, base_accs: list, frames):
+        """masksProperties for one combo_mode==3 chunk: its own group's
+        base union (_group_mask_entries), intersected against `cross_mask`
+        (this layer's own cross-layer mask, from Moho's masking/group_mask
+        system - None if this layer carries none) when both apply at once.
+
+        Lottie evaluates masksProperties SEQUENTIALLY, each entry combining
+        with the region accumulated so far via its own mode: "a" unions,
+        "i" intersects. `cross_mask`'s own entries already union together
+        (mode "a" - see _finalize_mask) into one region U. Appending the
+        group's own base union with mode "i" narrows U down to U ∩ base
+        exactly - but only when that base union is itself a SINGLE subpath:
+        a lone "i" entry can only narrow the running region once, and any
+        entry appended after it can only union more area back in (mode
+        "a") or cut more out (mode "s") - neither reconstructs "intersect
+        with the union of several separate shapes" from inside a sequential
+        chain.
+
+        Returns None - not a fallback, a signal - when the base union needs
+        more than one subpath AND `cross_mask` is set: that combination
+        cannot be expressed with a flat sequential list at all. The caller
+        (_build_layers) then reaches for _nested_group_mask_layer instead,
+        which composes the same two constraints EXACTLY via a
+        precomposition (two independent masking passes, nested, rather
+        than one flat list trying to express both at once) - so nothing
+        this exporter produces is ever less than exact here; this is a
+        dispatch point, not an approximation.
+        """
+        group_entries = self._group_mask_entries(layer, base_accs, frames)
+        if not cross_mask:
+            return group_entries
+        if len(group_entries) != 1:
+            return None
+        return cross_mask + [{**group_entries[0], "mode": "i"}]
+
+    def _nested_group_mask_layer(self, shapes: list, group_entries: list, cross_mask: list,
+                                 ip: float, op: float, name: str) -> dict:
+        """The exact fallback _combined_mask_properties itself cannot
+        express: `shapes` (a combo_mode==3 chunk's own already-finalized
+        Lottie groups) masked by its OWN group union (`group_entries`,
+        exact and unconditional - _group_mask_entries always works
+        regardless of how many subpaths it needs, since nothing else has
+        to combine with it INSIDE the same flat list here), wrapped in a
+        precomposition so `cross_mask` can be applied to the OUTER layer
+        that references it - two independent masking passes, composed by
+        nesting rather than by trying to sequence both into one list.
+
+        A precomp-referencing layer ("ty": 0) renders its target precomp's
+        content exactly like an ordinary visual layer renders its own -
+        offscreen, then composited as one unit - so a mask on THIS layer
+        clips that already-masked result precisely the same way a mask
+        clips a plain shape layer's content elsewhere in this file. This
+        is a standard, well-supported Lottie/After Effects composition
+        technique (precomp + mask), unlike the `mm` merge-path operator
+        the design doc's own § 2.2 rejected combo_mode support over in the
+        first place - a completely different Lottie primitive, not a
+        retry of that same rejected idea.
+        """
+        inner = self._shape_layer(name, shapes, ip, op, group_entries)
+        inner["ind"] = 1
+        asset_id = f"nested_mask_{self._next_asset_id()}"
+        self._assets.append({"id": asset_id, "layers": [inner]})
+        outer = {
+            "ty": 0, "nm": name, "refId": asset_id,
+            "ks": identity_transform(), "ao": 0,
+            "w": int(self.document.width), "h": int(self.document.height),
+            "ip": float(ip), "op": float(op), "st": 0.0,
+            "hasMask": True, "masksProperties": cross_mask,
+        }
+        return outer
 
     def _point_widths(self, mesh, edges, frame: float) -> list:
         """The interpolated width at every point touched by `edges`, at
@@ -407,6 +838,39 @@ class LottieExporter:
         point_indices = {mesh.curves[e.curve].points[e.segment].point_index
                           for e in edges}
         return [self.exporter.eval(mesh.points[i].width, frame) for i in point_indices]
+
+    def _keyframes(self, frames, s_values: list) -> list:
+        """Build a Lottie keyframe list from parallel `frames`/`s_values`
+        (`s_values[i]` already shaped as that keyframe's own "s" - a one-
+        element list wrapping a bezier value, or a plain list of numbers -
+        see this method's three callers), with LINEAR "i"/"o" easing added
+        to every keyframe but the last.
+
+        Confirmed empirically (outside this codebase, with a hand-built
+        two-keyframe rectangle) that lottie-web's SVG renderer (5.13.0)
+        does not merely interpolate an "a": 1 property incorrectly when its
+        keyframes omit "i"/"o" - it renders NOTHING for that property, at
+        any frame, even though `properties/base-keyframe` in
+        lottie.schema.json marks both fields optional and this writer's
+        own --validate already passed without them. This is therefore a
+        genuine gap in every animated property this writer has ever
+        emitted (path, scalar, point - masksProperties included, since
+        _finalize_mask/_group_mask_entries both build their entries
+        through _path_property), not something specific to combo_mode or
+        cross-layer masking.
+
+        Linear easing ("x"/"y" both running 0->1 in a straight line, i.e.
+        no curve at all) is the correct choice here, not merely a safe
+        default: every keyframe this writer emits already sits at its own
+        EXACT sampled value, one per integer frame in the export range -
+        there is no curve to approximate between two already-frame-exact
+        points, only a straight interpolation.
+        """
+        keyframes = [{"t": float(f), "s": s} for f, s in zip(frames, s_values)]
+        for kf in keyframes[:-1]:
+            kf["o"] = LINEAR_EASE_OUT
+            kf["i"] = LINEAR_EASE_IN
+        return keyframes
 
     def _path_property(self, per_frame: list, frames) -> dict:
         """A Lottie path property: static when the geometry never moves,
@@ -419,8 +883,7 @@ class LottieExporter:
         """
         if all(b == per_frame[0] for b in per_frame[1:]):
             return {"a": 0, "k": per_frame[0]}
-        return {"a": 1,
-                "k": [{"t": float(f), "s": [b]} for f, b in zip(frames, per_frame)]}
+        return {"a": 1, "k": self._keyframes(frames, [[b] for b in per_frame])}
 
     def _scalar_property(self, per_frame: list, frames) -> dict:
         """A Lottie scalar property (e.g. stroke width): static when the
@@ -448,8 +911,7 @@ class LottieExporter:
         """
         if all(abs(v - per_frame[0]) < 1e-9 for v in per_frame[1:]):
             return {"a": 0, "k": per_frame[0]}
-        return {"a": 1,
-                "k": [{"t": float(f), "s": [v]} for f, v in zip(frames, per_frame)]}
+        return {"a": 1, "k": self._keyframes(frames, [[v] for v in per_frame])}
 
     def _point_property(self, per_frame_points: list, frames) -> dict:
         """A Lottie 2D point property (e.g. a gradient's start/end point):
@@ -473,8 +935,7 @@ class LottieExporter:
         if all(p == per_frame_points[0] for p in per_frame_points[1:]):
             return {"a": 0, "k": list(per_frame_points[0])}
         return {"a": 1,
-                "k": [{"t": float(f), "s": list(p)}
-                      for f, p in zip(frames, per_frame_points)]}
+                "k": self._keyframes(frames, [list(p) for p in per_frame_points])}
 
     def _sh_elements(self, per_frame_subpaths: list, frames) -> list:
         """One Lottie "sh" element per subpath, each a (possibly keyframed)
@@ -512,7 +973,8 @@ class LottieExporter:
                     f"{frame_index} ({base} -> {got}) - Lottie cannot "
                     f"keyframe this; see moho-to-lottie-design.md section 5.3")
 
-    def _accumulate_frame(self, item, frame: float, accs: list, first_time: bool) -> None:
+    def _accumulate_frame(self, item, frame: float, accs: list, first_time: bool,
+                          union_band_widths: dict) -> None:
         """Extract ONE frame's worth of data for every shape of `item`'s
         layer, appending to `accs` (one accumulator dict per shape, created
         on `first_time` and reused - by matching POSITION, not identity -
@@ -524,6 +986,16 @@ class LottieExporter:
         _build_layers's own docstring for why that is load-bearing.  Style
         (colour, line width, brush/taper classification) is captured only
         ONCE, inside _new_accumulator, on `first_time`.
+
+        `union_band_widths` is `{id(shape): group_stroke_width_px}` from
+        `_prepare_union_band_widths`, for every shape that is a combo_mode
+        0/1 (base) member of a boolean group with more than one base
+        member - see that method's own docstring. A qualifying shape gets
+        an EXTRA `union_band_per_frame` entry alongside its ordinary fill/
+        outline geometry: its own outline as FILLED band geometry at the
+        group's stroke width, needed (whether or not this particular shape
+        itself has an outline) as material for EXCLUDING it from another
+        group member's own stroke - see _combo_mode_union_mask_properties.
         """
         exp = self.exporter
         mesh = item.layer.mesh
@@ -538,6 +1010,11 @@ class LottieExporter:
 
             acc["fill_per_frame"].append(
                 build_path_bezier(item.geometries, shape.edges, item.to_px))
+
+            band_width = union_band_widths.get(id(shape))
+            if band_width is not None:
+                acc["union_band_per_frame"].append(exp.tapered_outliner.build_bezier(
+                    item.geometries, shape.edges, item.to_px, band_width))
 
             if acc["outline_kind"] == "taper":
                 width_px = exp._stroke_width_px(acc["line_width"], 1.0)
@@ -579,8 +1056,13 @@ class LottieExporter:
         once, synchronously, while frame0's RenderItem is current.
         """
         exp = self.exporter
-        if shape.combo_mode != 0:
-            self.warnings["combo_mode"] += 1
+        combo_mode = shape.combo_mode
+        if combo_mode not in (0, 1, 3):
+            # Matches ShapeGroupRenderer._render_shape's own fallback in
+            # moho2svg.py: an unrecognised value is drawn as a plain
+            # replace shape rather than aborting the export.
+            self.warnings["combo_mode_unknown"] += 1
+            combo_mode = 0
         style = shape.style
 
         outline_kind = None
@@ -622,6 +1104,7 @@ class LottieExporter:
 
         return {
             "name": shape.name or "",
+            "combo_mode": combo_mode,
             "has_fill": shape.has_fill,
             "fill_color": fill_color,
             "gradient": gradient,
@@ -633,6 +1116,7 @@ class LottieExporter:
             "outline_cap": outline_cap,
             "outline_per_frame": [],
             "outline_width_per_frame": [],
+            "union_band_per_frame": [],
         }
 
     def _eval_gradient(self, shape, fill_style: dict, frame0: float):
@@ -668,11 +1152,18 @@ class LottieExporter:
             "rotation": exp.eval(shape.effect_rotation, frame0),
         }
 
-    def _finalize_shapes(self, layer, accs: list, frames) -> list:
+    def _finalize_shapes(self, layer, accs: list, frames, skip_outline: frozenset = frozenset()) -> list:
         """Turn every shape's already-collected per-frame data into Lottie
         shape-group elements.  Pure data transformation - no exp.eval()/
         to_px() calls here, which is exactly why _accumulate_frame had to
         do all of that eagerly (see its own docstring).
+
+        `skip_outline` is a set of `id(acc)` values whose outline is NOT
+        emitted here even though `acc["outline_kind"]` is set - used when a
+        combo_mode 0/1 (union) member's own outline needs its own masked
+        chunk instead (see _split_into_chunks's own "needs_exclusion"
+        entries and _combo_mode_union_mask_properties) - its FILL still
+        belongs in this call's ordinary, unmasked output.
 
         Each Moho shape becomes up to TWO Lottie groups - one for its fill,
         one for its outline - rather than one group holding both a "fl" and
@@ -733,7 +1224,8 @@ class LottieExporter:
                 name = f"{name}_{len(style_names_used)}"
             style_names_used.add(name)
 
-            if acc["outline_kind"] is not None and acc["outline_per_frame"][0]:
+            if (acc["outline_kind"] is not None and acc["outline_per_frame"][0]
+                    and id(acc) not in skip_outline):
                 out.append(self._finalize_outline_group(layer, acc, frames, name))
 
             if acc["has_fill"]:

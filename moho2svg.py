@@ -5245,17 +5245,24 @@ class Exporter:
         return paths
 
     def _mask_source_shapes_bezier(self, layer: Layer, ancestors: Sequence[Layer],
-                                    frame: float) -> list[tuple[list[dict], float]]:
+                                    frame: float) -> list[tuple[list[dict], float, Optional[list[dict]]]]:
         """Bezier counterpart of _mask_source_shapes(), for a Lottie writer -
         same recursion, same (per-shape geometry, exclude_width) pairing,
         `build_path_bezier()` in place of `build_path_d()`, same per-source
         Smart Bone context fix (see _mask_source_shapes's own docstring).
-        See _mask_source_shapes's own docstring for what `exclude_width`
-        means; a Lottie consumer is not required to use it (a plain
-        per-source union, dropping the exclude-width carve-out, is a
-        documented, counted simplification - see moho2lottie.py's own
-        notes)."""
-        paths: list[tuple[list[dict], float]] = []
+
+        Returns (beziers, exclude_width, exclude_band) triples, ONE MORE
+        element than _mask_source_shapes's plain (path, exclude_width) SVG
+        pairs: `exclude_band` is the same exclude_width band, ALREADY BUILT
+        as filled Lottie geometry (self.tapered_outliner.build_bezier at
+        that uniform width - correct because exclude_width is only ever
+        computed for a non-tapered, non-brush outline in the first place,
+        same restriction _mask_source_shapes itself applies), since a
+        Lottie consumer has no "stroke this path as a mask" primitive the
+        way an SVG <mask> does and must instead subtract an already-filled
+        band shape - see moho2lottie.py's LottieExporter._finalize_mask.
+        `exclude_band` is None exactly when `exclude_width` is 0.0."""
+        paths: list[tuple[list[dict], float, Optional[list[dict]]]] = []
         if layer.mesh is not None:
             self._active_actions = self._active_actions_along(ancestors, frame)
             try:
@@ -5266,6 +5273,7 @@ class Exporter:
                     if not beziers:
                         continue
                     exclude_width = 0.0
+                    exclude_band = None
                     if shape.has_outline and not shape.style.brush_name:
                         point_indices = {layer.mesh.curves[e.curve].points[e.segment].point_index
                                          for e in shape.edges}
@@ -5276,7 +5284,10 @@ class Exporter:
                             point_width = widths[0] if widths else 1.0
                             line_width = self.eval(shape.style.line_width, frame)
                             exclude_width = self._stroke_width_px(line_width, point_width)
-                    paths.append((beziers, exclude_width))
+                            if exclude_width > 0:
+                                exclude_band = self.tapered_outliner.build_bezier(
+                                    geometries, shape.edges, to_px, exclude_width) or None
+                    paths.append((beziers, exclude_width, exclude_band))
             finally:
                 self._active_actions = []
         for child in layer.children:
@@ -5286,7 +5297,7 @@ class Exporter:
 
     def _mask_sources_bezier(self, container: Optional[Layer],
                               chain_through_container: Sequence[Layer],
-                              frame: float) -> list[tuple[list[dict], float]]:
+                              frame: float) -> list[tuple[list[dict], float, Optional[list[dict]]]]:
         """Bezier counterpart of _mask_sources(), for a Lottie writer - same
         group_mask/masking rules, same per-source Smart Bone context fix
         (see _mask_sources's own docstring), `_mask_source_shapes_bezier`
@@ -5413,24 +5424,25 @@ class Exporter:
         nested SVG <g>/<mask> elements, including the nested_groups/--flat
         choice, which walk_render_tree has no opinion about at all.
 
-        NOTE (investigation in progress, see the module docstring's MASKING
-        section): confirmed against the Moho app that a masking==2 sibling's
-        own stroke stays fully visible on top of whatever it masks (Bandit's
-        Head_DarkBlue/BellyTexture pair) - this tool still draws it at its
-        plain list position, which is KNOWN WRONG for that specific pair. A
-        naive "move masking==2 to render after every masking==0 sibling" fix
-        was tried and reverted: on this same container most siblings
-        (Arm_B, Tail, Ears, Muzzle, Nose, EyeBrow, Arm_F, ...) are
-        masking==1 ("exempt"), and BellyTexture originally precedes some of
-        them (e.g. Muzzle) - forcing "masking==2 after masking==0" broke
-        that untouched relationship too, dragging BellyTexture's opaque fill
-        on top of the character's eyes/muzzle/nose, which is visibly worse
-        than the bug it was meant to fix. There is no single global reorder
-        of a layer list that satisfies both "every masking==2 after every
-        masking==0" and "never change relative order against any masking==1
-        sibling" for this document - the two constraints conflict for
-        BellyTexture specifically. Not fixed pending more evidence on how
-        masking==1 siblings should interact with this - see KNOWN GAPS.
+        NOTE (stale investigation superseded by a real fix - see the module
+        docstring's MASKING section, "FIXED: a masking==2 sibling's own
+        rendered stroke..."): a z-order reorder (paint every masking==2
+        sibling after every masking==0 one) was tried here first and
+        reverted - it conflicts with masking==1 siblings that must keep
+        their original file-order relationship to masking==2 ones (e.g.
+        Bandit's BellyTexture must stay before Muzzle). Paint order was
+        therefore left untouched, which is still true today: this method
+        draws every item at its plain list position regardless of masking.
+        The actual fix lives in `_mask_source_shapes`/`_mask_element`
+        instead - each masking==2 source's own stroke band is carved back
+        OUT of the mask it contributes, so whatever it masks can never paint
+        over that band, independent of paint order. That fix is already
+        active on every call through here (`enter_item.mask_sources` comes
+        from `_mask_sources`, which calls `_mask_source_shapes`) - nothing
+        further is needed in this method for the case it was written to
+        describe. The one remaining edge (tapered/brush-styled masking==2
+        outlines only contribute their bare fill, not an excluded stroke
+        band) is tracked in the module docstring's KNOWN GAPS, not here.
         """
         inner: list[str] = []
         pixel_points: list[Vec2] = []

@@ -72,6 +72,7 @@ Non-goals are listed in [§ 2.2](#22-out-of-scope-for-v1).
 | Gradients | `SS_Gradient2` appears 1,196 times across 17 of the 19 sample documents. Lottie has `gf` / `gs`. |
 | Masking | 162 layers carry a non-zero `masking`, and 70 containers carry `group_mask == 2`. Dropping it would let hidden artwork show through, which is the most visible possible failure. |
 | `SwitchLayer` | 17 layers. Cheap under the flat-bake model — see [§ 6.3](#63-switch-layers). |
+| Boolean shape combination (`combo_mode`) | A combo_mode==3 (intersect) shape is split into its own Lottie layer, clipped via `masksProperties` to the union of its own group's combo_mode 0/1 members — the Lottie counterpart of `ShapeGroupRenderer._mask_union` in `moho2svg.py`. See `LottieExporter._split_boolean_groups`/`_split_into_chunks`/`_combined_mask_properties`. combo_mode==1 (union) fills need no special handling (a union member's fill is never clipped on the SVG side either); its STROKE is not yet merged into one seamless outline the way `moho2svg.py`'s `_flush` does — narrower than the fill-bleed bug this was written to fix, not yet counted separately. One combination remains genuinely inexpressible with Lottie's sequential mask-mode chaining and falls back with a counted warning (`combo_mode_unclippable`) — see that method's own docstring. |
 
 ### 2.2 Out of scope for v1
 
@@ -79,7 +80,6 @@ Non-goals are listed in [§ 2.2](#22-out-of-scope-for-v1).
 |---|---|
 | Brush textures | Explicitly excluded. Lottie has no textured stroke; the only mapping is a raster image asset, which is the most expensive part of `moho2svg.py`. |
 | `ImageLayer` | 15 layers in one document. `moho2svg.py` already drops them because it is a vector-only exporter. Adding them means a raster asset pipeline, the same work that brush textures were excluded for. |
-| Boolean shape combination (`combo_mode`) | Only **16 shapes in all 19 documents** use a non-zero value (14 intersect, 2 union), all in `Bandit.mohoproj`. lottie-web's support for the `mm` merge element is poor. v1 draws these shapes with their plain outline and logs a warning naming each one. |
 | Smart Warp | Not decoded anywhere in this repository, and no sample document uses it. |
 | `interp` easing | `moho2svg.py` itself ignores it (monotone-cubic interpolation instead of Moho's own undecoded curve). v1 inherits that behaviour rather than diverging from the renderer it is verified against. Cycle markers used to be listed here too; they are now decoded and applied by `Channel` itself, so both exporters cycle - see `moho-animation-and-transform.md` § 3.4. |
 | Rigid-body physics (`physics.enabled` with `physics.static == false`) | `moho2svg.py` already ignores physics, on the stated assumption that "none of them affect a flat vector export of a single frame" - true for a single frame, but not for an animated Lottie export: `Bandit.mohoproj`'s own top-level `BoneLayer` is a dynamic physics body, and its keyframed channels alone (all ending by frame 41-90) do not account for the screen-spanning motion Moho's own render shows across its full 25-127 frame range. Neither module runs a physics simulation, so an affected layer renders at its rest pose on every sampled frame; v1 logs a counted warning naming each one instead of silently producing a static-looking layer. |
@@ -271,9 +271,17 @@ Static and animated paths differ only in the property envelope:
 
 ```json
 "ks": {"a": 0, "k": {"v": [], "i": [], "o": [], "c": true}}
-"ks": {"a": 1, "k": [{"t": 25, "s": [{"v": [], "i": [], "o": [], "c": true}]},
+"ks": {"a": 1, "k": [{"t": 25, "o": {"x":[0],"y":[0]}, "i": {"x":[1],"y":[1]},
+                       "s": [{"v": [], "i": [], "o": [], "c": true}]},
                       {"t": 26, "s": [{"v": [], "i": [], "o": [], "c": true}]}]}
 ```
+
+Every non-final keyframe carries linear `i`/`o` (temporal easing, not to be
+confused with the path's OWN per-vertex `i`/`o` tangents nested inside `s`) -
+`lottie.schema.json` marks both optional, but a real player (`lottie-web`
+5.13.0, confirmed directly) renders NOTHING for an animated property whose
+keyframes omit them, not merely the wrong curve. See
+`LottieExporter._keyframes` in `moho2lottie.py`.
 
 Path keyframes can only be interpolated when every keyframe has the same
 vertex count and subpath structure. **This was measured and holds**: across
@@ -365,7 +373,8 @@ The writer keeps a counter per skipped feature and prints a summary to stderr
 at the end of an export:
 
 ```
-moho2lottie: N shapes with combo_mode != 0 drawn without boolean combination
+moho2lottie: N shape(s) with an unrecognised combo_mode (not 0/1/3) drawn as a plain replace shape instead
+moho2lottie: N combo_mode==3 (intersect) group(s) whose own base has more than one member, on a layer that ALSO carries a cross-layer mask - drawn clipped to the cross-layer mask only
 moho2lottie: N ImageLayer layers skipped (vector-only exporter)
 moho2lottie: N styles naming a brush drawn as plain strokes
 ```

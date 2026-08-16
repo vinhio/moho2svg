@@ -45,6 +45,69 @@ def bezier_close_enough(got: dict, expected: dict) -> bool:
     return True
 
 
+def split_boolean_groups(shapes_in_order: list) -> list:
+    """The check-script counterpart of LottieExporter._split_boolean_groups
+    in moho2lottie.py - same grouping rule (a combo_mode==0 shape starts a
+    new group, combo_mode 1/3 shapes join the group in progress), applied
+    to plain `Shape` objects instead of accumulator dicts. combo_mode
+    values outside (0, 1, 3) are clamped to 0 first, matching
+    moho2lottie.LottieExporter._new_accumulator's own fallback. Returns
+    [(base_shapes, clip_shapes), ...] per group."""
+    groups = []
+    base, clip = [], []
+    for shape in shapes_in_order:
+        combo_mode = shape.combo_mode if shape.combo_mode in (0, 1, 3) else 0
+        if combo_mode == 0 and (base or clip):
+            groups.append((base, clip))
+            base, clip = [], []
+        (clip if combo_mode == 3 else base).append(shape)
+    if base or clip:
+        groups.append((base, clip))
+    return groups
+
+
+def split_into_chunks(groups: list) -> list:
+    """The check-script counterpart of LottieExporter._split_into_chunks -
+    same merge-adjacent-plain-groups, split-out-each-clip-group,
+    split-out-each-union-member-needing-stroke-exclusion rules. Returns a
+    list of chunk dicts in file order, one of:
+
+      {"kind": "plain", "shapes": [...], "skip_outline": frozenset(...)}
+      {"kind": "clip", "shapes": [...]}
+      {"kind": "union_exclude", "shape": shape}
+
+    The mask each kind gets is irrelevant to this script (it never builds
+    one) - only the resulting PER-LAYER shape grouping/naming/fill-vs-
+    outline split needs to match."""
+    chunks = []
+    plain_run = []
+    skip_outline = set()
+
+    def flush_plain():
+        nonlocal plain_run, skip_outline
+        if plain_run:
+            chunks.append({"kind": "plain", "shapes": plain_run,
+                           "skip_outline": frozenset(skip_outline)})
+        plain_run, skip_outline = [], set()
+
+    for base, clip in groups:
+        plain_run.extend(base)
+        group_exclusions = []
+        if len(base) > 1:
+            for member in base:
+                if member.has_outline:
+                    skip_outline.add(id(member))
+                    group_exclusions.append(member)
+        if clip or group_exclusions:
+            flush_plain()
+        if clip:
+            chunks.append({"kind": "clip", "shapes": clip})
+        for member in group_exclusions:
+            chunks.append({"kind": "union_exclude", "shape": member})
+    flush_plain()
+    return chunks
+
+
 def expected_layers(project_path: str, frame: float, include_hidden: bool = False):
     """Every mesh layer's expected shape geometry at `frame`, in LOTTIE draw
     order (front to back reversed from Moho's own back-to-front walk) - see
@@ -55,15 +118,20 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
     split (see docs/moho-to-lottie-plan.md Task 3's note on why fill and
     outline are never combined into one Lottie group).
 
-    The SHAPE sequence within each layer is reversed too, not just the layer
-    list - see LottieExporter._finalize_shapes for why Moho's back-to-front
-    mesh.shapes order becomes front-to-back in Lottie.  This check shares
-    that convention deliberately: while both sides emitted plain file order,
-    the check passed on output whose multi-shape layers were internally
-    z-inverted (the `kalca` belt buried under its own hip fill), because it
-    only ever compared the two orderings against EACH OTHER.  Geometry
-    agreement is all it can prove; the ordering convention itself has to be
-    argued from the writer's own rules and checked against reference frames.
+    A mesh with any combo_mode==3 (intersect) shape is split into several
+    named layers ("name", "name#1", "name#2", ...), one per boolean-
+    combination chunk - see split_boolean_groups/split_into_chunks above,
+    mirroring LottieExporter._split_boolean_groups/_split_into_chunks. The
+    SHAPE sequence is reversed WITHIN EACH CHUNK, not across the whole
+    original layer - see LottieExporter._finalize_shapes for why Moho's
+    back-to-front mesh.shapes order becomes front-to-back in Lottie. This
+    check shares that convention deliberately: while both sides emitted
+    plain file order, the check passed on output whose multi-shape layers
+    were internally z-inverted (the `kalca` belt buried under its own hip
+    fill), because it only ever compared the two orderings against EACH
+    OTHER. Geometry agreement is all it can prove; the ordering convention
+    itself has to be argued from the writer's own rules and checked against
+    reference frames.
     """
     Channel.reset_cache()
     doc = load_document(project_path)
@@ -72,15 +140,15 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
     for item in walk_render_tree(exp, frame, include_hidden):
         if item.event != "mesh":
             continue
-        blocks = []
+        shapes_in_order = []
+        blocks_by_shape = {}
         for shape in item.layer.mesh.shapes:
             if not shape.edges:
                 continue
             fill_beziers = build_path_bezier(item.geometries, shape.edges, item.to_px)
             if not fill_beziers:
                 continue
-            shapes = []
-            blocks.append(shapes)
+            block = []
             if shape.has_outline:
                 widths = [exp.eval(item.layer.mesh.points[i].width, frame)
                           for i in {item.layer.mesh.curves[e.curve].points[e.segment].point_index
@@ -95,11 +163,28 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
                     outline = build_path_bezier(item.geometries, shape.edges, item.to_px,
                                                  visible_only=True, close=False)
                 if outline:
-                    shapes.append(("outline", outline))
+                    block.append(("outline", outline))
             if shape.has_fill:
-                shapes.append(("fill", fill_beziers))
-        flat = [entry for block in reversed(blocks) for entry in block]
-        out.append((item.layer.name, flat))
+                block.append(("fill", fill_beziers))
+            shapes_in_order.append(shape)
+            blocks_by_shape[id(shape)] = block
+
+        chunks = split_into_chunks(split_boolean_groups(shapes_in_order))
+        multi = len(chunks) > 1
+        for chunk_index, chunk in enumerate(chunks):
+            if chunk["kind"] == "union_exclude":
+                flat = [entry for entry in blocks_by_shape[id(chunk["shape"])]
+                        if entry[0] == "outline"]
+            else:
+                skip_outline = chunk.get("skip_outline", frozenset())
+                flat = []
+                for shape in reversed(chunk["shapes"]):
+                    block = blocks_by_shape[id(shape)]
+                    if id(shape) in skip_outline:
+                        block = [entry for entry in block if entry[0] != "outline"]
+                    flat += block
+            name = f"{item.layer.name}#{chunk_index}" if multi else item.layer.name
+            out.append((name, flat))
     out.reverse()          # Moho back-to-front -> Lottie front-to-back
     return out
 
