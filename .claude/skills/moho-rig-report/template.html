@@ -1,0 +1,512 @@
+<title>{{PAGE_TITLE}}</title>
+
+<style>
+:root {
+  --bg: #f3f1ec;
+  --surface: #fdfcfa;
+  --surface-2: #ffffff;
+  --border: #dcd7cc;
+  --border-strong: #c7c0b0;
+  --ink: #26241f;
+  --ink-dim: #6b6558;
+  --ink-faint: #948d7d;
+  --accent: #b5560f;
+  --accent-soft: #f2e2d3;
+  --cyan: #2f6f6b;
+  --cyan-soft: #e2eeec;
+  --warn: #a5390c;
+  --warn-soft: #f6e2d6;
+  --warn-border: #e3b593;
+  --shadow: 0 1px 2px rgba(38,36,31,0.06), 0 8px 24px -12px rgba(38,36,31,0.18);
+  --radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17140f;
+    --surface: #201c15;
+    --surface-2: #262119;
+    --border: #362f24;
+    --border-strong: #4a4030;
+    --ink: #ece7db;
+    --ink-dim: #b1a891;
+    --ink-faint: #857c68;
+    --accent: #e08a3e;
+    --accent-soft: #3a2c1a;
+    --cyan: #6db3ad;
+    --cyan-soft: #1c2f2c;
+    --warn: #e2793e;
+    --warn-soft: #3a2416;
+    --warn-border: #6b4022;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.6);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17140f;
+  --surface: #201c15;
+  --surface-2: #262119;
+  --border: #362f24;
+  --border-strong: #4a4030;
+  --ink: #ece7db;
+  --ink-dim: #b1a891;
+  --ink-faint: #857c68;
+  --accent: #e08a3e;
+  --accent-soft: #3a2c1a;
+  --cyan: #6db3ad;
+  --cyan-soft: #1c2f2c;
+  --warn: #e2793e;
+  --warn-soft: #3a2416;
+  --warn-border: #6b4022;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -16px rgba(0,0,0,0.6);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+/* ---------- Header ---------- */
+
+header.hero {
+  margin-bottom: 2.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.6rem;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5rem;
+  text-wrap: balance;
+}
+
+.subtitle {
+  color: var(--ink-dim);
+  margin: 0 0 1.6rem;
+  max-width: 62ch;
+  font-size: 1.02rem;
+}
+
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.9rem;
+  min-width: 6.5rem;
+}
+
+.stat .k {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  margin-bottom: 0.15rem;
+}
+
+.stat .v {
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Section scaffolding ---------- */
+
+section { margin-bottom: 3rem; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+
+.section-note {
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+}
+
+p { color: var(--ink-dim); }
+p.lead { color: var(--ink); }
+
+/* ---------- Callout ---------- */
+
+.callout {
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  display: flex;
+  gap: 0.9rem;
+}
+
+.callout.calm {
+  background: var(--cyan-soft);
+  border-color: var(--cyan);
+}
+.callout.calm .mark, .callout.calm h3 { color: var(--cyan); }
+
+.callout .mark {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--warn);
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  padding-top: 0.1rem;
+}
+
+.callout h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  color: var(--warn);
+}
+
+.callout p {
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+  font-size: 0.93rem;
+}
+.callout p:last-child { margin-bottom: 0; }
+.callout code {
+  background: rgba(0,0,0,0.05);
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+  font-size: 0.87em;
+}
+:root:not([data-theme="light"]) .callout code { background: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .callout code { background: rgba(255,255,255,0.08); }
+
+/* ---------- Findings grid ---------- */
+
+.findings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+}
+
+.finding {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+}
+
+.finding .status {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.finding.off .status { background: var(--cyan-soft); color: var(--cyan); }
+.finding.on .status { background: var(--warn-soft); color: var(--warn); }
+
+.finding .title { font-weight: 600; font-size: 0.92rem; margin-bottom: 0.25rem; }
+.finding .desc { color: var(--ink-dim); font-size: 0.85rem; }
+
+/* ---------- Tree ---------- */
+
+.tree-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem 1.1rem 0.9rem;
+  overflow-x: auto;
+}
+
+ul.tree, .tree-wrap ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.15rem;
+  border-left: 1px solid var(--border);
+}
+ul.tree { padding-left: 0.4rem; border-left: none; }
+
+.tree-wrap li { margin: 0.14rem 0; position: relative; }
+
+.node {
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-size: 0.86rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.05rem 0;
+}
+
+.node .tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.04rem 0.32rem;
+  border-radius: 2px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+
+.node.rig .tag { background: var(--cyan-soft); color: var(--cyan); }
+.node.mesh .tag { background: var(--surface-2); color: var(--ink-faint); border: 1px solid var(--border); }
+.node.switch .tag { background: var(--accent-soft); color: var(--accent); }
+.node.image .tag { background: var(--accent-soft); color: var(--accent); }
+.node.patch .tag { background: var(--accent-soft); color: var(--accent); }
+.node.group .tag { background: var(--surface-2); color: var(--ink-faint); border: 1px solid var(--border); }
+
+.node[data-wind="1"]::after {
+  content: "wind";
+  font-family: -apple-system, sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+  background: var(--warn-soft);
+  padding: 0.03rem 0.3rem;
+  border-radius: 2px;
+}
+
+/* ---------- Rig detail tables ---------- */
+
+details.rig {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 0.55rem;
+  overflow: hidden;
+}
+
+details.rig[open] { border-color: var(--border-strong); }
+
+details.rig summary {
+  cursor: pointer;
+  padding: 0.75rem 1.1rem;
+  font-family: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  font-size: 0.87rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  list-style: none;
+  user-select: none;
+}
+details.rig summary::-webkit-details-marker { display: none; }
+details.rig summary::before {
+  content: "▸";
+  font-family: -apple-system, sans-serif;
+  color: var(--ink-faint);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+details.rig[open] summary::before { transform: rotate(90deg); }
+
+details.rig summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.count {
+  margin-left: auto;
+  font-family: -apple-system, sans-serif;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+
+.pill {
+  font-family: -apple-system, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.08rem 0.4rem;
+  border-radius: 2px;
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  white-space: nowrap;
+}
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+thead th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 0.48rem 0.9rem;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+tbody td.num { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+
+.static { color: var(--ink-faint); font-style: italic; font-size: 0.85em; }
+.frames { color: var(--ink-faint); font-size: 0.85em; }
+
+/* ---------- Notes list ---------- */
+
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.notes li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  font-size: 0.88rem;
+  color: var(--ink-dim);
+}
+.notes li strong { color: var(--ink); font-weight: 600; }
+.notes li .tagname {
+  font-family: ui-monospace, monospace;
+  background: var(--surface-2);
+  padding: 0.02rem 0.3rem;
+  border-radius: 2px;
+  font-size: 0.9em;
+  color: var(--ink);
+}
+
+footer {
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+  h1 { font-size: 1.6rem; }
+  .page { padding: 2rem 1rem 4rem; }
+}
+</style>
+
+<div class="page">
+
+<header class="hero">
+  <p class="eyebrow">Phân tích rig &mdash; Moho project</p>
+  <h1>{{DOC_NAME}}</h1>
+  <p class="subtitle">{{SUBTITLE}}</p>
+  <div class="stat-row">
+{{STATS}}
+  </div>
+</header>
+
+<section id="finding-main">
+  <div class="section-head"><h2>Phát hiện quan trọng nhất</h2></div>
+{{MAIN_CALLOUT}}
+</section>
+
+<section id="config-summary">
+  <div class="section-head">
+    <h2>Các cấu hình chuyển động đặc biệt</h2>
+    <span class="section-note">so sánh có/không dùng từng cơ chế của Moho</span>
+  </div>
+  <div class="findings">
+{{FINDINGS}}
+  </div>
+</section>
+
+<section id="hierarchy">
+  <div class="section-head">
+    <h2>Cây phân cấp layer</h2>
+    <span class="section-note">theo đúng Layer Pool của Moho App &mdash; trên cùng = lớp trước mặt nhất</span>
+  </div>
+  <div class="tree-wrap">
+{{TREE_PANEL}}
+  </div>
+  <details class="rig" style="margin-top: 0.75rem;">
+    <summary>Thứ tự vẽ thật trong file (ngược với Layer Pool) <span class="count">back &rarr; front</span></summary>
+    <div style="padding: 0.9rem 1.1rem 0.2rem; font-size: 0.85rem; color: var(--ink-dim); border-top: 1px solid var(--border);">
+      <p style="margin: 0 0 0.8rem;">File lưu <span class="mono">layers</span> theo đúng thứ tự vẽ (back&rarr;front), còn Layer Pool của Moho App hiển thị NGƯỢC LẠI thứ tự đó ở mỗi cấp (hàng trên cùng panel = phần tử cuối mảng) &mdash; đây là quy ước hiển thị UI thông thường, không có nghĩa là thứ tự trong file "bị đảo". Cây bên dưới giữ nguyên thứ tự file, dùng khi cần suy luận layer nào vẽ đè lên layer nào.</p>
+      <div class="tree-wrap" style="border: none; padding: 0 0 0.9rem;">
+{{TREE_DRAW}}
+      </div>
+    </div>
+  </details>
+</section>
+
+<section id="rig-notes">
+  <div class="section-head"><h2>Ghi chú theo từng nhóm rig</h2></div>
+  <ul class="notes">
+{{NOTES}}
+  </ul>
+</section>
+
+<section id="detail">
+  <div class="section-head">
+    <h2>Bảng bone chi tiết theo từng rig</h2>
+    <span class="section-note">{{RIG_COUNT}} nhóm &middot; bấm để mở từng bảng</span>
+  </div>
+{{RIGS}}
+</section>
+
+<footer>
+  Đọc trực tiếp từ <span class="mono">{{SOURCE_PATH}}</span> qua document model của <span class="mono">moho2svg.py</span> (Channel, Skeleton, Bone) &mdash; không qua export SVG/Lottie. "Wind" trong bảng = bone có <span class="mono">wind_dynamics = true</span> dưới một BoneLayer có <span class="mono">physics.enabled &amp;&amp; wind.strength &gt; 0</span>.
+</footer>
+
+</div>
