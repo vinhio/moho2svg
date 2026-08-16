@@ -20,6 +20,7 @@ help:
 	@echo '  make out/svg/ori/Bandit.svg            one original export (full brush texture)'
 	@echo '  make out/svg/med/SketchBone.svg        one medium-density preview'
 	@echo '  make out/svg/fast/WhatIsBone.svg       one fast preview (no brush stamping)'
+	@echo '  make out/svg/raster/Bandit.svg         one raster brush export (needs Pillow)'
 	@echo '  make out/svg/ori/png/SketchBone.png    render one ori SVG to PNG (3x)'
 	@echo '  make out/lottie/Bandit.json            one lottie export'
 	@echo '  make format/moho/Bandit                pretty-print one project (moho/Bandit.json)'
