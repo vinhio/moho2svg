@@ -44,8 +44,12 @@ layer keeps an identity transform. See
 implemented (all 8 planned tasks plus the post-plan additions — `combo_mode`
 boolean combination, missing keyframe easing, `pyclipper`-based combo_mode==3
 pre-clipping — verified against all 19 sample documents) and what is
-deliberately out of scope (brush textures, Smart Warp — each produces a
-counted warning on stderr rather than a silent gap).
+deliberately out of scope: brush textures (a counted warning); layers with
+particle/audio/note/3D-Poser types, and Smart Warp (a per-layer stderr
+warning, shared code between both exporters via `walk_render_tree` —
+`Exporter._warned_unsupported_layers`/`_warned_smart_warp_layers` — not
+`moho2lottie.py`'s own counted-`Counter` mechanism) — all produce a stderr
+warning rather than a silent gap.
 An `ImageLayer` renders through the shared exporter when the optional
 `psd-tools` package is installed (`--image-dir`), and is skipped with a
 counted warning otherwise. A combo_mode==3 (intersect) shape's own fill/
@@ -336,7 +340,25 @@ afterward regardless of what you touched:
   local angle still needs to swing when its parent moves. This is an
   unverified model (Moho gives three force numbers and no equation); see the
   method's own docstring for what has and hasn't been checked against a real
-  render.
+  render. The same method also gates a second, independent family —
+  `wind_dynamics`, behind `--wind-dynamics`, off by default — reusing this
+  spring rather than a separate equation (no `wind_spring_force` field
+  exists in the file). Tested against `DarkMan.mohoproj` and **confirmed not
+  to reproduce the observed effect** (same or more oscillation than plain
+  playback, not less) — see the method's own WIND EVIDENCE section before
+  assuming this flag helps anything.
+- **`Exporter._geometry_and_mapper`** (per-point rigid bone binding,
+  `MeshPoint.parent`, behind `--point-bones`, off by default) — an older
+  measurement recorded honouring this as much worse than ignoring it; a
+  2026-08 re-measurement against the SAME `SketchBone.animeproj` reference
+  frames, on two different metrics, found the opposite (improvement or a
+  wash, never worse), and it separately fixed a real complaint on
+  `DarkMan.mohoproj` (`hat -> right_part`/`left_part` moving far more than
+  in Moho App). The contradiction with the old measurement is **recorded,
+  not resolved** — see the method's own docstring. Don't flip the default
+  without resolving it first (or without deliberately accepting the
+  documented trade-off, since it also *increases* motion on the one
+  purely-single-bone mesh checked).
 
 ### Porting to Go
 

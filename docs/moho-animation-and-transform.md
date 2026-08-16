@@ -160,7 +160,9 @@ Each `interp` entry has a fixed shape:
 
 `s` is `false` and `h` is `0` on all 604,139 entries. `in` is `1` except on
 2,052 entries, all of them `fill_color`, `3d_thickness` or `line_color`. Both
-are **not decoded**.
+are **not decoded** from file evidence - see [§ 3.2b](#32b-background-from-mohos-own-scripting-api--still-not-a-file-finding)
+for what Moho's own API says these fields are (`stagger`/`interval`), still
+not confirmed against any sample document that varies them.
 
 ### 3.2 `t` — the interpolation type
 
@@ -189,7 +191,121 @@ The value mixes freely inside one channel — a single walk-cycle `anim_angle` i
 `Bandit.mohoproj` carries `t = [0, 4, 4, 2, 2, 2, 4, 4, 2, 2, 4]` — so it is a
 per-keyframe choice made by the animator, not a channel-wide setting.
 
+### 3.2b Background from Moho's own scripting API — still not a file finding
+
+> Read directly from Moho's own shipped C++ scripting header,
+> `/Applications/Moho.app/Contents/Resources/Support/Pro/Extra Files/Lua
+> Interfaces/pkg_moho.lua_pkg` - a real file on this machine, but still not a
+> real Moho *document*, so this is orientation only, exactly like
+> [`moho-rigging-and-deformation.md` § 5.1b](moho-rigging-and-deformation.md#51b-the-mechanism-from-mohos-own-scripting-api--still-not-a-file-finding)
+> for the same reason. **Do not change `Channel._segment`/`_parse_cycles`
+> against this alone** - it names fields and enum members, not their numeric
+> values or exact per-mode curve shapes, and § 3.2/3.3/3.4 above were each
+> validated against real exported frames, which nothing below has been.
+
+The API's `InterpSetting` class (one entry per `interp[i]`) has exactly this
+field set:
+
+```
+class InterpSetting {
+    int32   interpMode;   // one of the named constants below
+    real    val1;
+    real    val2;
+    int32   interval;     // 1 = every frame, 2 = on 2's, 3 = on 3's, etc.
+    int32   hold;         // frames to hold the previous value before interpolating
+    bool    stagger;
+    int32   tags;         // "used for keyframe color, and possibly other stuff"
+    uint8   flags;
+};
+#define INTERP_LINEAR
+#define INTERP_SMOOTH
+#define INTERP_EASE
+#define INTERP_STEP
+#define INTERP_NOISY
+#define INTERP_CYCLE
+#define INTERP_POSE
+#define INTERP_EASE_IN
+#define INTERP_EASE_OUT
+#define INTERP_BEZIER
+#define INTERP_BOUNCE
+#define INTERP_ELASTIC
+```
+
+The field NAMES line up one-to-one with this document's own JSON
+abbreviations by both position and a documented per-mode meaning that
+matches what § 3.4 already found independently:
+
+| JSON key | API field | Corroboration |
+|---|---|---|
+| `im` | `interpMode` | See below - this is the one field whose READING this section actually revises. |
+| `v1` | `val1` | The API comment reads "`INTERP_CYCLE` - val1 = relative starting frame" - an exact match for § 3.4's own independently-derived "`v1 >= 0`: resume at `when[i] - v1`". |
+| `v2` | `val2` | Same comment: "val2 = absolute starting frame" - matches § 3.4's "`v2 >= 0`: resume at `v2`" exactly. |
+| `in` | `interval` | "1 to interpolate every frame, 2 to animate on 2's, 3 on 3's" - gives §3.1's "not decoded" `in` field a concrete meaning: **stepped/held keyframe density**, not literally "interval between two specific frames". Still not tested against a document where `in` actually varies meaningfully (§3.1 found only 2,052 non-`1` entries, all on colour-ish channels). |
+| `h` | `hold` | "how many frames to hold the previous value before interpolating" - a real field, not decoded further; `0` on every sample entry per §3.1. |
+| `s` | `stagger` | A real boolean field (matching the Moho 13.5-era "Stagger" keyframe-interpolation-type UI language in the changelogs), not a flag on `im` - `false` on every sample entry per §3.1. |
+| `t` | **possibly `tags`, not "the interpolation type"** | See below. |
+
+**Reconsidering §3.2's own `t` framing.** The API has no field literally
+named "type" or "mode" other than `interpMode` itself - the closest
+positional/semantic match for `t` is `tags` ("used for keyframe colour, and
+possibly other stuff in the future"), which is exactly the kind of
+free-mixing, non-functional metadata that would explain §3.2's own confirmed
+finding that `t` "mixes freely inside one channel" and cannot be read as a
+clean mode selector (`t == 4` shows up in three unrelated contexts). If `t`
+is `tags`, `im` is the far more likely home for the actual interpolation
+MODE - which reframes §3.3 below.
+
+**Reconsidering §3.3's own `im` framing.** §3.3 reads `im` as a **bit
+field** (bits 1/2/4/8) because the observed values (`0,1,2,3,5,7,9`) are
+consistent with that. They are EQUALLY consistent with `im` being
+`interpMode` itself - a plain ~12-way enum, not independently combinable
+flags - if the constants above are assigned sequentially in their declared
+order (`LINEAR=0, SMOOTH=1, EASE=2, STEP=3, NOISY=4, CYCLE=5, POSE=6,
+EASE_IN=7, EASE_OUT=8, BEZIER=9, BOUNCE=10, ELASTIC=11`, unconfirmed - the
+header shows no numeric values, only declaration order). Under that reading:
+- `im=1` (`SMOOTH`, 446,672 - the overwhelming default) matches ordinary
+  Moho knowledge that smooth/TCB interpolation is its default keyframe type.
+- `im=9` (`BEZIER`, 182) would mean the enum value ITSELF says "Bezier
+  handles follow", not "bit 8 is a modifier flag on some other base mode" -
+  and 182 is the EXACT count §3.3 already found for entries carrying the `b`
+  array, either reading fits that correlation equally well.
+- `im=5`/`im=7` (`CYCLE`/`EASE_IN`, 520 combined) would mean the cycle
+  marker is its own discrete mode, not "flag bit 4 layered on top of mode
+  1 or 3" - consistent with §3.3's own finding that cycle-marked entries
+  never ALSO show `im=9` (Bezier) in this corpus, i.e. the two never
+  co-occur, which a true independent-bit-flags model would allow but a
+  plain-enum model would forbid by construction.
+- `im=3` (`STEP`, 151,877 - "151,875 of those are on single-keyframe
+  channels") fits a channel with nothing to interpolate being left at
+  whatever Moho's own UI happened to default a fresh single-keyframe
+  property to, rather than "bits 1+2 set, meaning unknown".
+
+Both readings currently explain 100% of the observed corpus - a real file
+using `BOUNCE`, `ELASTIC`, `NOISY`, `POSE`, or `EASE`/`EASE_OUT` explicitly
+(none of which appear among `{0,1,2,3,5,7,9}`) would immediately discriminate
+them, and is the concrete next step if this ever gets revisited. **Until
+then this is a hypothesis, not a decode** - §3.3's own bit-flag framing
+below is left as-is rather than rewritten against unverified enum numbers.
+
+**`BOUNCE`/`ELASTIC`, named for the first time here**, are two of the
+interpolation "curve shapes" the Anime Studio Pro 10 changelog
+(`mono-changelogs.md`) advertises by the same names ("By applying the
+Bounce keyframe type to the timeline, any object interpolated will appear
+to bounce... Elastic provides a rubber band effect") - plausible candidates
+for part of what §3.5/KNOWN GAPS already call "Moho's own undecoded easing
+curve", alongside plain `EASE`/`EASE_IN`/`EASE_OUT`. None of the three
+appear in this repository's own 604,139-entry census under the
+`im`-as-plain-enum reading either (no `im` value beyond `9` is observed) -
+so, real file evidence or not, this corpus still never exercises them.
+
 ### 3.3 `im` — a flag field, partly decoded
+
+> See [§ 3.2b](#32b-background-from-mohos-own-scripting-api--still-not-a-file-finding)
+> for an alternative reading of these same numbers - `im` as a plain
+> ~12-way enum (Moho's own `interpMode`) rather than independent bit flags.
+> Both fit every count below equally well; this section's own bit-flag
+> framing is left as-is because it is the one actually checked against
+> real exported frames.
 
 **Confirmed** distribution: `1` (446,672), `3` (151,877), `0` (3,803), `2`
 (1,085), `5` (493), `9` (182), `7` (27).
@@ -586,6 +702,7 @@ without writing any keyframe. Nothing bakes them into `anim_angle`.
 |---|---|---|
 | Bone dynamics (spring physics) | `bone_dynamics` (`Bool` channel), `spring_force`, `damping_force`, `torque_force` | **115 bones in 6 documents**: `WhatIsBone` (52), `Bandit` (28 — every bone), `AddBone` (21), `BoneDynamics` (6), `Rabbit` (6), `ControlBones` (2) |
 | Angle dynamics | `angle_dynamics` | 2 bones in `Bandit.mohoproj` |
+| Wind dynamics | `wind_dynamics` (plain `Bool`, no dedicated `wind_spring_force` etc. — shares the row above's fields), plus `BoneLayer.wind`/`.gravity` (`direction`/`strength`/`turbulence_*`) | **0 bones in this 19-document corpus** — `false` on every bone of the two format-1045 documents checked (`Bandit`, `SketchBone`'s re-save). `DarkMan.mohoproj` (outside this corpus, gitignored, user-supplied) is the first document found where it is `true` — on all 91 of its bones, with `bone_dynamics`/`angle_dynamics` `false` everywhere on the same file, a combination the six documents above never exercise. See `moho2svg.py`'s `Layer.physics_dynamic` and `Skeleton.dynamic_angles`' WIND EVIDENCE section |
 | Angle constraints | `constraints`, `min_constraint`, `max_constraint` | **158 bones in 11 documents** |
 | Control bones | `angle_control_parent`, `pos_control_parent`, `scale_control_parent` (+ `_scale`, `_delay`) | 4 documents: `ControlBones` (2 bones each for angle/pos/scale), `BoneDynamics`, `AddBone`, `Rabbit`. `Bandit` sets only `scale_control_delay` (8, on one bone) |
 | IK targets | `target_bone`, `ik_lock`, `ik_global_angle`, `ignored_by_ik` | `target_bone` set on 41 bones across 14 documents (1–8 bones each) |

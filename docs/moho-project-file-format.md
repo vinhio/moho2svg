@@ -496,9 +496,20 @@ turbulence_frequency}`, also channels).
 no physics at all — carries `wind.strength = 100.0` on **all five** of its
 `BoneLayer`s and `gravity = {x: 0, y: -10}` on every `GroupLayer`. So these
 are per-layer defaults Moho always writes, not a sign that anything is being
-simulated. The per-bone `wind_dynamics` flag is the more likely subscription
-switch (false on every bone of both 1045 documents), but that is **not
-decoded**. Neither field is read by `moho2svg.py`.
+simulated. The per-bone `wind_dynamics` flag is the real subscription switch
+(`Layer.physics_dynamic`, false on every bone of both 1045 documents above)
+— confirmed genuinely load-bearing outside this 19-file corpus:
+`DarkMan.mohoproj` (gitignored, user-supplied) sets it `true` on all 91 of
+its bones, with real secondary motion observed in Moho App that plain
+keyframe playback does not reproduce. `moho2svg.py`/`moho2lottie.py` now
+read `wind_dynamics` (`Layer.physics_dynamic` for detection/warnings, and an
+opt-in `--wind-dynamics` flag reusing `Skeleton.dynamic_angles`' spring for
+an actual attempt at simulating it) — but that attempt is **confirmed NOT to
+reproduce Moho's own damping** on the one bone tested (see
+`Skeleton.dynamic_angles`' WIND EVIDENCE section), so "read" here means
+detected and experimented with, not decoded. `gravity` itself is only ever
+read as part of that same detection (`_any_nonzero("gravity")`) — no
+gravity-specific force is simulated separately from wind.
 
 **`SwitchLayer`** — `switch_keys` (a `String` channel whose `val` entries are
 **child layer names**) selects the active child; used. Not used:
@@ -593,7 +604,7 @@ A `MeshLayer`'s `mesh` has three parallel structures plus metadata:
 | `position` | `Vec2` channel | animated on 14 points | **yes** |
 | `width` | `Val` channel | `1.0` on 12,797 points; also `0.34`, `0.32`, `0.14`, `0.0`, `0.46`, `0.2`, `0.26`, … | **yes** — per-point stroke width ([§ 7.6](#76-stroke-width), [§ 7.7](#77-tapered-strokes)) |
 | `curves` | list of ints | indices of the curves through this point | no (the reverse mapping is rebuilt from `curves`) |
-| `parent` | int | point-level parenting | no |
+| `parent` | int | point-level parenting — a bone index this ONE point follows rigidly, overriding the layer's own binding; `-2`/`-1` = no override (the common case). Real on ~4,000 points over 119 meshes across the 19-file corpus, e.g. `Bandit.mohoproj`'s `Leg_F` (9 of 28 points → bone 11) and `Ears` (all 20 → 5 different bones) | **detected, applied only behind `--point-bones` (off by default)** — see `Exporter._geometry_and_mapper`. Ignored by default: the point still goes through the layer's own flexible region blend as if unbound. An older measurement called honouring it much worse; re-measured against the same reference frames (two different metrics) it is an improvement or a wash, never worse — contradiction recorded, not resolved, in that method's own docstring |
 | `colored` | bool | `false` on all 52,748 points (19-file total) | no |
 | `color` | `Color` channel | per-point vertex colour | no — inert while `colored` is `false` |
 | `color_strength` | `Val` channel | `1.0` everywhere | no |
@@ -1106,11 +1117,24 @@ Bone fields **not** used, grouped by what they would change:
   (21), `BoneDynamics` (6), `Rabbit` (6), `ControlBones` (2) — and
   `BoneDynamics.animeproj` keyframes it (7 channels with more than one key).
   `angle_dynamics` is `true` on 2 bones in `Bandit.mohoproj`; the `pos_`,
-  `scale_` and `wind_` variants are `false` everywhere. Moho adds the
-  resulting spring motion on top of the keyed pose at playback time, so
-  ignoring these fields drops real secondary motion (follow-through, overlap)
-  rather than nothing — an **exercised** gap. See
+  `scale_` and `wind_` variants are `false` everywhere **in this 19-file
+  corpus**. Moho adds the resulting spring motion on top of the keyed pose
+  at playback time, so ignoring these fields drops real secondary motion
+  (follow-through, overlap) rather than nothing — an **exercised** gap. See
   [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 6.
+  **Correction: `wind_dynamics` is not always false.** `DarkMan.mohoproj`
+  (gitignored, user-supplied, outside this corpus) has it `true` on all 91
+  of its bones while `bone_dynamics`/`angle_dynamics` stay `false` — the
+  first real case of that combination. `moho2svg.py`/`moho2lottie.py` now
+  detect this (`Layer.physics_dynamic`) and offer an opt-in `--wind-dynamics`
+  attempt at simulating it, reusing `bone_dynamics`' own spring — but that
+  attempt is confirmed NOT to reproduce Moho's own damping (see
+  `Skeleton.dynamic_angles`' WIND EVIDENCE section), so this remains an
+  exercised, still-open gap, not a closed one. A separate, unrelated finding
+  from the same investigation: `MeshPoint.parent` (per-point rigid bone
+  binding — [§ 7.2](#72-mesh-points)) is read but ignored by default too
+  (`--point-bones`), and honouring it measurably helps the exact symptom
+  `DarkMan.mohoproj` showed.
 - **Editor state**: `hidden`, `shy`, `selected`, `bone_label_showing`,
   `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`.
 - **`flip_h` / `flip_v`** — Bool channels, listed as editor state by an

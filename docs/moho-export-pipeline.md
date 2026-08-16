@@ -423,9 +423,30 @@ result = acc / total   (or p unchanged if total == 0)
 
 The default falloff is `inv_d2` (`1/d²`), selected by
 `RenderSettings.bone_weight_falloff`. Three alternatives (`linear`, `cut_d2`,
-`hermite`) are kept in `BONE_WEIGHT_FALLOFFS` because they were tried during
-development and **could not be told apart from `inv_d2` by any available
-reference** — not because they are known to be equally valid.
+`hermite`) are kept in `BONE_WEIGHT_FALLOFFS`: scored against Moho's own
+reference frames they now separate clearly and **disagree between the two
+documents that have one** (`inv_d2` wins `SketchBone`, `linear` wins
+`Bandit`'s many-bone layers) — so the default is the best-of-four for the
+one document it was tuned on, not a decoded formula, and not "equally valid"
+either.
+
+**A mesh point can skip this blend entirely.** `MeshPoint.parent` (a
+per-point bone index) is meant to override the layer's own binding for that
+one point — see `Exporter._deformed_point_mapper`/`_geometry_and_mapper`.
+It is read but **ignored by default** (`--point-bones` off): the point still
+goes through the same weighted blend above as if it carried no binding at
+all. Turning `--point-bones` on instead routes a bound point straight to
+`skinner.bones[bone].rest_to_pose.apply(p)` — no blend, no falloff function
+involved. An older measurement recorded this as much worse than ignoring
+the field; re-measured against the same `SketchBone.animeproj` reference
+frames (two different metrics, not the original one) it is an improvement
+or a wash, never worse — the contradiction is recorded, not resolved, in
+`Exporter._geometry_and_mapper`'s own docstring. It also measurably fixes a
+real over-motion complaint on `DarkMan.mohoproj`, where the artist bound
+`hat -> right_part`/`left_part`'s own mesh points to specific bones and the
+default blend was diluting that with a sibling bone's much larger swing —
+see `docs/moho-rigging-and-deformation.md` for that investigation's shape,
+generalised as the `moho-relationship-trace` skill.
 
 ---
 

@@ -344,7 +344,18 @@ rest_p0(i)      = rest(i) applied to (0, 0)          # bone base, rest pose
 rest_p1(i)      = rest(i) applied to (length, 0)     # bone tip, rest pose
 ```
 
-Then, for a point `p` (flexible binding):
+**Before any of this, one point can opt out entirely.** `MeshPoint.parent` -
+a bone index carried on the POINT, not the layer - overrides the layer's
+own binding for that single point: `-2`/`-1` mean "no override, use the
+layer's own binding" (the common case, ~89% of the 19-file corpus' points);
+a real index (~4,000 points over 119 meshes) means "this point should
+follow that one bone rigidly", skipping the weighted blend below entirely
+for it. The field is read by `moho2svg.py`, but applying it is **off by
+default** (`--point-bones`) - see [§ 3.8](#38-summary-what-ignoring-each-feature-costs)
+for the current, unresolved evidence on whether ignoring it is actually
+safe.
+
+Then, for a point `p` with no per-point override (flexible binding):
 
 ```
 for each candidate bone i:
@@ -356,9 +367,18 @@ p' = weighted average, or p unchanged if no bone contributed
 ```
 
 The **falloff shape is a heuristic**. `moho2svg.py` ships four
-(`inv_d2`, `linear`, `cut_d2`, `hermite`) and uses inverse-distance-squared;
-no available reference could separate them, and the case where two bones both
-have strong influence near one point is the unvalidated one.
+(`inv_d2`, `linear`, `cut_d2`, `hermite`). An earlier revision of this
+section said no available reference could separate them - that is now
+corrected: scored against Moho's own reference frames they separate
+clearly and **disagree between the two documents that have more than one
+bone**, `inv_d2` winning `SketchBone.mohoproj` while `linear` wins
+`Bandit.mohoproj`'s many-bone layers. So the default is the best fit for
+one document, not a decoded formula, and the case of two bones both having
+strong influence near one point - the scenario this whole falloff exists
+for - is where the four candidates disagree most, not where they agree.
+`DarkMan.mohoproj`'s `hat -> right_part`/`left_part` is a concrete instance
+of exactly that scenario found outside this corpus: see
+[§ 3.8](#38-summary-what-ignoring-each-feature-costs).
 
 Note what `strength` does *not* do in the default falloff: `1/d²` ignores its
 value entirely, so `strength` acts only as an on/off gate there. The
@@ -708,15 +728,102 @@ Two consequences that catch people out:
 
 ---
 
+## 4b. Vitruvian Bones — background, not evidence
+
+> **Not in the sample.** `bones_groups` (the field this section's own
+> mechanism points to) is present but **empty in every one of this
+> repository's 19 sample documents** - same status as `distortion_layer_uuid`
+> in § 5.1. This section comes from Moho's own shipped scripting API header
+> (a real file, `pkg_moho.lua_pkg` - see § 5.1b for the same source used the
+> same way) and from `mono-changelogs.md`'s own feature announcement, not
+> from any project file examined here. Orientation only - do **not**
+> implement against it. [🟠 3/10]
+
+**What it is.** Vitruvian Bones is a Moho Pro 13.5 feature
+(`mono-changelogs.md`): "you can have different sets of heads, each with its
+own controllers. Or the same limb in different perspectives... group and
+animate them on the fly just by switching from one to the next." It reads
+like a SwitchLayer, but for a SUBSET OF BONES within one skeleton instead of
+a subset of layers.
+
+**The mechanism, from the API.** `M_Skeleton` (the scripting-API counterpart
+of this project's own `Skeleton`) exposes `CountGroups()`/`Group(id)`,
+returning `M_BoneGroup` objects:
+
+```
+class M_BoneGroup {
+    const char *Name();
+    int32 CountBones();
+    M_Bone *Bone(int32 id);
+    M_Bone *ActiveBone();
+    bool ContainsBoneID(int32 boneID);
+    ...
+    AnimVal   fActiveBone;   // ANIMATED - which member bone is "active" now
+    bool      fEnabled;
+};
+```
+
+A bone group is a NAMED subset of a skeleton's own bones, with an
+**animatable** `fActiveBone` channel selecting which one member is active at
+a given frame - structurally the same idea as `SwitchLayer.switch_active_child`
+already implemented in this project (`Layer.switch_active_child`), just
+scoped to bones inside one skeleton rather than child layers. `Strings.EN.txt`
+corroborates the UI surface: `/Menus/Bone/EnableAllVitruvianBones`,
+`/Menus/Bone/DisableAllVitruvianBones`, `/Scripts/Tool/BoneGroups/
+AddToVitruvianGroup`, and channel names `VitruvianBones`/
+`VitruvianBonesConsolidated` under `/Animation/Channels/`.
+
+**Likely storage.** `bones_groups` — already present in this project's own
+raw JSON (`docs/moho-project-file-format.md` lists it as "ignored", and
+`schema/skeleton.schema.json` presumably has an empty-array placeholder for
+it) — is the obvious JSON home for `M_Skeleton`'s own group list, by
+straightforward name matching, exactly as `distortion_layer_uuid` was
+matched to `GetWarpLayer()`/`SetWarpLayer()` in § 5.1b. Not confirmed at the
+field-shape level (no sample document populates it), so the actual per-group
+JSON keys (name/active-bone/enabled/member-bone-list) are not known.
+
+**What to do today.**
+- **Do not guess the format** — same posture as Smart Warp.
+- **Do detect it.** `moho2svg.py` now does: `walk_render_tree` warns once per
+  `BoneLayer` whose `skeleton.bones_groups` is non-empty (`Skeleton.
+  bones_groups`, a raw passthrough — see its own docstring), the same
+  dedup mechanism as the Smart Warp detector right above it in the source.
+  Before this, a Vitruvian-Bones-using document would silently pose only
+  the skeleton's OWN keyed angles, ignoring whichever bone the group's
+  `fActiveBone` selector actually meant to be showing.
+- **To document it properly**, one file is enough — same recipe as § 5.3:
+  save a Vitruvian-Bones-using project into `moho/` and re-run the census
+  in [§ 9](#9-reproducing-the-numbers); `bones_groups` will stop being
+  empty and its own shape will be immediately visible.
+
+**Pin Bones (Anime Studio 12) — an unresolved lead, not a finding.**
+`mono-changelogs.md` also names "Pin Bones": "Add one point bones to alter,
+move and reshape assets in fun new ways... Works with both vectors and
+images!" Unlike Vitruvian Bones and Smart Warp, this pass found **no
+corroborating evidence at all** for it — no `Pin`-named class or method in
+`pkg_moho.lua_pkg`, no `Pin Bone` string in `Strings.EN.txt`, and no
+zero-length `Bone` (the cheapest guess for what a "one point bone" might
+serialize as — a bone whose `length` is 0, since an ordinary bone is a
+two-point segment) anywhere in this repository's 531-bone, 19-document
+corpus. Left here only as a flagged, unconfirmed lead for a future session
+with either a newer/different Moho install or a real Pin-Bone-using file —
+not worth a detector given zero grounding for what field to even check.
+
+---
+
 ## 5. Smart Warp
 
 ### 5.1 What it is — background, not evidence
 
 > **Not in the sample.** No file in `moho/` uses Smart Warp: a search for any
-> JSON key containing "warp" across all 19 files returns **zero hits**. The
-> paragraphs in this sub-section come from general knowledge of Moho as an
-> application, not from any file examined here. They are orientation only —
-> do **not** implement against them. [🟠 4/10]
+> JSON key containing "warp" across all 19 files returns **zero hits** - now
+> re-run also for "curver", "quad" and "compressible" (see § 5.1b), still
+> **zero hits** across all three. The paragraphs in this sub-section come
+> from general knowledge of Moho as an application (§ 5.1) or from Moho's own
+> shipped Lua scripting API headers (§ 5.1b, a real file on this machine, but
+> still not a real Moho *document* - no exported project has ever put these
+> fields under a microscope). They are orientation only — do **not**
+> implement against them. [🟠 4/10]
 
 Smart Warp is a deformation feature added in the Moho 13 generation. Instead
 of bending artwork with bones, the artist puts a **warp mesh** over a layer or
@@ -736,6 +843,86 @@ warp mesh is *dense* (a piecewise mapping defined by a grid). They are not
 interchangeable, and a bone-only implementation cannot approximate one with
 the other.
 
+### 5.1b The mechanism, from Moho's own scripting API — still not a file finding
+
+Moho ships its C++ scripting interface as plain-text header files under the
+application bundle itself: `/Applications/Moho.app/Contents/Resources/
+Support/Pro/Extra Files/Lua Interfaces/pkg_moho.lua_pkg` (class/method
+signatures) and `/Applications/Moho.app/Contents/Resources/Strings/
+Strings.EN.txt` (menu-label strings) — both read directly for this section,
+not third-party documentation. This confirms the *mechanism* precisely,
+narrowing (but not replacing) § 5.2's `distortion_layer_uuid` inference:
+
+- **A warp/Curver layer is NOT a distinct document layer type.** There is no
+  `WarpLayer`/`CurverLayer`/`QuadMeshLayer` C++ class in `pkg_moho.lua_pkg` -
+  the full layer class hierarchy it defines is exactly the set this project
+  already knows: `MohoLayer` -> `MeshLayer`, `AudioLayer` -> `ImageLayer`,
+  `GroupLayer` -> `BoneLayer`/`SwitchLayer`/`ParticleLayer`, `Mesh3DLayer`,
+  `NoteLayer`. An ordinary `MeshLayer` instance carries the warp/Curver
+  behaviour as STATE, not type:
+  ```
+  class MeshLayer : public MohoLayer {
+      bool IsWarpLayerCandidate(bool curverOnly = false);
+      void MarkAsWarpLayer(bool b, MohoLayer *target);
+      bool IsWarpLayer();
+      void MarkAsCurver(bool b);
+      bool IsCurver();
+      ...
+  };
+  class MohoLayer {
+      ...
+      void SetWarpLayer(MohoLayer *layer);
+      MohoLayer *GetWarpLayer();
+      ...
+  };
+  ```
+  `MarkAsWarpLayer(bool, target)` / `GetWarpLayer()` on `MohoLayer` (the
+  common base every layer kind inherits) is the API-level match for
+  `distortion_layer_uuid` in § 5.2's table below: a plain `MeshLayer`,
+  marked as a warp layer, pointing at the OTHER layer it deforms. This is
+  the strongest evidence yet for that inference, but it is evidence about
+  the *application's* internal model, not about how `distortion_layer_uuid`
+  (or a boolean twin of `IsWarpLayer()`/`IsCurver()`) is actually spelled in
+  the serialized JSON - neither `IsWarpLayer` nor `IsCurver`'s own stored
+  field name is confirmed; a search for "curver" as a JSON key substring
+  across all 19 sample documents (same method as the existing "warp" search)
+  returns zero hits too, same as `distortion_layer_uuid` itself: present but
+  always empty/inert.
+- **"Curver" (not "Curve") is the correct spelling** - confirmed by
+  `MarkAsCurver`/`IsCurver` in the API above, and independently by
+  `Strings.EN.txt`'s own UI menu labels:
+  `/Menus/Draw/CreateCurverLayer=Create Curver Layer` and
+  `/Menus/Draw/CreateCompressibleCurverLayer=Create Compressible Curver
+  Layer` (alongside the ordinary `/Menus/Draw/CreateMeshLayer=Create Mesh
+  Layer`). A "Curver" is presumably a `MeshLayer` created with `IsCurver()`
+  already true - a 1-D warp mesh (a strip/curve an artist bends artwork
+  along) rather than the general 2-D quad-grid warp mesh described in
+  § 5.1, though that distinction is this project's own reading of the name,
+  not confirmed by either source file.
+- **"Quad Mesh" IS a real, confirmed Moho feature - update: found in
+  `mono-changelogs.md`**, just not under a distinct layer-type name. Moho Pro
+  13.5's own release notes: "Meshes are now even more powerful and easier to
+  use with the new Quads! Animate your artwork in true perspective by simply
+  attaching a four points shape to it. Or create grids for your characters -
+  combining triangles and quads- and make them move like 3D." This resolves
+  the "not confirmed" status below to "confirmed real, still not a distinct
+  JSON type": a Quad mesh is a plain `MeshLayer` (matching § 5.1b's own
+  finding that no `QuadMesh`-named class exists in the scripting API) whose
+  warp behaviour is a genuine PERSPECTIVE transform ("true perspective"),
+  not just the affine bend a bone/ordinary-mesh-warp produces - the sharpest
+  concrete difference from a `Curver` (a 1-D bend along a line, per its own
+  name) found so far. Introduced in the 13.5 generation specifically, one
+  point release after Smart Warp itself (13.0) and Wind dynamics (also
+  13.5) - all three shipped in the same release.
+- **Practical implication for this project, regardless of the above:**
+  because a warp/Curver layer is an ordinary `MeshLayer`, `moho2svg.py`
+  ALREADY renders its own mesh geometry correctly today - nothing about
+  parsing or drawing that layer's own shapes is missing. The unimplemented
+  part is strictly the DEFORMATION EFFECT it would apply to whatever layer
+  `GetWarpLayer()`/`distortion_layer_uuid` names, exactly the gap § 5.3
+  already describes - this sub-section renames and sharpens that gap, it
+  does not add a new one.
+
 ### 5.2 What the files actually show
 
 These are **confirmed** observations. Whether they belong to Smart Warp is
@@ -743,7 +930,7 @@ inference, and is marked as such.
 
 | Field | Where | Observed | Reading |
 |---|---|---|---|
-| `distortion_layer_uuid` | every layer in the `1038` and `1045` files (827 layers); **absent** in the `1021` file | `""` in all 827 | A layer pointing at *another layer* used as a distortion mesh. The name is a strong match for a warp-mesh reference. **Inference** [🟡 6/10]. |
+| `distortion_layer_uuid` | every layer in the `1038` and `1045` files (827 layers); **absent** in the `1021` file | `""` in all 827 | A layer pointing at *another layer* used as a distortion mesh. The name is a strong match for a warp-mesh reference, and now also matches `MohoLayer::GetWarpLayer()`/`SetWarpLayer(MohoLayer*)` in Moho's own scripting API ([§ 5.1b](#51b-the-mechanism-from-mohos-own-scripting-api--still-not-a-file-finding)) at the MECHANISM level - still not confirmed as the same field at the SERIALIZATION level. **Inference** [🟡 6/10]. |
 | `triangulated` | every `MeshLayer` in the `1045` file (21); absent in `1038` and `1021` | `false` on all 21 | A mesh can be triangulated — which is what a deformation mesh needs and a drawing mesh does not. |
 | `squashable_deformer` | same 21 layers | `false` on all 21 | The word *deformer* implies a mesh can act as one. |
 | `frame_zero_deformer` | same 21 layers | `true` on all 21 | Presumably "this deformer is defined at frame 0", matching the rest-pose-at-frame-0 convention bones already use. |
@@ -761,7 +948,14 @@ That is a raster deformation mode, not Smart Warp, and is equally undecoded.
 ### 5.3 What to do today
 
 - **Do not guess the format.** No structure, no field names, no point layout
-  for a warp mesh can be stated from this sample.
+  for a warp mesh can be stated from this sample - § 5.1b confirms the
+  MECHANISM (an ordinary `MeshLayer`, marked as a warp/Curver layer,
+  pointing at a target layer it deforms) from Moho's own API, but not the
+  JSON key names or point layout that mechanism is actually serialized as.
+- **A warp/Curver layer's OWN geometry already exports correctly** - see
+  § 5.1b's last point. Nothing needs to change there; the gap is narrower
+  than "this layer type is unsupported" - it is specifically "the
+  DEFORMATION EFFECT on the target layer is not applied".
 - **Do detect it.** A reader can cheaply flag a document as "possibly
   unsupported" when any layer has a non-empty `distortion_layer_uuid`, or when
   a mesh layer has `squashable_deformer: true`. `moho2svg.py` does neither
@@ -769,7 +963,9 @@ That is a raster deformation mode, not Smart Warp, and is equally undecoded.
 - **To document it properly**, one file is enough: save any Moho project that
   uses a Smart Warp mesh into `moho/`, then re-run the census in
   [§ 9](#9-reproducing-the-numbers). The new keys will stand out immediately,
-  because the current key set is fully enumerated.
+  because the current key set is fully enumerated. Also grep that new file
+  directly for `"curver"` (case-insensitive) - § 5.1b's `IsCurver()` finding
+  means that substring, not just "warp", is now worth checking too.
 
 ---
 
@@ -1141,7 +1337,10 @@ Useful variants:
 - Finding a feature that is absent: grep the raw text for a key name, e.g.
   `grep -o '"[a-z_0-9]*warp[a-z_0-9]*"' moho/*.animeproj | sort -u` — this is
   how the "zero Smart Warp hits" claim in [§ 5.1](#51-what-it-is--background-not-evidence)
-  was checked.
+  was checked. Also try `curver` (not just `warp`) since
+  [§ 5.1b](#51b-the-mechanism-from-mohos-own-scripting-api--still-not-a-file-finding)
+  found that spelling in Moho's own API for the same feature — zero hits
+  for that one too, in every sample document checked so far.
 - A channel's value: read `val[0]` for the first keyframe and `len(when)` for
   the number of keys. A field like `bone_dynamics` is a channel, not a bool,
   and counting it as a bool gives the wrong answer.

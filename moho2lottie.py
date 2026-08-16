@@ -174,10 +174,16 @@ WARNING_EXPLANATIONS = {
                      "their animation in time - not applied, because nothing in "
                      "the sample corpus animates such a layer, so the sign and "
                      "scope cannot be verified (see Layer.timing_offset)",
-    "physics": "layer(s) driven by Moho's own rigid-body physics simulation "
-               "(gravity/velocity/forces), which this exporter does not run - "
-               "each renders at its rest pose on every sampled frame instead "
-               "of the simulated motion Moho itself would show",
+    "physics": "layer(s) with at least one bone subscribed to Moho's wind/"
+               "gravity spring-damper (wind_dynamics), which plain playback "
+               "does not simulate - each bone's keyframed angle/pos/scale "
+               "channel is still played back exactly as authored, just "
+               "without the damping Moho itself applies at runtime, so a "
+               "channel that changes direction quickly may show MORE "
+               "oscillation and larger swings here than in Moho, not less "
+               "(pass --wind-dynamics for an experimental, NOT verified to "
+               "help, attempt at simulating it - see moho2svg.py's "
+               "Skeleton.dynamic_angles WIND EVIDENCE section)",
     "image_layer_shear": "image-layer frame(s) where a flexible (multi-bone) "
                          "bone binding does not map to a true parallelogram - "
                          "the single affine transform this writer keyframes "
@@ -2165,9 +2171,37 @@ def main() -> None:
                              "but measured slightly WORSE against the reference frames "
                              "overall, so it is off by default")
     parser.add_argument("--bone-dynamics", action="store_true",
-                        help="simulate Moho's per-bone spring/damping secondary motion. "
-                             "UNVERIFIED - see moho2svg.py's Skeleton.dynamic_angles. "
-                             "Off by default")
+                        help="simulate Moho's per-bone spring/damping secondary motion "
+                             "(bone_dynamics AND angle_dynamics). UNVERIFIED - see "
+                             "moho2svg.py's Skeleton.dynamic_angles. Off by default")
+    parser.add_argument("--wind-dynamics", action="store_true",
+                        help="simulate Moho's per-bone wind/gravity dynamics "
+                             "(wind_dynamics), reusing --bone-dynamics' own spring/"
+                             "damper. CONFIRMED NOT TO REPRODUCE THE OBSERVED EFFECT "
+                             "on DarkMan.mohoproj (same or MORE oscillation than plain "
+                             "playback, not less) - see moho2svg.py's "
+                             "Skeleton.dynamic_angles WIND EVIDENCE section. Shipped as "
+                             "plumbing for a future, properly-fitted model, not as a "
+                             "fix. Independent of --bone-dynamics. Off by default")
+    parser.add_argument("--point-bones", action="store_true",
+                        help="honour Moho's per-POINT bone binding "
+                             "(mesh.points[].parent), forcing each bound point to "
+                             "follow its own named bone rigidly instead of the "
+                             "layer's flexible region blend. Off by default - the "
+                             "existing note in moho2svg.py's Exporter."
+                             "_geometry_and_mapper recorded this as measured WORSE on "
+                             "SketchBone.animeproj's ear meshes, but re-measured "
+                             "against those SAME reference frames it now improves "
+                             "both centroid tracking (kulak-sol mean dy 3.20px -> "
+                             "1.46px) and a translation-independent shape metric "
+                             "(9.53px -> 4.71px) - the discrepancy with the old note "
+                             "is UNRESOLVED (different metric, or something changed "
+                             "since), so this stays off by default pending that. It "
+                             "also measurably reduces DarkMan.mohoproj's hat -> "
+                             "right_part/left_part over-motion by following each "
+                             "point's own explicitly-bound bone (mesh.points[].parent "
+                             "names bone 0 or 1 there) instead of blending in bone 2's "
+                             "much larger swing")
     parser.add_argument("--validate", action="store_true",
                         help="validate the output against lottie/lottie.schema.json "
                              "(needs the optional 'jsonschema' package)")
@@ -2193,6 +2227,8 @@ def main() -> None:
     exporter = LottieExporter(document,
                                RenderSettings(smooth_bone_joints=args.smooth_joints,
                                                bone_dynamics=args.bone_dynamics,
+                                               wind_dynamics=args.wind_dynamics,
+                                               point_bone_binding=args.point_bones,
                                                image_search_dir=args.image_dir))
     lottie = exporter.export(frames, include_hidden=args.include_hidden)
 

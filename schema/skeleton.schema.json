@@ -12,7 +12,7 @@
         "type": { "const": "Skeleton" },
         "binding_mode": { "type": "integer", "description": "Observed values: 1 (large majority), 2 (rare). Meaning not decoded; moho2svg.py never branches on it." },
         "bones": { "type": "array", "items": { "$ref": "#/$defs/Bone" } },
-        "bones_groups": { "type": "array", "description": "Observed only rarely, and empty in every sample seen. Presumably a bone-grouping feature parallel to mesh.groups." }
+        "bones_groups": { "type": "array", "description": "Observed only rarely, and empty in every sample seen. Presumably Vitruvian Bones (a Moho Pro 13.5 feature - animatable per-group 'which bone is active' switching, like a SwitchLayer scoped to a subset of one skeleton's bones) - matched at the MECHANISM level by Moho's own scripting API, M_Skeleton::CountGroups()/Group(id) returning M_BoneGroup {name, AnimVal fActiveBone, bool fEnabled}, though not confirmed as the same field at the serialization level. See docs/moho-rigging-and-deformation.md section 4b. Read by moho2svg.py only to WARN when non-empty (Skeleton.bones_groups); the groups themselves are not parsed or applied." }
       },
       "additionalProperties": true
     },

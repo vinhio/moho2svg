@@ -218,7 +218,7 @@
         "follow_bending": { "type": "boolean" },
         "follow_curve": { "type": "integer", "description": "Observed constant -1 in every sample." },
         "follow_layer_uuid": { "type": "string" },
-        "distortion_layer_uuid": { "type": "string", "description": "UUID of another layer used as a distortion mesh - the most likely storage hook for Moho's Smart Warp feature, though nothing in the sample confirms that. Empty in all 827 layers that carry the field; absent from the 1021 format generation. Not read by moho2svg.py, which does not even warn about it. See docs/moho-rigging-and-deformation.md section 5." },
+        "distortion_layer_uuid": { "type": "string", "description": "UUID of another layer used as a distortion mesh - the most likely storage hook for Moho's Smart Warp feature. Empty in all 827 layers that carry the field; absent from the 1021 format generation. Now also matched at the MECHANISM level (not the serialization level - still not confirmed as the same field) by Moho's own scripting API, MohoLayer::SetWarpLayer(MohoLayer*)/GetWarpLayer() - a plain MeshLayer, marked via MarkAsWarpLayer(bool, target)/IsWarpLayer()/IsCurver(), pointing at the layer it deforms. Not read by moho2svg.py, which does not even warn about it. See docs/moho-rigging-and-deformation.md section 5 (5.1b for the API finding)." },
         "rotate_to_follow": { "type": "boolean" },
         "scale_compensation": { "type": "boolean", "description": "How a layer's stroke width reacts to ancestor scaling." },
         "scale_normalization": { "type": "number" },

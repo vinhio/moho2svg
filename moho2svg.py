@@ -1003,14 +1003,15 @@ KNOWN GAPS
     still does not synthesise an
     ImageLayer on its own (no ancestor chain to deform it with outside
     `--combined`/the whole-document walk).
-  - Physics (wind/gravity) and layer_effects/layer_shadow are ignored; a
-    single static frame rarely shows either, but an animated Lottie export
-    can - see moho2lottie.py's own "physics" warning.  Nothing in this
-    corpus actually trips that warning any more: Layer.physics_dynamic now
+  - Physics (wind/gravity) and layer_effects/layer_shadow are ignored by
+    default; a single static frame rarely shows either, but an animated
+    Lottie export can - see moho2lottie.py's own "physics" warning.  Nothing
+    in the tracked 19-file corpus trips that warning: Layer.physics_dynamic
     requires a bone to subscribe via `wind_dynamics` on top of the two
-    fields Moho defaults on for every layer, and the one document it used to
-    flag turned out to be explained by the channels after all (see
-    Channel._cycle_value).
+    fields Moho defaults on for every layer, and the one corpus document it
+    used to flag turned out to be explained by the channels after all (see
+    Channel._cycle_value).  `DarkMan.mohoproj` (outside the corpus,
+    gitignored under `moho/`) DOES trip it - see `--wind-dynamics` below.
   - Bone dynamics (Skeleton.dynamic_angles) now drives the spring from the
     PARENT's world rotation, so a bone whose own angle never moves still
     swings - which is how every rig in the corpus actually uses the feature.
@@ -1019,8 +1020,14 @@ KNOWN GAPS
     TRANSLATES; making those move needs a pivot-acceleration term, tried and
     rejected on evidence (see dynamic_angles).  Force units are fitted, not
     decoded.  `torque_force`, `angle_weight` and the
-    `*_control_delay`/`pos_`/`scale_`/`wind_` dynamics families are read or
-    skipped but never applied.
+    `*_control_delay`/`pos_`/`scale_` dynamics families are read or skipped
+    but never applied.  `wind_dynamics` now has a `--wind-dynamics` flag
+    that reuses this same spring, gated independently of `bone_dynamics` -
+    but it is a CONFIRMED negative result on the one bone tested
+    (`DarkMan.mohoproj`'s `hat -> right_part` `B3`: same or more oscillation
+    than plain playback, not the observed damping), shipped as plumbing for
+    a future model rather than a working simulation - see
+    Skeleton.dynamic_angles' WIND EVIDENCE section.
   - `Bandit.mohoproj`'s whole TAIL sits ~18 px (base) to ~32 px (tip) off
     vertically against Moho's own render, where every other layer in the
     document manages 0.3-2.8 px.  DIAGNOSED as the bone-dynamics gap above,
@@ -1058,6 +1065,15 @@ KNOWN GAPS
     (brush, colour) combinations sourced from a large texture, despite
     rendering much faster - not implemented: downscaling a source texture
     before baking, which would fix this too.
+  - Four layer kinds named in Moho/Anime Studio's own documented layer-type
+    list are not implemented at all: ParticleLayer, AudioLayer, NoteLayer,
+    Mesh3DLayer (Poser/3D). All four fall through walk_render_tree's own
+    layer dispatch to LayerKind.OTHER and draw nothing - now with a counted-
+    per-layer stderr warning (`Exporter._warned_unsupported_layers` dedupes
+    it across the many times a multi-frame Lottie export re-walks the same
+    tree) rather than silently. None of the 19 sample documents in this
+    repository's corpus contains any of the four, so none has ever been
+    reverse-engineered even to the point of confirming its own JSON shape.
 
 --------------------------------------------------------------------------------
 PORTING NOTES (E.G. TO GO)
@@ -2198,6 +2214,53 @@ class Bone:
             return False
         return self.angle_dynamics is None or _channel_ever_true(self.angle_dynamics)
 
+    def wind_dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
+        """Whether this bone's WIND dynamics is switched on at `frame`.
+
+        Unlike `dynamics_on` (the Angle family), this is NOT gated by
+        `bone_dynamics`. Evidence: `DarkMan.mohoproj` (a user-supplied file
+        under `moho/`, gitignored, outside the tracked 19-document corpus)
+        has `bone_dynamics = false` and `angle_dynamics = false` on every one
+        of its 91 bones, while `wind_dynamics = true` on all 91 - the first
+        case in this project's history of that combination. A direct
+        side-by-side comparison against Moho App and its own exported video,
+        on `hat -> right_part`'s bone `B3`, showed REAL secondary motion
+        despite the Angle switch being off: raw keyframe playback (this
+        exporter's un-simulated behaviour) produces ~3 oscillation cycles at
+        full keyframed amplitude, while Moho's own playback shows only ~2,
+        visibly smaller - the signature of a damped spring smoothing a
+        rapidly-alternating target, not of "no dynamics at all". Requiring
+        `bone_dynamics` here, by analogy with the Angle family, would have
+        predicted zero secondary motion on this exact bone, which is not
+        what was observed. So the model implemented is "wind_dynamics alone
+        is the switch" - matching `Layer.physics_dynamic`, which already
+        reads it that way for the same reason.
+
+        UNVERIFIED INFERENCE, same tier as `dynamics_on`/`dynamic_angles`:
+        reasoned from one document's raw keyframes plus one person's direct
+        Moho App/video comparison, not a pixel-measured reference render
+        (`moho/track/DarkMan/` does not exist). See `Skeleton.dynamic_angles`
+        for the shared spring-damper model this drives, and why it reuses
+        the bone's own `spring_force`/`damping_force`/`torque_force` rather
+        than inventing separate constants: the raw JSON never carries
+        `wind_spring_force`/`wind_damping_force`/`wind_torque_force` fields
+        the way it carries dedicated `pos_*`/`scale_*` ones for those other
+        two families - only `wind_dynamics` itself exists, which is why
+        Wind is read as sharing Angle's rotational spring rather than having
+        its own. That switch reading (wind_dynamics alone) is independent of
+        whether the shared spring reproduces the right MAGNITUDE - it does
+        not, on this same bone, tested: see `Skeleton.dynamic_angles`' WIND
+        EVIDENCE section for the confirmed negative result.
+        """
+        return bool(exporter.eval(self.wind_dynamics, frame))
+
+    @property
+    def wind_dynamics_ever_on(self) -> bool:
+        """True when wind_dynamics_on() could be true at SOME frame - the
+        wind-family counterpart to `dynamics_ever_on`, and just as cheap a
+        prefilter."""
+        return _channel_ever_true(self.wind_dynamics)
+
     @staticmethod
     def _build(raw: dict) -> "Bone":
         return Bone(
@@ -2229,14 +2292,25 @@ class Skeleton:
     relative to a frame, hence world_matrices() rather than a precomputed
     property."""
 
-    def __init__(self, bones: list[Bone]):
+    def __init__(self, bones: list[Bone], bones_groups: list):
         self.bones = bones
+        # Raw passthrough, NOT parsed - see docs/moho-rigging-and-deformation.md's
+        # Vitruvian Bones section: presumed (from Moho's own scripting API,
+        # M_Skeleton::CountGroups/Group returning M_BoneGroup - name,
+        # AnimVal fActiveBone, bool fEnabled, member bones) to be the
+        # storage for Vitruvian Bones (an animated "which bone in this
+        # group is active" selector, like a SwitchLayer for a subset of a
+        # skeleton's own bones) - but empty in every one of this
+        # repository's 19 sample documents, so this field exists only so
+        # walk_render_tree can warn a document likely uses the feature,
+        # not to read it.
+        self.bones_groups = bones_groups
 
     @staticmethod
     def _build(raw: Optional[dict]) -> Optional["Skeleton"]:
         if not raw or not raw.get("bones"):
             return None
-        return Skeleton([Bone._build(b) for b in raw["bones"]])
+        return Skeleton([Bone._build(b) for b in raw["bones"]], raw.get("bones_groups") or [])
 
     def world_matrices(self, frame: float, exporter: "Exporter") -> list[Mat2D]:
         """One world-space matrix per bone, parents resolved before children
@@ -2575,17 +2649,34 @@ class Skeleton:
         """Simulated angle for every bone whose dynamics switch is on AT
         `frame`, or {} when the feature is disabled or no bone uses it.
 
-        The switch is `bone_dynamics` AND `angle_dynamics` - see
-        Bone.dynamics_on for why both, and for what changed between format
-        versions.  It is made of keyframed Bool channels, not constants, and
-        it is asked per frame: `BoneDynamics.animeproj`'s `Main` bone turns
-        dynamics ON at frame 1 and OFF again at frame 29.  Smart Bone action
-        poses on it are honoured too (via Exporter.eval), because that same
-        document registers a "JumpCycle" pose on the `bone_dynamics` of all
-        six of its rabbit-ear bones.
+        TWO INDEPENDENT FAMILIES share this one simulation, each gated by
+        its own `RenderSettings` flag and each contributing its own set of
+        candidate bones (a bone can qualify via either, or both):
 
-        UNVERIFIED INFERENCE, off unless `--bone-dynamics` is passed.  Moho
-        gives three numbers per bone (`spring_force`, `damping_force`,
+        - Angle (`--bone-dynamics`): the switch is `bone_dynamics` AND
+          `angle_dynamics` - see Bone.dynamics_on for why both, and for what
+          changed between format versions.
+        - Wind (`--wind-dynamics`): the switch is `wind_dynamics` alone, NOT
+          gated by `bone_dynamics` - see Bone.wind_dynamics_on for the
+          `DarkMan.mohoproj` evidence this reading is built on, and for why
+          it is NOT modelled as a separate force (no `wind_spring_force`
+          field exists in the raw JSON the way `pos_spring_force`/
+          `scale_spring_force` do for their own families) but instead
+          simulated with the SAME rotational spring below as Angle - wind
+          and keyed-angle dynamics both perturb the same degree of freedom
+          (the bone's own rotation), so they share the same constants.
+
+        Both switches are made of keyframed Bool channels, not constants,
+        and are asked per frame: `BoneDynamics.animeproj`'s `Main` bone
+        turns Angle dynamics ON at frame 1 and OFF again at frame 29.
+        Smart Bone action poses on either are honoured too (via
+        Exporter.eval), because `BoneDynamics.animeproj` registers a
+        "JumpCycle" pose on the `bone_dynamics` of all six of its rabbit-ear
+        bones.
+
+        UNVERIFIED INFERENCE, off unless `--bone-dynamics`/`--wind-dynamics`
+        is passed.  Moho gives three numbers per bone (`spring_force`,
+        `damping_force`,
         `torque_force`) and nothing else: not the equation, not the units of
         those numbers, not the integrator, not the initial conditions.
 
@@ -2688,6 +2779,62 @@ class Skeleton:
         The skin weights themselves were checked point by point and are
         sane - each ear point is 95%+ dominated by its nearest bone.
 
+        WIND EVIDENCE - TESTED, AND LIKE THE ANGLE FAMILY ABOVE, IT FAILS.
+        No document in the tracked 19-file corpus has a bone subscribed to
+        `wind_dynamics` at all, so this reuse of the Angle spring model for
+        Wind has no `make check-reference` coverage. The motivating case is
+        `DarkMan.mohoproj` (user-supplied, under `moho/`, gitignored): its
+        `hat -> right_part` bone `B3` has 8 `anim_angle` keyframes across
+        frames 0-27 that reverse direction almost every keyframe (roughly
+        +99, -93, +83, -72, +50, -52, +14 degrees between consecutive keys).
+        Raw keyframe playback (`--wind-dynamics` OFF, this exporter's normal
+        behaviour) necessarily hits every one of those extremes
+        (`Channel._segment` is a monotone cubic; it cannot change how many
+        times the KEYED values themselves reverse), giving 6 reversals
+        (~3 oscillation cycles) at 135 degrees of total swing. A direct
+        side-by-side comparison against Moho App and its own exported video
+        showed only about 2 cycles, visibly smaller in amplitude - the
+        hypothesis this reuse was meant to test was that a damped spring
+        chasing a target this fast would naturally reproduce that.
+
+        IT DOES NOT.  Two models were tried against this exact bone, neither
+        reproduces fewer or smaller swings:
+
+        - The Angle family's own 2nd-order spring/damper (`spring_force =
+          2.0`, `damping_force = 1.0`, both DEFAULT values - not tuned per
+          bone) is UNDERDAMPED for a target changing this fast: critical
+          damping for `spring = 2` is `damping = 2*sqrt(2) ~= 2.83`, well
+          above the file's `1.0`. Simulated on `B3`, it produced the SAME 6
+          reversals as raw playback, with 154 degrees of swing - MORE than
+          the 135 degrees of raw playback, not less. This is the same
+          failure mode as the "HOW FAR IT IS CHECKED - AND IT FAILS" result
+          above (`BoneDynamics.animeproj`'s ears got worse, not better) -
+          an underdamped spring driven by a fast target rings instead of
+          smoothing it.
+        - A 1st-order relaxation toward the keyed target (`x' = spring *
+          (target - x)`, no velocity/inertia term at all, so it cannot
+          overshoot) was also tried, using the same `spring_force = 2.0` as
+          the rate constant. It barely changed anything: 96.9 degrees of
+          swing against 98.7 raw, same 6 reversals. `B3`'s target reverses
+          roughly every 3-6 frames, and a rate of 2.0/frame reaches ~86% of
+          the way to a new target within a single frame - far too fast to
+          filter out alternation on that timescale.
+
+        So NEITHER a literal reuse of the existing spring constants, in
+        either integration order, is the mechanism Moho actually uses here -
+        or the constants mean something other than what this reading
+        assumes. Rather than guess a third model with no way to check it (no
+        `moho/track/DarkMan/` reference exists), `--wind-dynamics` is being
+        shipped anyway, OFF by default, as working PLUMBING - the switch
+        detection (`Bone.wind_dynamics_on`/`_ever_on`), the per-bone
+        family-union gating in this method, and the CLI/RenderSettings
+        wiring in both moho2svg.py and moho2lottie.py - for whoever next
+        gets real reference frames for a wind-subscribed document to fit an
+        actual model against, rather than starting from nothing. Passing it
+        today reuses the Angle spring, which is now KNOWN not to reproduce
+        the observed smoothing - treat it as a documented negative result,
+        not a fix.
+
         Cost note: the state at frame F depends on every frame before it, so
         this simulates start_frame..F on each call, now with one keyed
         world-matrix build per frame on top.  Results are cached per
@@ -2705,20 +2852,33 @@ class Skeleton:
           Callers fall back to the keyed `anim_angle` for any bone absent
           from the mapping.
         """
-        if not exporter.settings.bone_dynamics:
+        settings = exporter.settings
+        if not (settings.bone_dynamics or settings.wind_dynamics):
             return {}
-        # Candidates: every bone whose switch is EVER on, on the main timeline
-        # or inside a Smart Bone action pose.  This is only a cheap prefilter -
-        # whether the switch is on at any given frame is asked again below,
-        # per frame, because it is a keyframed Bool channel and not a constant.
-        candidates = [i for i, b in enumerate(self.bones) if b.dynamics_ever_on]
+
+        def active(i: int, at: float) -> bool:
+            """Whether bone `i` is simulated at frame `at`, unioning
+            whichever family flag(s) are enabled.  A bone can be a
+            candidate via EITHER family (or both); this is asked once per
+            frame per bone, same as the single-family check used to be."""
+            bone = self.bones[i]
+            return ((settings.bone_dynamics and bone.dynamics_on(at, exporter))
+                    or (settings.wind_dynamics and bone.wind_dynamics_on(at, exporter)))
+
+        # Candidates: every bone whose EITHER enabled switch is EVER on, on
+        # the main timeline or inside a Smart Bone action pose.  This is
+        # only a cheap prefilter - whether a switch is on at any given frame
+        # is asked again below, per frame, because these are keyframed Bool
+        # channels and not constants.
+        candidates = [i for i, b in enumerate(self.bones)
+                      if (settings.bone_dynamics and b.dynamics_ever_on)
+                      or (settings.wind_dynamics and b.wind_dynamics_ever_on)]
         if not candidates:
             return {}
         document = exporter.document
         start = float(document.start_frame)
         stop = float(frame)
-        on_at_stop = [i for i in candidates
-                      if self.bones[i].dynamics_on(stop, exporter)]
+        on_at_stop = [i for i in candidates if active(i, stop)]
         if not on_at_stop:
             return {}
         if stop <= start:
@@ -2750,7 +2910,7 @@ class Skeleton:
             for i in candidates:
                 bone = self.bones[i]
                 target = exporter.eval(bone.anim_angle, f)
-                if not bone.dynamics_on(f, exporter):
+                if not active(i, f):
                     x[i], v[i] = target, 0.0
                     continue
                 # Parent world rotation, as a velocity and an acceleration in
@@ -3314,6 +3474,25 @@ class Layer:
         return self._raw.get("target_layer_uuid", "")
 
     @property
+    def distortion_layer_uuid(self) -> str:
+        """The uuid of another layer used as a Smart Warp distortion mesh -
+        empty ("") when unset. NOT resolved or applied anywhere in this
+        module - Smart Warp itself is not implemented (see the module
+        docstring's KNOWN GAPS and docs/moho-rigging-and-deformation.md
+        section 5, including 5.1b for how this field's NAME was inferred).
+        Exists so walk_render_tree can at least WARN when a document likely
+        uses the feature, instead of silently exporting undeformed
+        artwork."""
+        return self._raw.get("distortion_layer_uuid", "")
+
+    @property
+    def squashable_deformer(self) -> bool:
+        """Whether this MeshLayer is marked as a Smart Warp deformer mesh -
+        see distortion_layer_uuid's own docstring; same "detect, do not
+        implement" status."""
+        return bool(self._raw.get("squashable_deformer", False))
+
+    @property
     def visible(self) -> bool:
         return self._raw.get("visible", True)
 
@@ -3456,13 +3635,24 @@ class Layer:
 
     @property
     def physics_dynamic(self) -> bool:
-        """True when Moho moves this BoneLayer's whole rig with its own
-        rigid-body physics simulation (wind/gravity) rather than any
-        keyframed channel this tool can read - see the module docstring's
-        KNOWN GAPS entry on physics. A layer where this is true can only
-        ever render at its rest pose here, however many frames are sampled,
-        since neither this module nor moho2lottie.py runs a physics
-        simulation.
+        """True when this BoneLayer has at least one bone actually
+        SUBSCRIBED to Moho's wind/gravity spring-damper (`wind_dynamics`),
+        on top of a non-zero wind/gravity strength - see the module
+        docstring's KNOWN GAPS entry on physics.
+
+        A layer where this is true is NOT frozen at a rest pose here -
+        neither this module nor moho2lottie.py simulates the spring-damper,
+        so a subscribed bone's `anim_angle`/`anim_pos`/`anim_scale` channel
+        is still played back exactly as keyed, just with zero damping.  For
+        a slow, mostly-monotonic channel that under-simulation is barely
+        visible (the WhatIsBone/AddBone/BoneDynamics/Rabbit/ControlBones
+        style of ordinary bone dynamics used to be checked this way too).
+        For a channel whose keyed angle reverses direction quickly, it is
+        not subtle: raw playback hits every keyframe's exact extreme, so it
+        can show MORE oscillation cycles and LARGER amplitude than Moho's
+        real, damped result - see the DarkMan.mohoproj evidence below.  So
+        this flag means "expect the export to look jitterier/wobblier here
+        than in Moho", not "expect it to look frozen".
 
         THREE things have to line up, because the first two are defaults Moho
         writes everywhere and mean nothing on their own:
@@ -3479,21 +3669,52 @@ class Layer:
            This is the part that discriminates, and it is false on all 28
            bones of `Bandit.mohoproj` and all 94 of `SketchBone`.
 
-        The result is that nothing in this corpus is physics-driven, which is
-        a correction, not a gap.  This property used to fire for
-        `Bandit.mohoproj`'s top-level "Bandit" layer on the strength of
-        condition 2 plus an observation - "its keyframed bone channels do not
-        account for the screen-spanning motion Moho's own render shows across
-        frames 25-127".  They do account for it.  The channels were being
-        read wrongly: Moho's cycle ACCUMULATES (see Channel._cycle_value),
-        and once it does, this exporter tracks Moho's own 103 exported frames
-        to within 0.73 px of horizontal travel over a 2430 px march.  There
-        is no unexplained motion left to attribute to physics.
+        Nothing in the tracked 19-document corpus is physics-driven under
+        this reading, which is a correction, not a gap.  This property used
+        to fire for `Bandit.mohoproj`'s top-level "Bandit" layer on the
+        strength of condition 2 plus an observation - "its keyframed bone
+        channels do not account for the screen-spanning motion Moho's own
+        render shows across frames 25-127".  They do account for it.  The
+        channels were being read wrongly: Moho's cycle ACCUMULATES (see
+        Channel._cycle_value), and once it does, this exporter tracks Moho's
+        own 103 exported frames to within 0.73 px of horizontal travel over
+        a 2430 px march.  There is no unexplained motion left to attribute
+        to physics.
 
         `wind_dynamics` exists only from format 1045, so on an older file
         condition 3 can never be met.  That is the safe direction: those
         files predate the field, and nothing in them shows unexplained
         motion either.
+
+        EVIDENCE `wind_dynamics` IS a real, live subscription outside the
+        tracked corpus - `DarkMan.mohoproj` (a user-supplied file under
+        `moho/`, gitignored, not one of the 19 tracked documents above).
+        Every one of its 91 bones, across all 33 skeleton-bearing
+        BoneLayers, sets `wind_dynamics = true` with a non-default
+        `spring_force`/`damping_force`/`torque_force` triple, while
+        `bone_dynamics`/`angle_dynamics` (the ordinary angle-spring switch,
+        see `Bone.dynamics_on`) stay `false` everywhere - the first
+        real-world case in this project's history of "wind on, angle spring
+        off" on the same bone. `hat -> right_part`'s bone `B3` is the
+        sharpest example: its `anim_angle` has 8 keyframes across frames
+        0-27 that reverse direction almost every keyframe (roughly
+        +99deg, -93deg, +83deg, -72deg, +50deg, -52deg, +14deg between
+        consecutive keys). Raw playback (this exporter's own behaviour)
+        necessarily hits every one of those extremes - `Channel._segment`
+        is a monotone cubic, so within-segment shape can't change the
+        keyframe-implied reversal count - producing roughly 3 full
+        oscillation cycles at full amplitude. Watching the same bone in
+        Moho App directly, and in Moho's own exported video, shows only
+        about 2 cycles at visibly smaller amplitude - consistent with a
+        damped spring chasing a rapidly-alternating target rather than
+        reaching every extreme. NOT independently confirmed against a
+        Moho-exported reference frame sequence (`moho/track/DarkMan/` does
+        not exist, unlike the corpus documents above) - this is reasoned
+        from the raw keyframe data plus one person's direct side-by-side
+        comparison against Moho App/its own video export, not a
+        pixel-measured reference. Treat as a plausible mechanism, not a
+        decoded one, same evidence tier as `Channel._segment`'s own curve
+        shape.
         """
         if self.skeleton is None:
             return False
@@ -4737,6 +4958,7 @@ class RenderSettings:
     smooth_bone_joints: bool = False    # --smooth-joints; Exporter._effective_subset
     point_bone_binding: bool = False    # --point-bones; Exporter._geometry_and_mapper
     bone_dynamics: bool = False         # --bone-dynamics; Skeleton.dynamic_angles
+    wind_dynamics: bool = False         # --wind-dynamics; Skeleton.dynamic_angles
     forced_mask_containers: frozenset[str] = field(default_factory=frozenset)  # --mask-container
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0
@@ -4897,6 +5119,8 @@ class Exporter:
         self._psd_layer_cache: dict[tuple, Optional[tuple[bytes, int, int]]] = {}  # see _psd_layer_png
         self._library_dirs_cache: dict[str, list[str]] = {}           # see _library_dirs
         self._image_segment_cache: dict[int, list["ImageSegment"]] = {}  # id(layer) -> see _image_layer_segments
+        self._warned_unsupported_layers: set[int] = set()  # id(layer) -> see walk_render_tree
+        self._warned_smart_warp_layers: set[int] = set()   # id(layer) -> see walk_render_tree
 
     # -- channel evaluation --------------------------------------------------
 
@@ -5147,24 +5371,94 @@ class Exporter:
         better, so the order is only ever switched for a mesh that actually
         uses per-point binding - 119 of them across the 19 sample documents.
 
-        AND EVEN THEN IT IS OFF BY DEFAULT (`--point-bones`), because
-        treating `MeshPoint.parent` as "follow this bone rigidly" measured
-        much WORSE, not better.  On `SketchBone.animeproj`'s two ear meshes,
-        the only ones there that use the field (5 points each, all naming
-        bone 0), error against Moho's own frames rose from 16.0% to 48.4%
-        and from 13.8% to 38.5%, taking the whole-frame difference 78.9% the
-        wrong way.  So the field is real and widely used - roughly 4,000
-        points over those 119 meshes - but this reading of it is wrong.
-        Resolving the index against the OUTERMOST skeleton instead was then
-        tested and is WORSE still - 49.4% ear error against 40.7% for the
-        innermost and 14.5% for ignoring the field entirely - so it is not a
-        skeleton mix-up.  The value genuinely is a bone index (123 of the
-        4,400 bound points exceed their own mesh's point count, so it cannot
-        be a point index); it is the RIGID reading that is wrong.  Untested:
-        a bound point may still blend with its neighbours with that bone
-        merely forced into the weighting, or the behaviour may be gated by
-        `skeleton.binding_mode`.  Left wired up but disabled so the next
-        attempt starts from these measurements instead of a guess.
+        AND EVEN THEN IT IS OFF BY DEFAULT (`--point-bones`).  An older
+        measurement recorded treating `MeshPoint.parent` as "follow this
+        bone rigidly" as much WORSE, not better: on `SketchBone.animeproj`'s
+        two ear meshes, the only ones there that use the field (5 points
+        each, all naming bone 0), error against Moho's own frames was said
+        to rise from 16.0% to 48.4% and from 13.8% to 38.5% (a whole-frame
+        IoU-style percentage, not otherwise specified), and resolving the
+        index against the OUTERMOST skeleton instead was said to be worse
+        still (49.4% against 40.7% innermost, 14.5% for ignoring the field).
+
+        THAT MEASUREMENT DOES NOT REPRODUCE on a re-run using this repo's
+        OWN tracked SVG references (`make check-reference`'s
+        `moho/track/SketchBone/new/`, 12 sampled frames) and two metrics
+        this repo can actually compute from them:
+
+            metric                          ignore field   rigid (--point-bones)
+            bbox-centre mean dy (px)             3.20            1.46
+            bbox-centre max dy (px)              6.68            2.40
+            shape-RMS mean, centroid-aligned      9.53            4.71
+            shape-RMS worst frame                39.66           25.97
+
+        Both metrics, on both documents checked (`SketchBone.mohoproj` above;
+        `Bandit.mohoproj`'s point-bound `Body`/`BlueSpot`/`YellowSpot`/
+        `Back_Texture` sub-meshes of its tracked `BellyTexture` group showed
+        NO measurable difference either way, i.e. neutral, not worse), say
+        rigid point-bone binding is an IMPROVEMENT or a wash on THIS
+        re-measurement, never the regression the old note describes.
+
+        BUT the discrepancy is UNRESOLVED, not settled in this re-run's
+        favour: these are point-position metrics against SVG path vertices,
+        not the original's methodology.  `moho/track/SketchBone/ears/`
+        (120 PNG frames - Moho's own raster render, isolated to just the
+        ear meshes) exists in this repo and is exactly what
+        `docs/moho-rigging-and-deformation.md`'s "The falloff shape is not
+        the lever - measured" section describes scoring by SILHOUETTE IoU
+        for this same question ("per-point bone binding (two readings, both
+        far worse)") - a pixel-coverage metric, not a vertex-position one,
+        and the more likely source of the 16%/48%/etc. figures than a since
+        -fixed bug. IoU and vertex-RMS can legitimately disagree: IoU
+        penalises AREA/silhouette distortion (exactly the "linear-blend-
+        skinning volume collapse" that same section separately diagnoses)
+        in a way sparse on-curve vertex comparisons do not weight the same
+        way. No tool in this repo currently reproduces that raster IoU
+        measurement, so this re-run neither confirms nor overturns it -
+        recorded here rather than silently preferring the newer, weaker
+        signal.
+
+        A THIRD document supplies a real-world case this repo's corpus never
+        had: `DarkMan.mohoproj` (user-supplied, gitignored under `moho/`,
+        no Moho reference frames exist for it, so this is NOT a
+        `make check-reference`-verified number, only an internal
+        self-comparison) - `hat -> right_part`/`left_part`'s `r_part`/
+        `l_part` meshes explicitly bind their own points to bone 0 (B1) or
+        bone 1 (B2), never bone 2 (B3, which swings ~135 degrees in world
+        space against B1's ~27). Ignoring that binding (the current
+        default) blends bone 2's much larger swing into B1-bound points via
+        the region falloff; honouring it (`--point-bones`) cuts those
+        points' own on-screen travel from 59.6px to 35.3px (-41%) - directly
+        addressing a real complaint that this rig's `hat` accessories move
+        far more in the export than in Moho App/its own exported video.
+
+        NOT a universal win on this same document, though: `1_bubenchik`/
+        `1_bubenchik 2` (the pompom, ALL points bound to bone 2/B3, no mix)
+        moves slightly MORE with `--point-bones` on (Lottie-baked bbox
+        diagonal 147-173px default -> 155-182px rigid) - the default's
+        region blend was pulling in a little of B1/B2's much smaller motion
+        even on a mesh entirely "owned" by B3, and losing that blend when
+        binding turns fully rigid makes an already-large swing slightly
+        larger. So this flag trades "B1/B2-bound regions swing noticeably
+        less" for "a B3-only region swings very slightly more" - net
+        improvement on the meshes actually complained about, not a
+        strict improvement on every mesh in the document.
+
+        Given the SIZE of the flip (an established "much worse" finding not
+        reproducing, across two independent metrics and two documents, plus
+        a THIRD document where honouring the field is clearly the right
+        direction) the default has NOT been changed here regardless - the
+        original finding was presumably not fabricated, and flipping a
+        global default on a metric mismatch this repo cannot fully explain
+        is exactly the kind of guess this codebase's own conventions warn
+        against.  `--point-bones` remains available, still off by default,
+        for anyone exporting a point-bound-heavy document today, and this
+        contradiction is left recorded - not resolved - for whoever
+        rebuilds an IoU-style checker next, so the next attempt starts from
+        real numbers on both sides instead of trusting either note blindly.
+        The value genuinely is a bone index (123 of the 4,400 bound points
+        across the original corpus exceed their own mesh's point count, so
+        it cannot be a point index).
         """
         if mesh.has_point_bones and self.settings.point_bone_binding:
             return (self._curve_geometries(mesh, frame,
@@ -6466,6 +6760,26 @@ def walk_render_tree(exporter: "Exporter", frame: float,
             child_exempt = layer.masking in (1, 2)
 
             if layer.mesh is not None:
+                if ((layer.distortion_layer_uuid or layer.squashable_deformer)
+                        and id(layer) not in exporter._warned_smart_warp_layers):
+                    # Smart Warp is not implemented at all - see the module
+                    # docstring's KNOWN GAPS and docs/moho-rigging-and-
+                    # deformation.md section 5 (5.1b for how these two field
+                    # names were narrowed down, still without a confirmed
+                    # sample to verify the effect against). This is a CHEAP
+                    # detector, not a decoder: it flags a document as
+                    # "possibly relies on an effect this tool cannot
+                    # reproduce" so the artwork silently exporting undeformed
+                    # is at least visible on stderr, deduplicated per layer
+                    # the same way _warned_unsupported_layers is (a
+                    # multi-frame Lottie export re-walks the whole tree once
+                    # per sampled frame).
+                    exporter._warned_smart_warp_layers.add(id(layer))
+                    sys.stderr.write(f"  ! layer {layer.name!r}: looks like a Smart Warp "
+                                     f"deformer or target (distortion_layer_uuid="
+                                     f"{layer.distortion_layer_uuid!r}, squashable_deformer="
+                                     f"{layer.squashable_deformer}) - Smart Warp is not "
+                                     f"implemented, this layer exports without it\n")
                 exporter._active_actions = exporter._active_actions_along(ancestors, frame)
                 exporter._layer_scale = world_here.uniform_scale() or 1.0
                 chain = build_deform_chain(ancestors, layer, frame, exporter)
@@ -6490,8 +6804,42 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 # children, which may be an empty list; that still yields an
                 # "enter"/"exit" pair with nothing in between, matching
                 # Moho's own still-draws-an-empty-<g> behaviour.
+                if (layer.kind is LayerKind.BONE and layer.skeleton is not None
+                        and layer.skeleton.bones_groups
+                        and id(layer) not in exporter._warned_smart_warp_layers):
+                    # Vitruvian Bones is not implemented at all - see
+                    # docs/moho-rigging-and-deformation.md's Vitruvian Bones
+                    # section. Same cheap "detect, do not decode" posture as
+                    # the Smart Warp warning just above, and the same dedup
+                    # set (both mean "an animation feature this tool cannot
+                    # reproduce was probably used here").
+                    exporter._warned_smart_warp_layers.add(id(layer))
+                    sys.stderr.write(f"  ! layer {layer.name!r}: skeleton has "
+                                     f"{len(layer.skeleton.bones_groups)} bones_groups "
+                                     f"entr(y/ies) - looks like Vitruvian Bones, which is "
+                                     f"not implemented; this bone layer poses without it\n")
                 yield from walk(layer.children, layer, ancestors + (layer,),
                                  world_here, child_exempt)
+            elif layer.kind is LayerKind.OTHER and id(layer) not in exporter._warned_unsupported_layers:
+                # A layer kind this tool has never implemented at all -
+                # ParticleLayer, AudioLayer, NoteLayer and Mesh3DLayer
+                # (Poser) are the four named in Moho/Anime Studio's own
+                # layer-type list that fall here (see the module docstring's
+                # PORTING NOTES/KNOWN GAPS - none of the four appear in any
+                # of this repository's 19 sample documents, so none has
+                # ever been reverse-engineered). Distinct from an unresolved
+                # PatchLayer (kind stays LayerKind.PATCH, a KNOWN kind whose
+                # target just did not resolve - see PATCH LAYERS), which
+                # intentionally draws nothing here without a warning.
+                # Deduplicated per layer (not per frame) via `exporter`'s
+                # own cache - walk_render_tree re-walks the whole tree once
+                # per sampled frame for an animated Lottie export, and this
+                # would otherwise repeat the same warning 100+ times for one
+                # layer.
+                exporter._warned_unsupported_layers.add(id(layer))
+                sys.stderr.write(f"  ! layer {layer.name!r}: layer kind "
+                                 f"{layer.type_name!r} is not implemented, skipped "
+                                 f"entirely (drawn as nothing) - see LayerKind.OTHER\n")
             # else: neither a mesh, an image, nor a container - e.g. an
             # unresolved PatchLayer (see PATCH LAYERS) whose target never
             # got a mesh - draws nothing at all, not even an empty
@@ -6932,17 +7280,40 @@ def main() -> None:
                              "is on), hence off by default")
     parser.add_argument("--bone-dynamics", action="store_true",
                         help="simulate Moho's per-bone spring/damping secondary "
-                             "motion (bone_dynamics). UNVERIFIED: the file gives the "
-                             "force numbers but not the equation, units or "
-                             "integrator, and no reference render in this repo "
-                             "exercises it cleanly - see Skeleton.dynamic_angles. "
+                             "motion (bone_dynamics AND angle_dynamics). UNVERIFIED: "
+                             "the file gives the force numbers but not the equation, "
+                             "units or integrator, and no reference render in this "
+                             "repo exercises it cleanly - see Skeleton.dynamic_angles. "
                              "Off by default")
+    parser.add_argument("--wind-dynamics", action="store_true",
+                        help="simulate Moho's per-bone wind/gravity dynamics "
+                             "(wind_dynamics), reusing --bone-dynamics' own spring/"
+                             "damper (no separate wind_* force fields exist in the "
+                             "file). CONFIRMED NOT TO REPRODUCE THE OBSERVED EFFECT: "
+                             "on DarkMan.mohoproj, real Moho damps a fast-alternating "
+                             "bone from ~3 oscillation cycles to ~2 with smaller "
+                             "amplitude, but this model produces the SAME cycle count "
+                             "and MORE amplitude than plain playback (underdamped, "
+                             "same failure mode as --bone-dynamics on BoneDynamics."
+                             "animeproj's ears) - see Skeleton.dynamic_angles' WIND "
+                             "EVIDENCE section for the full negative result. Shipped "
+                             "as plumbing for a future, properly-fitted model, not as "
+                             "a fix. Independent of --bone-dynamics. Off by default")
     parser.add_argument("--point-bones", action="store_true",
                         help="honour Moho's per-POINT bone binding "
-                             "(mesh.points[].parent). Measured MUCH worse than "
-                             "ignoring it - see Exporter._geometry_and_mapper - "
-                             "so it is off by default and kept only for further "
-                             "investigation")
+                             "(mesh.points[].parent), forcing each bound point to "
+                             "follow its own named bone rigidly instead of the "
+                             "layer's flexible region blend. Off by default: an "
+                             "older measurement recorded this as MUCH worse on "
+                             "SketchBone.animeproj's ear meshes (see "
+                             "Exporter._geometry_and_mapper), but re-measured against "
+                             "those SAME reference frames it now improves both "
+                             "centroid tracking and a translation-independent shape "
+                             "metric - UNRESOLVED discrepancy with the old note, kept "
+                             "off pending that. Also measurably helps "
+                             "DarkMan.mohoproj's hat -> right_part/left_part "
+                             "over-motion - see _geometry_and_mapper's own "
+                             "docstring for the numbers")
     args = parser.parse_args()
 
     if args.brush_raster and Image is None:
@@ -6958,6 +7329,7 @@ def main() -> None:
                               smooth_bone_joints=args.smooth_joints,
                               point_bone_binding=args.point_bones,
                               bone_dynamics=args.bone_dynamics,
+                              wind_dynamics=args.wind_dynamics,
                               image_search_dir=args.image_dir)
     document = load_document(args.project)
     exporter = Exporter(document, settings)

@@ -74,6 +74,11 @@ Exactly one export mode is required: `--layer`, `--all`, `--combined`, or
 | `--brush-spacing-mul N` | `1.0` | Multiply brush dab spacing by `N` — raise it (e.g. `3`-`4`) to thin out dab density on a heavily brush-styled document, trading texture fidelity for a much lighter/faster-to-view SVG. See [Brush textures](#7-brush-textures). |
 | `--brush-raster` | off | Composite each brush-styled shape's entire stroke into ONE raster `<image>` instead of one `<use>`/dab — smallest/fastest brush option, at the cost of that stroke no longer being vector. Requires Pillow. See [Brush textures § 7.2](#72-rasterizing-a-whole-stroke-into-one-image-per-shape). |
 | `--brush-raster-supersample N` | `2.0` | With `--brush-raster`, composite at `N`x the shape's own pixel size before declaring it at 1x size in the SVG — sharper fine texture at a roughly `N²` file-size cost. See [§ 7.2](#72-rasterizing-a-whole-stroke-into-one-image-per-shape). |
+| `--image-dir DIR` | — | Local directory standing in for the `Support/` folder of the Moho install an `ImageLayer`'s source lives under (e.g. `/Applications/Moho.app/Contents/Resources/Support` on macOS) — tries the portable `Layer.image_fileref` first, falling back to rebasing the absolute, often other-machine `image_path`. Requires the optional `psd-tools` package (and Pillow); a source that can't be found/opened is skipped with a counted warning, same as omitting this flag. |
+| `--smooth-joints` | off | Approximate Moho's "Smooth Joint for Bone Pair": blend a rigidly single-bone-bound layer across that bone's parent and children too, instead of tearing at the joint. A heuristic — no sample document records whether Moho's own option is on — so off by default. |
+| `--bone-dynamics` | off | Simulate Moho's per-bone spring/damping secondary motion (`bone_dynamics` AND `angle_dynamics`). **Unverified**: the file gives the force numbers but not the equation, units, or integrator, and the one reference-checked document that exercises it (`BoneDynamics.animeproj`'s ears) gets measurably *worse* with this on, not better. See `Skeleton.dynamic_angles`. |
+| `--wind-dynamics` | off | Simulate Moho's per-bone wind/gravity dynamics (`wind_dynamics`), reusing `--bone-dynamics`' own spring (no separate `wind_*` force fields exist in the file). **Confirmed not to reproduce the observed effect**: on `DarkMan.mohoproj`, real Moho damps a fast-alternating bone from ~3 oscillation cycles to ~2 with smaller amplitude, but this model gives the same cycle count and *more* amplitude than plain playback. Independent of `--bone-dynamics`; shipped as plumbing for a future, properly-fitted model, not as a fix — see `Skeleton.dynamic_angles`'s WIND EVIDENCE section. |
+| `--point-bones` | off | Honour Moho's per-point bone binding (`mesh.points[].parent`): a bound point follows its own named bone rigidly instead of the layer's flexible region blend. An older measurement recorded this as much worse on `SketchBone.animeproj`'s ear meshes; a later re-measurement, using different metrics than that original one, found the opposite (improvement or a wash) — the discrepancy is recorded, not resolved, so this stays off by default. Also measurably reduces `DarkMan.mohoproj`'s `hat -> right_part`/`left_part` moving more than in Moho App. See `Exporter._geometry_and_mapper`. |
 
 ## 4. Typical workflows
 
@@ -349,11 +354,20 @@ lists (with the reasoning behind each):
 
 - Boolean shape combination mode `combo_mode == 2` is not reverse-engineered.
 - Gradient centre/radius placement is approximate, not pixel-matched.
-- The flexible bone-binding weight falloff is unvalidated for cases where
-  more than one bone has significant influence at a point.
+- The flexible bone-binding weight falloff is a best-of-four heuristic, not
+  a decoded formula, and disagrees between the two documents that have more
+  than one candidate falloff to score against. A mesh point can instead be
+  bound rigidly to one bone (`MeshPoint.parent`, `--point-bones`), which
+  skips the falloff entirely for that point — off by default; see the flag
+  reference above and `Exporter._geometry_and_mapper` for the current,
+  unresolved evidence on whether ignoring per-point binding is safe.
 - `PatchLayer` is not modelled (observed to produce no visible geometry in
   every reference document so far).
-- Physics, IK, and layer effects/shadows are ignored (a flat single-frame
-  export is unaffected by any of them).
+- IK and layer effects/shadows are ignored (a flat single-frame export is
+  unaffected by either). Physics (wind/gravity spring-damper) is *detected*
+  (a counted warning in `moho2lottie.py`) and has an experimental, opt-in
+  simulation attempt (`--wind-dynamics`) — confirmed NOT to reproduce the
+  real damping on the one document tested, so it remains effectively
+  ignored in practice; see the flag reference above.
 - Textured brush strokes are an approximation with several further
   simplifications — see [§ 7](#7-brush-textures) and the module docstring.

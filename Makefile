@@ -151,7 +151,7 @@ out/lottie/%.json: moho2lottie.py moho2svg.py Makefile $$(wildcard moho/$$*.anim
 	mkdir -p out/lottie
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $@"; exit 1; fi; \
-	python3 moho2lottie.py "$$src" --out $@ $(VALIDATE) $(image_dir_flag)
+	python3 moho2lottie.py "$$src" --out $@ --wind-dynamics --point-bones $(VALIDATE) $(image_dir_flag)
 
 # Every project's lottie export (PROJECT_STEMS from above). A name with both
 # extensions (SketchBone) exports once, through the .animeproj; a .mohoproj
