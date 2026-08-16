@@ -6,7 +6,7 @@
 
 **Architecture:** Reuse `moho2svg.py`'s geometry pipeline unchanged. Two small additions to it — a Bezier path builder beside `build_path_d`, and one shared tree walk both exporters consume — then a new writer that bakes every deformation into canvas-pixel vertex positions, so every Lottie layer keeps an identity transform.
 
-**Tech Stack:** Python 3, standard library only. `jsonschema` and Pillow are optional and must never become required. No test framework: verification is check scripts under `tools/` driven by `make`, matching how this repository already verifies itself.
+**Tech Stack:** Python 3, standard library only. `jsonschema`, Pillow and `psd-tools` are optional and must never become required. No test framework: verification is check scripts under `tools/` driven by `make`, matching how this repository already verifies itself.
 
 **Spec:** [`moho-to-lottie-design.md`](moho-to-lottie-design.md) — read it before Task 1. This plan implements that design and does not restate its reasoning.
 
@@ -1628,3 +1628,102 @@ item 2's precomp path stays dormant for every document in this corpus);
 `SketchBone.animeproj` (no combo_mode at all) produces byte-identical
 layer/asset counts to before this work, confirming zero effect on
 documents these fixes do not apply to.
+
+### Post-plan addition: combo_mode==3 pre-clipped geometry (masksProperties mode "i" is not reliably honoured)
+
+Found while chasing a user report that Bandit's `Eye_Upper`/`Eye_Back`
+rendered with a large wrong-colour patch where the white of the eye should
+be, at specific frames (105-114, 35-41), and ONLY in some players -
+`moho2svg.py`'s own SVG export was already confirmed correct, matching a
+real Moho-exported reference SVG at frame 111 exactly.
+
+Root cause, isolated by rendering the SAME exported JSON through TWO
+different real renderers: lottie-web's own SVG mode rendered every frame
+correctly; lottie-web's own CANVAS mode, and separately LottieFiles' own
+preview player, did not. Bisecting `Eye_Upper#1`'s `masksProperties` list
+in the canvas renderer (removing entries, changing modes, live) found that
+mode `"i"` (intersect) has NO EFFECT AT ALL there - removing it changes
+nothing, while changing another entry's mode to `"a"`/`"s"` visibly does.
+A compound "subtract (bounding box minus the base shape)" single-path `"s"`
+workaround (avoiding `"i"` entirely by re-expressing the same region
+algebraically) was tried and ALSO had no effect - a multi-subpath MASK
+path appears equally unreliable in both broken renderers, not just mode
+`"i"` specifically. `_combined_mask_properties` is the one and only place
+this writer ever emitted mode `"i"`: exactly the combo_mode==3 (intersect)
+clip case, and only when that layer ALSO carries a cross-layer mask
+(`Leg_F 2`, which the user separately pointed out as an apparently-identical
+but WORKING case, turned out to have no cross-layer mask at all, so its own
+`masksProperties` never needed `"i"` in the first place - a real, and
+initially confusing, difference invisible from Moho's own "Combine Method"
+UI, which shows both cases identically).
+
+Fixed by computing the TRUE clipped geometry once at export time instead
+of asking any player to clip it at render time at all: `_clip_polygon_
+loops` (new module-level function) flattens a shape's own Bezier boundary
+and its group's base-union boundary to straight-edged polygons and hands
+both to the optional `pyclipper` package (a mature, independently-tested
+C++ polygon-clipping library, not a hand-rolled Bezier-Bezier intersection
+- deliberately not attempted in pure Python here, given how bug-prone
+general polygon Boolean algorithms are and how much the earlier masksProp­
+erties debugging in this same file already cost). `LottieExporter.
+_accumulate_frame` attempts this for every combo_mode==3 shape with a
+non-empty base union, in PARALLEL with the existing raw (uncut) geometry -
+never overwriting it - because whether the attempt is usable cannot be
+known from one frame alone.
+
+Two further problems this exposed, both fixed as part of the same change:
+
+1. **A raw pyclipper intersection's vertex count is not fixed** - it
+   depends on how many times the two input boundaries cross, which can
+   differ frame to frame as the shapes move, but Lottie's own keyframe
+   interpolation requires an IDENTICAL vertex count at every keyframe of
+   the same path property (`_assert_stable` already enforced this
+   document-wide, and immediately caught this: the very first pre-clipping
+   attempt crashed on `Leg_F 2`/`S5`, a genuinely different shape from the
+   Eye layers). Fixed by `_resample_loop` - every clipped loop is resampled
+   to a fixed `_CLIP_RESAMPLE_POINTS` (64) vertices, evenly spaced by arc
+   length, with `_canonical_loop_start` first rotating it to begin at its
+   own topmost vertex so consecutive frames' vertex 0 stays close to the
+   same physical point (pyclipper's own output otherwise starts wherever
+   its internal sweep happened to finish, which is not guaranteed to
+   correspond between adjacent frames and could make the resampled loop
+   visibly twist between keyframes even though each keyframe on its own is
+   correct).
+2. **A shape's clipped TOPOLOGY (not just its vertex count) can genuinely
+   change across an animation** - confirmed on `Leg_F`/`Leg_F 2`: of the
+   two combo_mode==3 members in the very same "clip" chunk (`S5`, `S6`),
+   one clips to a single stable loop the whole time, the other splits into
+   two disjoint pieces partway through - no fixed vertex count can paper
+   over a DIFFERENT NUMBER of loops. `_build_layers`' new "PRE-CLIP
+   RESOLUTION" pass (once per shape, after every frame has been
+   accumulated) checks this via `_topology_stable` and, per SHAPE (not per
+   chunk - two members of the same chunk resolved differently in this very
+   example), either promotes the pre-clipped attempt to the shape's real
+   geometry (`pre_clipped = True`, no masksProperties needed for this
+   relationship at all) or discards it and keeps the original raw geometry
+   plus the OLD masksProperties `"i"` approach, with a counted warning
+   (`combo_mode3_clip_unstable`). A chunk's own masksProperties choice
+   requires EVERY member to have pre-clipped successfully, since one
+   shared masksProperties list cannot apply to only some of a layer's
+   shape items.
+
+`tools/check_lottie_geometry.py` updated to match: it cannot know, from a
+single checked frame alone, which path (pre-clipped or masksProperties
+fallback) the real writer resolved to for a given combo_mode==3 shape, so
+it computes BOTH alternatives per shape and accepts either - `_layer_
+mismatches` tries the raw expectation first, per shape, only falling back
+to the pre-clip alternative on a mismatch (this had to be per-SHAPE, not
+per-chunk, for the same `Leg_F`/`Leg_F 2` reason above).
+
+Verified: `make check-lottie` (all three sample documents) and `make
+check-reference` (SVG side, untouched) both still pass; re-rendered the
+fixed `Bandit.json` through lottie-web's canvas renderer at every
+previously-bad frame and confirmed the eye renders correctly; an automated
+per-frame pixel comparison against `moho2svg.py`'s own rasterized output
+across all 98 on-canvas frames of Bandit's own walk cycle found the worst
+remaining discrepancy dropped from 11.4% of the eye-region crop (before
+this fix) to 1.2% (after - ordinary anti-aliasing/rasterizer differences,
+not a structural defect), with zero frames left above the 3% threshold
+that previously flagged frames 35-41 and 102-114. Without `pyclipper`
+installed, or on a document where this never applies, output is
+byte-identical to before this fix.

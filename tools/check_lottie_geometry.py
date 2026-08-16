@@ -22,6 +22,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from moho2svg import Channel, Exporter, build_path_bezier, load_document, walk_render_tree
+from moho2lottie import (_clip_polygon_loops, _flatten_bezier_dict, _loops_to_bezier_dicts,
+                         pyclipper)
 
 # Same tolerance as check_bezier_roundtrip.py, deliberately: both scripts
 # compare build_path_bezier()-shaped data (rounded to 3 decimals, with
@@ -142,49 +144,109 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
             continue
         shapes_in_order = []
         blocks_by_shape = {}
+        # Flattened base-union loops for the CURRENT boolean group, exactly
+        # mirroring moho2lottie.LottieExporter._accumulate_frame's own
+        # `group_base_loops` - needed here because that writer, when
+        # pyclipper is installed, pre-clips a combo_mode==3 member's own
+        # fill/outline against this SAME running union instead of leaving
+        # it raw (see _clip_polygon_loops's own docstring for why). This
+        # checker cannot know, from a single frame alone, whether that
+        # pre-clip attempt stayed topologically stable across the WHOLE
+        # animation (the one thing that decides whether the real writer
+        # actually used it - see LottieExporter._build_layers' own
+        # "PRE-CLIP RESOLUTION" pass) - so a combo_mode==3 shape gets a
+        # SECOND, alternate expected block (`block_clip`) here, and
+        # check_frame accepts either one as a pass, rather than trying to
+        # replicate the writer's cross-frame stability decision.
+        group_base_loops: list = []
         for shape in item.layer.mesh.shapes:
             if not shape.edges:
                 continue
+            if shape.combo_mode == 0:
+                group_base_loops = []
             fill_beziers = build_path_bezier(item.geometries, shape.edges, item.to_px)
             if not fill_beziers:
                 continue
-            block = []
+            can_clip = (shape.combo_mode == 3 and pyclipper is not None
+                       and bool(group_base_loops))
+            fill_clip = None
+            if can_clip:
+                fill_clip = _loops_to_bezier_dicts(_clip_polygon_loops(
+                    [_flatten_bezier_dict(d) for d in fill_beziers], group_base_loops))
+            block, block_clip = [], []
             if shape.has_outline:
                 widths = [exp.eval(item.layer.mesh.points[i].width, frame)
                           for i in {item.layer.mesh.curves[e.curve].points[e.segment].point_index
                                     for e in shape.edges}]
                 tapered = (max(widths) - min(widths) > 1e-6) if widths else False
+                line_width = exp.eval(shape.style.line_width, frame)
+                point_width = 1.0 if tapered else (widths[0] if widths else 1.0)
+                width_px = exp._stroke_width_px(line_width, point_width)
                 if tapered and not shape.style.brush_name:
-                    line_width = exp.eval(shape.style.line_width, frame)
-                    width_px = exp._stroke_width_px(line_width, 1.0)
                     outline = exp.tapered_outliner.build_bezier(
                         item.geometries, shape.edges, item.to_px, width_px)
                 else:
+                    # visible_only=(combo_mode != 3) - must match
+                    # moho2lottie.py's own _accumulate_frame exactly (see
+                    # its own comment, and moho2svg.py's BOOLEAN SHAPE
+                    # COMBINATIONS section): a combo_mode==3 member's own
+                    # segments_on==False segment is not a legitimate gap,
+                    # it is a piece of curve the intersect clip resolves,
+                    # so it must stay in the outline this checker expects
+                    # too - otherwise this "reference" computation carries
+                    # the same bug it exists to catch.
                     outline = build_path_bezier(item.geometries, shape.edges, item.to_px,
-                                                 visible_only=True, close=False)
+                                                 visible_only=(shape.combo_mode != 3), close=False)
                 if outline:
                     block.append(("outline", outline))
+                if can_clip:
+                    # The pre-clip ATTEMPT always builds the outline as a
+                    # filled band (TaperedStrokeOutliner), tapered or not -
+                    # see moho2lottie.LottieExporter._accumulate_frame's own
+                    # comment for why a native "st" stroke cannot itself be
+                    # intersected against the base union.
+                    band = exp.tapered_outliner.build_bezier(
+                        item.geometries, shape.edges, item.to_px, width_px)
+                    band_clip = _loops_to_bezier_dicts(_clip_polygon_loops(
+                        [_flatten_bezier_dict(d) for d in band], group_base_loops))
+                    if band_clip:
+                        block_clip.append(("outline", band_clip))
             if shape.has_fill:
                 block.append(("fill", fill_beziers))
+                if can_clip and fill_clip:
+                    block_clip.append(("fill", fill_clip))
             shapes_in_order.append(shape)
-            blocks_by_shape[id(shape)] = block
+            blocks_by_shape[id(shape)] = (block, block_clip if can_clip else None)
+            if shape.combo_mode in (0, 1):
+                group_base_loops.extend(_flatten_bezier_dict(d) for d in fill_beziers)
 
         chunks = split_into_chunks(split_boolean_groups(shapes_in_order))
         multi = len(chunks) > 1
         for chunk_index, chunk in enumerate(chunks):
+            # One entry per SHAPE (not flattened across the whole chunk):
+            # `(block, block_clip_or_None)`, block_clip being the shape's
+            # OWN pre-clip attempt when it has one. A chunk with more than
+            # one combo_mode==3 member can have EACH pre-clip independently
+            # (Bandit's own Leg_F/Leg_F 2 confirmed this: of two members in
+            # the SAME "clip" chunk, one clipped stably, the other did not
+            # - LottieExporter._build_layers' own "PRE-CLIP RESOLUTION"
+            # pass decides per-SHAPE, so this checker must compare per-
+            # shape too, not assume a whole chunk is all-or-nothing.
             if chunk["kind"] == "union_exclude":
-                flat = [entry for entry in blocks_by_shape[id(chunk["shape"])]
-                        if entry[0] == "outline"]
+                block, _clip = blocks_by_shape[id(chunk["shape"])]
+                shape_blocks = [([entry for entry in block if entry[0] == "outline"], None)]
             else:
                 skip_outline = chunk.get("skip_outline", frozenset())
-                flat = []
+                shape_blocks = []
                 for shape in reversed(chunk["shapes"]):
-                    block = blocks_by_shape[id(shape)]
+                    block, clip = blocks_by_shape[id(shape)]
                     if id(shape) in skip_outline:
                         block = [entry for entry in block if entry[0] != "outline"]
-                    flat += block
+                        clip = ([entry for entry in clip if entry[0] != "outline"]
+                               if clip is not None else None)
+                    shape_blocks.append((block, clip))
             name = f"{item.layer.name}#{chunk_index}" if multi else item.layer.name
-            out.append((name, flat))
+            out.append((name, shape_blocks))
     out.reverse()          # Moho back-to-front -> Lottie front-to-back
     return out
 
@@ -227,6 +289,60 @@ def emitted_layers(lottie: dict, frame: float):
     return out
 
 
+def _shape_mismatches(name: str, frame: float, exp_shapes: list, got_shapes: list) -> list:
+    """[(message), ...] describing every disagreement between one layer's
+    expected and emitted shape-group geometry."""
+    msgs = []
+    if len(exp_shapes) != len(got_shapes):
+        msgs.append(f"  frame {frame} {name!r}: {len(got_shapes)} shape-groups emitted, "
+                    f"expected {len(exp_shapes)}")
+        return msgs
+    for (exp_kind, exp_beziers), (got_kind, got_beziers) in zip(exp_shapes, got_shapes):
+        if exp_kind != got_kind or len(exp_beziers) != len(got_beziers):
+            msgs.append(f"  frame {frame} {name!r}: expected {exp_kind} with "
+                        f"{len(exp_beziers)} subpath(s), got {got_kind} with {len(got_beziers)}")
+            continue
+        for a, b in zip(got_beziers, exp_beziers):
+            if not bezier_close_enough(a, b):
+                msgs.append(f"  frame {frame} {name!r} ({exp_kind}): geometry differs")
+    return msgs
+
+
+def _layer_mismatches(name: str, frame: float, shape_blocks: list, got_shapes: list) -> list:
+    """[(message), ...] for one LAYER, matching `got_shapes` (the emitted,
+    already-flat list of (kind, beziers) shape-groups) against
+    `shape_blocks` (expected_layers' own per-shape `(block, block_clip)`
+    list) shape by shape, consuming `len(block)` entries of `got_shapes`
+    per shape in turn.
+
+    Tries `block` (the raw, unclipped expectation) first; only when it
+    disagrees does it retry with `block_clip` (the alternative expectation
+    for a shape LottieExporter's own pre-clip attempt MIGHT have replaced -
+    see expected_layers' own docstring for why this checker cannot know,
+    from a single frame alone, which of the two the real writer actually
+    used for THIS shape). Two members of the very same "clip" chunk can
+    each resolve differently - confirmed on Bandit's own Leg_F/Leg_F 2,
+    where one combo_mode==3 member's clip stayed stable and the other did
+    not - so this is decided per shape, not once for the whole layer.
+    """
+    msgs = []
+    pos = 0
+    for block, block_clip in shape_blocks:
+        n = len(block)
+        window = got_shapes[pos:pos + n]
+        pos += n
+        shape_msgs = _shape_mismatches(name, frame, block, window)
+        if shape_msgs and block_clip is not None:
+            clip_msgs = _shape_mismatches(name, frame, block_clip, window)
+            if not clip_msgs:
+                shape_msgs = []
+        msgs.extend(shape_msgs)
+    if pos != len(got_shapes):
+        msgs.append(f"  frame {frame} {name!r}: {len(got_shapes)} shape-groups emitted, "
+                    f"expected {pos}")
+    return msgs
+
+
 def check_frame(project_path: str, lottie: dict, frame: float,
                  include_hidden: bool = False) -> int:
     """Compare one frame. Returns the number of disagreements found."""
@@ -238,27 +354,16 @@ def check_frame(project_path: str, lottie: dict, frame: float,
         print(f"  frame {frame}: {len(got)} layers emitted, expected {len(expected)}")
         return 1
 
-    for (exp_name, exp_shapes), (got_name, got_shapes) in zip(expected, got):
+    for (exp_name, shape_blocks), (got_name, got_shapes) in zip(expected, got):
         if exp_name != got_name:
             print(f"  frame {frame}: layer order mismatch - got {got_name!r}, "
                   f"expected {exp_name!r} (reversed layer order is the classic cause)")
             failures += 1
             continue
-        if len(exp_shapes) != len(got_shapes):
-            print(f"  frame {frame} {exp_name!r}: {len(got_shapes)} shape-groups emitted, "
-                  f"expected {len(exp_shapes)}")
-            failures += 1
-            continue
-        for (exp_kind, exp_beziers), (got_kind, got_beziers) in zip(exp_shapes, got_shapes):
-            if exp_kind != got_kind or len(exp_beziers) != len(got_beziers):
-                print(f"  frame {frame} {exp_name!r}: expected {exp_kind} with "
-                      f"{len(exp_beziers)} subpath(s), got {got_kind} with {len(got_beziers)}")
-                failures += 1
-                continue
-            for a, b in zip(got_beziers, exp_beziers):
-                if not bezier_close_enough(a, b):
-                    print(f"  frame {frame} {exp_name!r} ({exp_kind}): geometry differs")
-                    failures += 1
+        msgs = _layer_mismatches(exp_name, frame, shape_blocks, got_shapes)
+        for msg in msgs:
+            print(msg)
+        failures += len(msgs)
     return failures
 
 

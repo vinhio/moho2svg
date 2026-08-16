@@ -984,7 +984,7 @@ blend across such a joint, and **no stored field for it was found**: the
 audit above rules out every candidate. Closing this would mean inventing a
 blend, which the falloff is already flagged as unvalidated for
 ([§ 2.4](#24-flexible-region-binding)).
-| `parent_bone == -3` | falls through to flexible binding, unconfirmed |
+| `parent_bone == -3` | falls through to flexible binding, tiled into small pieces (each still flexibly bound, not snapped to one bone) so the one affine map per piece stays close to exact (confirmed the right call for ImageLayer motion against real per-frame reference PNGs - see moho2svg.py's IMAGE LAYERS section) |
 | Smart Warp / distortion layers | **not implemented, not detected** |
 | Point groups, curve profiles, `start_percent` / `end_percent` | ignored |
 

@@ -731,6 +731,212 @@ orientation but has not been matched pixel-for-pixel against Moho's own
 (differently-parameterised) gradient placement.
 
 --------------------------------------------------------------------------------
+IMAGE LAYERS
+--------------------------------------------------------------------------------
+An ImageLayer carries no vector geometry of its own - `image_path` names an
+external file (a PSD or a plain image) and, for a PSD, `psd_layerid`/
+`psd_layer` identify which of its layers this one is a raster crop of.
+`BoneStrengthTool.animeproj` (a Photoshop-imported character rig, 15
+ImageLayers + a BoneLayer skeleton, zero vector MeshLayers) is the one
+reference document this was reverse-engineered against, using a real Moho
+export (25 PNG frames the user rendered directly, under
+`moho/track/BoneStrengthTool/`) as ground truth - the same empirical method
+as everything else in this file, just for a feature with only one example
+document instead of nineteen.
+
+Reading order: `Layer.image_path`/`.psd_layerid`/`.image_width`/
+`.image_height`, `Exporter._resolve_image_path`/`_resolve_psd`/
+`_psd_layer_png`/`_render_image_layer`, `build_deform_chain`'s own
+`unbind_parent_bone_neg3` parameter.
+
+CROP SIZE - CONFIRMED, exact, zero measured error across all 15 ImageLayers
+in the one reference document: `Layer.image_width`/`.image_height` (Moho's
+own stored `width`/`height` fields, in this layer's own local Moho-space
+units - same convention as a MeshLayer's own point coordinates) equal the
+crop's own PIXEL size (`psd_layer_bounds`, or psd-tools' own `Layer.bbox`,
+which independently agree with each other exactly too) divided by 540.
+That divisor is independent of BOTH the source PSD's own canvas size
+(1456x2766 px there) and this document's own output canvas (1280x720) -
+consistent with Moho importing under a fixed "2 Moho-units = 1080 px"
+convention (540 = 1080 / 2, the same "2 units span a canvas height"
+convention the module docstring's COORDINATES section describes for
+vector geometry, just against a fixed nominal 1080 rather than the
+document's own actual canvas height) rather than one derived from either
+canvas' own resolution.
+
+POSITION - CONFIRMED for the common case, empirically, by rendering and
+overlaying against the reference PNGs (see `Exporter._render_image_layer`):
+build a synthetic quad of 4 corners at this layer's own local
+(±image_width/2, ±image_height/2) - exactly like a MeshLayer's own mesh
+points live in ITS OWN local space - and run them through the SAME
+deform chain (`build_deform_chain`) any mesh layer's points already go
+through: ordinary ancestor transforms (Layer.local_matrix, composed up
+through GroupLayer/BoneLayer ancestors) AND bone skinning alike, with NO
+special-casing needed in that shared function for an ImageLayer target,
+since it already reads `target.parent_bone`/`.flexi_bone_subset`/
+`.local_matrix` generically. The one exception is `parent_bone == -3` -
+see below.
+
+`parent_bone == -3` - GENUINELY UNDECODED, exactly as this module's
+BONE DEFORMATION section and `docs/moho-rigging-and-deformation.md`
+already say (9 ImageLayer instances there, all with a non-empty
+`flexi_bone_subset` - 13 of `BoneStrengthTool.animeproj`'s own 15 confirm
+that pattern too), and read the same way as any other negative
+`parent_bone`: flexible/region binding across `flexi_bone_subset`
+(`Skinner.deform`, blending by weighted average of each bone's
+`rest_to_pose` applied to the point - see that method's own docstring).
+
+An earlier revision of this module instead unbound a `parent_bone == -3`
+target entirely (no SkinStep at all, every ancestor BoneLayer contributing
+only its own plain transform), on the grounds that flexible binding maps
+an ImageLayer's 4 corners to a NON-PARALLELOGRAM - not affine in the input
+point, confirmed directly (`_render_image_layer`'s own self-check: up to
+~105px of error on `BoneStrengthTool.animeproj`'s own walking legs at
+some frames) - and a single SVG `<image transform=matrix(...)>` or Lottie
+image layer can only ever express one affine map, never a true per-pixel
+bend. That trade was wrong: unbinding ALSO discards the walk-cycle bone
+ROTATION driving those same legs, confirmed directly against a real
+walk-cycle export of this same document - `back leg`/`front leg` sat at
+their bit-for-bit identical rest position on EVERY one of frames 1-24 with
+unbinding (the character does not walk at all), while flexible binding
+reproduces real per-frame movement whose active frames match the union of
+the walking bones' own `anim_angle` keyframe times exactly (`front foot`/
+`f toe`/`back foot`/`b toe`, bones 8/14/11/15 of this skeleton). A
+present-but-sheared leg is a smaller defect than an absent one, so
+flexible binding is used unconditionally now - see build_deform_chain's
+own docstring for the same finding from the geometry side.
+
+IMAGE TILING (`Exporter._image_layer_segments`) is what actually fixes the
+visible cost above, for the common case: confirmed directly against
+`BoneStrengthTool.animeproj`'s own reference walk-cycle PNGs that a single
+flexible-bound affine transform renders a real knee bend (the peak of the
+stride, e.g. frame 19) nearly straight, since the shin+foot pixels and the
+thigh pixels need to rotate DIFFERENTLY and one affine map cannot do that
+regardless of which 3 corners it is fit from. `_image_layer_segments`
+splits the crop into `_IMAGE_TILE_COUNT` rectangular TILES along its
+longer axis; each tile is evaluated through the SAME flexible blend as the
+un-tiled case (Skinner.deform across every subset bone, weighted - never
+snapped to a single bone), just over its own much SMALLER local extent -
+which keeps the one affine map a tile is still limited to much closer to
+exact (measured on `back leg` at frame 19: 105.88px of parallelogram error
+for the whole crop, under 15px for the worst of 16 tiles), without ever
+discarding a bone's own contribution to the blend the way a rigid single-
+bone piece would.
+
+TWO WRONG DESIGNS were tried and rejected first, both caught by the SAME
+reference frames, not by inspection - see `_compute_image_layer_segments`'s
+own docstring for the full account:
+
+  - Rigid per-bone pieces (`build_deform_chain`'s `point_bone` override
+    forcing one bone's own, un-blended `rest_to_pose`): exactly affine,
+    genuinely bends at the joint, and - confirmed by the shared-joint
+    invariant (`SkinBone.rest_to_pose` for two bones sharing a pivot maps
+    it to the identical posed position, always, by construction of
+    Skeleton.world_matrices' own parent-chain composition) - stays
+    connected there regardless of bend angle. But it renders EVERY OTHER
+    frame visibly WRONG: comparing against `moho/track/BoneStrengthTool/
+    back-leg/`'s own per-frame isolated-layer references (not just the
+    full composite), the leg swings through a dramatically larger arc
+    than the reference at nearly every sampled frame, because a rigid
+    piece applies one bone's FULL rotation to its whole region while
+    Moho's own render blends smoothly - an abrupt snap is visibly more
+    bent than a smooth blend, joint-connected or not.
+  - Per-bone pixel MASKING on top of that: a bone's owned region is one
+    connected patch of local coordinate space, but this artwork's own
+    baggy, folded pant leg is not always one connected SHAPE at those
+    same coordinates - confirmed directly (`back leg`'s own "back foot"
+    piece intersected with the source alpha in 6 disconnected islands,
+    sizes 4015/1473/178/12/3/1 - a real, sizeable stray, not a rounding
+    error), producing visible disconnected debris under that bone's own
+    large rotation.
+
+Tiling avoids both: no rigid single-bone snap (so no over-bending), and
+every tile's PNG is a plain rectangular CROP, never a mask, so a tile's
+own pixels are contiguous in the source image by construction (no
+debris possible - nothing to reassemble). What tiling introduces instead,
+confirmed by the same reference-frame comparison: adjacent tiles are each
+evaluated through slightly DIFFERENT flexible blends (different local
+corners), so even though their nominal boundary is the exact same line in
+local space, the two tiles' own posed versions of it land a hair apart -
+visible as a thin seam, worse at a sharp bend. `_TILE_OVERLAP_PX` pads
+each tile's own crop (and its matching local corners) into its neighbour
+by a few pixels so adjacent tiles physically overlap, hiding that seam
+under whichever tile draws on top - confirmed removing every visible gap
+across a full 25-frame sweep of both legs (one 5px fleck left on 2 of 25
+front-leg frames, from rsvg-convert's own rasterization, not a real
+geometric gap). The overlap's own cost: at a sharp bend, the OUTER
+(convex) edge of the overlapping region is not covered by anything and
+can show as a slightly feathered/scalloped silhouette rather than one
+smooth curve - a real, visible trade, but confirmed far less objectionable
+than either a wrong pose or actual disconnection, and only at the
+specific frames where the true bend is sharp to begin with.
+
+Segmentation only ever applies to a flexibly-bound (`bound_bone_index ==
+-1`) target with 2+ subset bones that actually contribute
+(`strength > 0`); a layer that does not meet that, or whose tiling leaves
+1 or 0 non-empty tiles, falls back to the un-tiled single-affine
+approximation, with its own parallelogram-error self-check and warning
+unchanged. Reproducing Moho's own genuinely smooth per-pixel blend
+exactly would need true per-pixel WARPING (moving pixels along a
+continuous field), not just piecewise-affine tiles however fine - remains
+out of scope, see KNOWN GAPS. Whatever mechanism actually drives Moho's
+own true per-pixel raster bend remains exactly as undecoded as
+`docs/moho-rigging-and-deformation.md` already says.
+
+FILE RESOLUTION: `image_path` is recorded exactly as the machine that did
+the PSD import saw it - typically an absolute path from a DIFFERENT
+machine/OS than whatever later re-exports the document (e.g. a Windows
+path into Moho's own shipped content library, as in the reference
+document: `C:/Program Files/Smith Micro/Moho 12/Resources/Support/...`,
+which plainly does not exist on the macOS machine that later re-exports
+it). Moho itself does not actually resolve against this string, though -
+confirmed directly: the user who reported this opened the very same
+`BoneStrengthTool.animeproj` in the Moho app on that same macOS machine
+with ZERO errors, despite `image_path` naming that nonexistent Windows
+path. What Moho actually resolves against is `Layer.image_fileref`, a
+SECOND, portable reference recorded right alongside `image_path` -
+`{"relativeTo": "Library", "path": "Characters/Partners/Mike Roberts/
+Images/dude side.psd"}` for that same ImageLayer - confirmed present,
+with `relativeTo == "Library"`, on every one of the reference document's
+15 ImageLayers. `Exporter._resolve_image_path` therefore tries this
+FIRST: `--image-dir` names the LOCAL equivalent of the Moho install's own
+`Support/` directory, and `Exporter._library_dirs` finds every directory
+literally named `Library` under it (Moho ships one PER EDITION TIER, not
+a single shared one - `Support/Common/Library`, `Support/Pro/Library`,
+`Support/Debut/Library` on this machine - and `relativeTo == "Library"`
+does not say which, so every one found is tried) - `image_fileref`'s own
+`path` is then joined onto whichever one actually has it. Falling back to
+rebasing `image_path`'s own `Support/` segment onto `--image-dir` (matched
+case-insensitively - relies on the local filesystem being case-insensitive
+too, confirmed true for macOS's default APFS) is now the SECOND-choice
+path, kept for a document (or Moho version) that never populated
+`image_fileref`, or whose `relativeTo` names something other than
+`"Library"` - unconfirmed what other values look like, since every
+ImageLayer in this repository's one reference document uses `"Library"`.
+
+Confirmed NOT every ImageLayer in one document necessarily shares the same
+file: 2 of `BoneStrengthTool.animeproj`'s 15 reference a separate
+standalone PNG (an alternate pose) instead of the shared PSD everything
+else uses, via their own `image_fileref`/`image_path` pair pointing
+elsewhere within the SAME `Library` tier - not coincidentally, the same 2
+layers whose `psd_layerid` is -2, since they are not "a layer inside the
+shared PSD" to begin with. A `.psd`/`.psb` extension goes through
+psd-tools' own per-layer `composite()` (confirmed to return a crop already
+the exact size of that layer's own bbox, not the whole PSD canvas); any
+other extension is opened directly as a plain image, the whole file being
+that layer's own content.
+
+LAYER MATCHING (within a PSD): by `psd_layerid` (psd-tools' own
+`Layer.layer_id`) first - confirmed exactly matching for 13 of 15
+ImageLayers in the reference document - falling back to matching by NAME
+when that id is -2 (Moho's own "could not resolve at import time"
+sentinel, on the remaining 2 - see FILE RESOLUTION above for why those 2
+are a red herring anyway, being standalone files with no "layer inside
+them" to match). NOT `psd_layer` (a plain positional index): confirmed
+NOT unique across that same 15 - two distinct pairs of ImageLayers share
+one `psd_layer` value each, so it cannot be a reliable key on its own.
+
+--------------------------------------------------------------------------------
 KNOWN GAPS
 --------------------------------------------------------------------------------
   - combo_mode 2 (see BOOLEAN SHAPE COMBINATIONS).
@@ -770,6 +976,33 @@ KNOWN GAPS
     no-outline duplication IS confirmed directly against the Moho app - see
     PATCH LAYERS - so this remaining gap is narrower than it used to be:
     transform/position only, not appearance.)
+  - ImageLayer (see IMAGE LAYERS): position/size is confirmed for a layer
+    that only needs ancestor transforms. A `parent_bone == -3` layer whose
+    true pose requires ARTICULATION (bending, not just translating) now
+    gets real, bone-driven motion that closely tracks Moho's own render
+    across a full walk cycle - confirmed against `BoneStrengthTool.
+    animeproj`'s own per-frame reference PNGs (both `back leg` and
+    `front leg`, all 25 frames), not just one extreme frame. Two earlier
+    designs (rigid per-bone pieces, then per-bone pixel masking on top of
+    that) were tried and rejected by that same reference comparison - see
+    IMAGE TILING above for the full account of what each got wrong. What
+    remains APPROXIMATE with the current TILED design: a thin seam between
+    two adjacent tiles' own slightly different flexible blends, mostly
+    hidden by `_TILE_OVERLAP_PX` overlap (confirmed clean across a full
+    25-frame sweep of both legs, one 5px rasterization fleck left); that
+    same overlap can show as a slightly feathered silhouette edge on the
+    OUTER side of a sharp bend, where nothing covers the overlapping
+    region - a real trade, confirmed markedly less objectionable than a
+    wrong pose or actual disconnection; and a layer whose subset has
+    fewer than 2 contributing bones still falls back to the un-tiled
+    single-affine approximation, whose own parallelogram self-check
+    surfaces exactly which frames look sheared, per layer, on stderr.
+    moho2lottie.py implements ImageLayer too, reusing this same machinery
+    (including tiling) unchanged - see its own module docstring's IMAGE
+    LAYERS section. `--layer <name>` standalone export (moho2svg.py)
+    still does not synthesise an
+    ImageLayer on its own (no ancestor chain to deform it with outside
+    `--combined`/the whole-document walk).
   - Physics (wind/gravity) and layer_effects/layer_shadow are ignored; a
     single static frame rarely shows either, but an animated Lottie export
     can - see moho2lottie.py's own "physics" warning.  Nothing in this
@@ -904,6 +1137,20 @@ try:
     from PIL import Image, ImageChops, ImageOps
 except ImportError:
     Image = ImageChops = ImageOps = None
+
+try:
+    # Optional, exactly like Pillow above: only used to read individual
+    # named layers (with their own pixel data and crop bounds) out of a
+    # PSD file an ImageLayer references - see the module docstring's
+    # IMAGE LAYERS section.  Pillow's own PSD plugin can only read the
+    # flattened "merged image" resource, not a specific layer by id/name,
+    # which is what ImageLayer needs (Image is still used to decode the
+    # per-layer pixels psd-tools hands back). Absent, ImageLayer content
+    # is skipped with a counted warning, exactly as before this feature
+    # existed - this tool still runs with zero required dependencies.
+    from psd_tools import PSDImage
+except ImportError:
+    PSDImage = None
 
 
 # ============================================================================
@@ -1793,6 +2040,9 @@ class LayerKind(str, Enum):
     PATCH = "PatchLayer"      # carries no mesh of its own - see the module
                                # docstring's PATCH LAYERS section and
                                # Document._resolve_patch_layers.
+    IMAGE = "ImageLayer"      # a raster crop of an external PSD layer, not
+                               # vector geometry - see the module docstring's
+                               # IMAGE LAYERS section.
     OTHER = "__other__"       # anything else Moho might define.
 
 
@@ -3102,6 +3352,69 @@ class Layer:
         return Vec2(o.get("x", 0.0), o.get("y", 0.0))
 
     @property
+    def image_path(self) -> str:
+        """Only meaningful when kind is IMAGE: the absolute path (as Moho
+        recorded it, on whatever machine did the import - typically a
+        Windows path even on this machine) to the external image/PSD file
+        this layer's own crop comes from. `Layer.image_fileref` is a
+        SECOND, portable reference to the same file - see its own
+        docstring for why Exporter._resolve_image_path prefers it."""
+        return self._raw.get("image_path", "")
+
+    @property
+    def image_fileref(self) -> dict:
+        """Only meaningful when kind is IMAGE: `{"relativeTo": ..., "path":
+        ...}` - a PORTABLE counterpart to `Layer.image_path`'s absolute,
+        machine-specific one. Confirmed `relativeTo == "Library"` on every
+        one of `BoneStrengthTool.animeproj`'s 15 ImageLayers (the
+        reference document for this whole feature - see the module
+        docstring's IMAGE LAYERS section): `path` is then relative to
+        Moho's own installed content library (e.g.
+        `Characters/Partners/Mike Roberts/Images/dude side.psd`, found
+        under any of that install's own `Library/` directories - Moho
+        ships several, one per edition tier: `Support/Common/Library`,
+        `Support/Pro/Library`, `Support/Debut/Library` on this machine).
+        This is what Moho ITSELF actually resolves against - confirmed
+        by the user opening this exact document in the Moho app on this
+        exact machine with zero errors, despite `image_path` naming a
+        Windows path that plainly does not exist here - so
+        Exporter._resolve_image_path tries this FIRST, falling back to
+        rebasing `image_path`'s own `Support/` segment only if this is
+        absent or does not resolve."""
+        return self._raw.get("image_fileref") or {}
+
+    @property
+    def psd_layerid(self) -> int:
+        """Only meaningful when kind is IMAGE: the PSD layer's own stable
+        numeric id (psd-tools' own `Layer.layer_id`), or -2 when Moho could
+        not resolve one at import time - see the module docstring's IMAGE
+        LAYERS section for why name matching is the fallback in that case,
+        not `psd_layer` (a plain positional index, confirmed NOT unique
+        across this file's own 15 ImageLayers - two distinct pairs share
+        the same value)."""
+        return self._raw.get("psd_layerid", -2)
+
+    @property
+    def image_width(self) -> float:
+        """Only meaningful when kind is IMAGE: this crop's own width, in
+        this layer's local Moho-space units (see Layer.local_matrix) -
+        i.e. BEFORE any ancestor/bone transform, exactly like a MeshLayer's
+        own point coordinates. Confirmed exactly `psd_layer_bounds` (the
+        crop's own pixel-space size, from the PSD file) / 540 on every one
+        of `BoneStrengthTool.animeproj`'s 15 ImageLayers (zero measured
+        error) - 540 px per Moho-unit, independent of both the source
+        PSD's own canvas size and this document's own output canvas size,
+        consistent with Moho importing a PSD under a fixed "2 units = 1080
+        px" convention (540 = 1080 / 2) rather than one derived from either
+        canvas. See the module docstring's IMAGE LAYERS section."""
+        return float(self._raw.get("width", 0.0))
+
+    @property
+    def image_height(self) -> float:
+        """See Layer.image_width - the same crop's height."""
+        return float(self._raw.get("height", 0.0))
+
+    @property
     def action_names(self) -> frozenset[str]:
         """Names registered in this (bone) layer's own `actions` list.  This is
         only a name registry - it does not itself carry any pose data, and a
@@ -3809,9 +4122,56 @@ class TaperedStrokeOutliner:
         construction (see the docstring's TAPERED STROKES section in the
         module header for the underlying offset-curve technique itself).
         """
-        out: list[dict] = []
+        return [bez for bez, _is_hole in self.build_bezier_with_holes(
+            geometries, edges, to_px, stroke_width_px, cap_segments)]
+
+    def build_bezier_with_holes(self, geometries: list[CurveGeometry], edges: Sequence[Edge],
+                                to_px: Callable[[Vec2], Vec2], stroke_width_px: float,
+                                cap_segments: int = 8) -> list[tuple[dict, bool]]:
+        """Same as build_bezier(), but tags each returned subpath with
+        whether it is a HOLE - the inner, counter-wound loop of a closed
+        run's own ring (see this class' own "TWO dicts" paragraph above:
+        `(outer, True_for_the_second_one)`). An open run's one dict is
+        never a hole.
+
+        A plain FILL consumer doesn't need this distinction: Lottie's own
+        evenodd fill rule on ONE compound shape already reconstructs a
+        ring correctly straight from the raw subpaths (both loops just go
+        in the same "sh" group) - which is why build_bezier() itself
+        stays the simple, undecorated version other callers keep using
+        unchanged.
+
+        A MASK consumer does need it. Lottie's masksProperties has no
+        shared fill-rule to cancel a ring's own overlap - each entry is
+        its own INDEPENDENT sequential add/subtract/intersect operation.
+        Treating a ring's two loops as two ordinary "subtract" entries
+        therefore subtracts the OUTER loop's own FULL area, then
+        subtracts the (already-covered) INNER loop's full area again -
+        a no-op for the interior, since it was removed already - instead
+        of the thin band between them alone. Confirmed as a real, severe
+        bug this way (not a theoretical one): on `Bandit.mohoproj`,
+        `Eye_Back`/`Eye_Upper`'s own cross-layer mask exclusion band comes
+        from "Body" (BellyTexture's masking==2 child) - a single CLOSED
+        run - and treating both of ITS loops as "subtract" wiped out the
+        mask's ENTIRE union wherever it overlapped Body's own silhouette,
+        not just a stroke-width sliver along Body's edge, taking the
+        whole eye down to nothing (found by bisecting a real lottie-web
+        render frame-by-frame down to this one exclusion entry). The fix
+        is for a mask consumer to use mode "s" for a `is_hole=False`
+        entry and mode "a" for a `is_hole=True` one instead of "s" for
+        both - see moho2lottie.py's own _finalize_mask, the one place
+        this actually matters (_combo_mode_union_mask_properties's own
+        union-band usage is mode "a" throughout already, for which
+        adding a subset twice is harmless, so it does not need this).
+        """
+        out: list[tuple[dict, bool]] = []
         for run in self._traced_runs(geometries, edges):
-            out.extend(self._outline_one_run_bezier(run, to_px, stroke_width_px, cap_segments))
+            pieces = self._outline_one_run_bezier(run, to_px, stroke_width_px, cap_segments)
+            if len(pieces) == 2:
+                out.append((pieces[0], False))
+                out.append((pieces[1], True))
+            else:
+                out.extend((piece, False) for piece in pieces)
         return out
 
     def _sample_offsets(self, run, to_px: Callable[[Vec2], Vec2], stroke_width_px: float):
@@ -4247,6 +4607,30 @@ def build_deform_chain(ancestors: Sequence[Layer], target: Layer, frame: float,
     deformation - i.e. the deformation-aware counterpart of composing
     Layer.local_matrix up the ancestor chain.
 
+    `target.parent_bone == -3` (observed only on ImageLayer, still
+    undecoded - see the module docstring's IMAGE LAYERS section) is read
+    the same as any other negative `parent_bone`: flexible/region binding
+    across `flexi_bone_subset`. An earlier revision of this function had a
+    dedicated `unbind_parent_bone_neg3` flag that instead skipped every
+    SkinStep for such a target - Exporter._render_image_layer's original
+    justification was that flexible binding maps an ImageLayer's 4 corners
+    to a non-parallelogram (confirmed, up to ~105px of error on
+    `BoneStrengthTool.animeproj`'s own walking legs), which a single affine
+    `<image transform>`/Lottie image layer cannot represent exactly either
+    way. That trade was wrong: unbinding entirely also discards the
+    walk-cycle bone ROTATION driving those same legs, which flexible
+    binding at least approximates - confirmed directly by comparing against
+    a real walk-cycle export of that document: unbinding left `back leg`/
+    `front leg` at their identical rest position on EVERY one of frames
+    1-24 (the character does not walk at all), while flexible binding
+    reproduces real per-frame movement whose active frames match the union
+    of the walking bones' own `anim_angle` keyframe times exactly
+    (`front foot`/`f toe`/`back foot`/`b toe`). A present-but-sheared leg is
+    a smaller defect than an absent one, so flexible binding is now used
+    unconditionally - the parallelogram distortion this leaves on some
+    frames is the documented remaining KNOWN GAP, not "no bone influence at
+    all" applied to every frame regardless of pose.
+
     Steps are built innermost-first conceptually but returned in APPLICATION
     order (apply steps[0] to the raw point, then steps[1], and so on).  A mesh
     several groups deep inside a BoneLayer is deformed in *that bone layer's*
@@ -4363,6 +4747,7 @@ class RenderSettings:
     brush_raster: bool = False          # --brush-raster; Exporter._raster_brush_shape (requires Pillow)
     brush_raster_max_pixels: int = 16_000_000  # safety cap; falls back to per-dab <use> above this
     brush_raster_supersample: float = 2.0    # --brush-raster-supersample; canvas oversampling factor
+    image_search_dir: Optional[str] = None   # --image-dir; Exporter._resolve_image_path
 
 
 @dataclass
@@ -4391,6 +4776,12 @@ class RenderItem:
     - "mesh": one mesh layer to draw.  `geometries`/`to_px` are already
       built for `frame`, under the correct Smart Bone context - see the
       warning below about self._active_actions.
+    - "image": one ImageLayer to draw (a raster PSD crop, not vector
+      geometry - see the module docstring's IMAGE LAYERS section).
+      `deform_chain` is already built for `frame`, exactly like a mesh
+      item's `geometries`/`to_px` - the consumer applies it to the
+      layer's own 4 corners (Exporter._render_image_layer does this for
+      the SVG writer).
     - "exit": the scope opened by the last unmatched "enter" is finished.
 
     Every layer that is itself a container is wrapped in its own
@@ -4420,6 +4811,48 @@ class RenderItem:
     mask_sources: Sequence[tuple[str, float]] = ()
     geometries: Optional[list] = None
     to_px: Optional[Callable[["Vec2"], "Vec2"]] = None
+    deform_chain: Optional[list] = None  # "image" events only - see IMAGE LAYERS
+
+
+@dataclass(frozen=True)
+class ImageSegment:
+    """One TILE of an ImageLayer's raster crop, as Exporter.
+    _image_layer_segments splits it - see that method's own docstring for
+    why (a single affine transform cannot fold a raster at a joint, which a
+    multi-bone flexible binding needs to look right), and for why this is
+    a plain rectangular TILE rather than a per-bone rigid piece (an
+    earlier revision of this - confirmed WRONG, not just simpler: matching
+    each tile's own local extent to one bone RIGIDLY reproduced each
+    bone's full, un-blended rotation, which measurably over-bends a joint
+    compared to Moho's own real (smoothly blended) render - see that
+    method's own docstring for the direct comparison that caught this).
+
+    `corners` is `None` for the ORIGINAL, un-tiled behaviour (the whole
+    crop, one flexible blend across its own full local extent) - every
+    ImageLayer that does not need tiling (no SkinStep, a rigid single-bone
+    SkinStep, or fewer than 2 effectively-contributing subset bones)
+    resolves to exactly one ImageSegment shaped this way, so a consumer
+    always iterates `_image_layer_segments`'s return value the same way
+    regardless of whether real tiling happened. A non-None `corners` is
+    this tile's own `(top_left, top_right, bottom_left)` in the layer's
+    local space - a narrower slice of the same crop, evaluated through
+    the SAME flexible (region) blend as the un-tiled case (Skinner.deform
+    across every bone in the subset, weighted - never a single rigid
+    bone), just over a much smaller extent, which keeps the one affine
+    map this tile is still limited to much closer to exact (see
+    _compute_image_layer_segments for the measurements).
+
+    `png` is `None` for the un-tiled case (the consumer falls back to
+    Exporter._psd_layer_png(layer), the ordinary whole-crop image);
+    otherwise it is that same (bytes, width_px, height_px) shape, but
+    CROPPED (not merely alpha-masked) to this tile's own pixel rows/
+    columns - a plain rectangular slice of the original crop, so unlike a
+    per-bone ownership mask this can never produce a disconnected
+    fragment (nothing to reassemble - every tile's pixels are contiguous
+    in the SOURCE image by construction)."""
+    corners: Optional[tuple[Vec2, Vec2, Vec2]]  # (top_left, top_right, bottom_left), local space
+    suffix: str
+    png: Optional[tuple[bytes, int, int]] = None
 
 
 # ============================================================================
@@ -4460,6 +4893,10 @@ class Exporter:
         self._brush_refs: dict[str, Optional[RegisteredBrush]] = {}  # brush_name -> registered brush (or None)
         self._brush_tinted_defs: list[str] = []       # <image> defs, emitted once per export (tint path)
         self._brush_tinted_ids: dict[tuple, Optional[tuple[str, int, int]]] = {}  # see _brush_tinted_ref
+        self._psd_cache: dict[str, Optional["PSDImage"]] = {}         # RESOLVED local path -> opened PSD (or None)
+        self._psd_layer_cache: dict[tuple, Optional[tuple[bytes, int, int]]] = {}  # see _psd_layer_png
+        self._library_dirs_cache: dict[str, list[str]] = {}           # see _library_dirs
+        self._image_segment_cache: dict[int, list["ImageSegment"]] = {}  # id(layer) -> see _image_layer_segments
 
     # -- channel evaluation --------------------------------------------------
 
@@ -4662,8 +5099,8 @@ class Exporter:
         deformation at all - used for --local exports."""
         return lambda p: self._to_pixel(matrix.apply(p))
 
-    def _deformed_pixel_mapper(self, chain: list[DeformStep],
-                                frame: float) -> Callable[[Vec2], Vec2]:
+    def _deformed_pixel_mapper(self, chain: list[DeformStep], frame: float,
+                                point_bone: int = -2) -> Callable[[Vec2], Vec2]:
         """A point-mapper that walks a full DeformChain (ordinary transforms
         plus bone skinning) before projecting to pixel space.
 
@@ -4672,9 +5109,17 @@ class Exporter:
         the render target - required for a BoneLayer nested inside another
         BoneLayer, where the OUTER SkinStep's subset (if it is flexible at
         all) belongs to the nested BoneLayer itself, not to whatever mesh
-        is ultimately being rendered."""
+        is ultimately being rendered.
+
+        `point_bone` is passed straight through to _deformed_point_mapper's
+        own `deform(p, point_bone)` - default -2 keeps every pre-existing
+        call site's behaviour (the innermost SkinStep's own binding, flexible
+        or rigid, is used unchanged). An ImageSegment with a non-None
+        `point_bone` (see _image_layer_segments) passes its own bone index
+        here instead, forcing a RIGID bind to that one bone regardless of
+        the innermost SkinStep's own (flexible) subset."""
         deform = self._deformed_point_mapper(chain, frame)
-        return lambda p: self._to_pixel(deform(p, -2))
+        return lambda p: self._to_pixel(deform(p, point_bone))
 
     def _geometry_and_mapper(self, mesh: Mesh, chain: list[DeformStep], frame: float):
         """(geometries, to_px) for one mesh, picking the geometry order that
@@ -5019,6 +5464,460 @@ class Exporter:
         self._brush_tinted_ids[key] = result
         return result
 
+    # -- ImageLayer (a raster crop of an external PSD layer) -----------------
+
+    def _library_dirs(self, search_dir: str) -> list[str]:
+        """Every directory literally named `Library` (case-insensitive)
+        within 3 levels of `search_dir` (`--image-dir`, the local
+        equivalent of a Moho install's own `Support/` directory) - cached,
+        since a document with many ImageLayers would otherwise re-walk the
+        same (large: ~760 MB on this machine) directory tree once per
+        layer. Moho ships one `Library/` per edition tier under `Support/`
+        (`Common`, `Pro`, `Debut` on this machine) rather than a single
+        shared one, and `Layer.image_fileref`'s own `relativeTo ==
+        "Library"` does not say WHICH - so every candidate found is tried,
+        in `os.walk`'s own (platform) directory order, by
+        _resolve_image_path.  Bounded to 3 levels deep (measured
+        sufficient on this machine's own install: every `Library/` found
+        sits at exactly `search_dir/<tier>/Library`) rather than walking
+        `search_dir` unbounded, which would need to stat every file under
+        a directory this large for no benefit - only directory NAMES are
+        needed here.
+        """
+        if search_dir not in self._library_dirs_cache:
+            # search_dir ITSELF counts too - a user who already points
+            # --image-dir straight at one edition's own Library/ (rather
+            # than at Support/, the documented convention) should not need
+            # a Library/ child of THAT to also exist.
+            found = [search_dir] if os.path.basename(search_dir.rstrip(os.sep)).lower() \
+                == "library" else []
+            base_depth = search_dir.rstrip(os.sep).count(os.sep)
+            for root, dirs, _files in os.walk(search_dir):
+                depth = root.rstrip(os.sep).count(os.sep) - base_depth
+                if depth >= 3:
+                    dirs[:] = []            # do not descend further
+                    continue
+                found.extend(os.path.join(root, d) for d in dirs if d.lower() == "library")
+            self._library_dirs_cache[search_dir] = found
+        return self._library_dirs_cache[search_dir]
+
+    def _resolve_image_path(self, layer: Layer) -> Optional[str]:
+        """`layer`'s own external image/PSD file, resolved to a path that
+        exists on THIS machine - or None if it cannot be found at all.
+
+        Tries `layer.image_fileref` FIRST when `--image-dir` is set and
+        `relativeTo == "Library"` (see that property's own docstring for
+        why - confirmed to be what Moho itself actually resolves against,
+        unlike `image_path`), searching every `Library/` directory
+        `_library_dirs` finds under `--image-dir` for `image_fileref`'s
+        own relative `path`. Falls back to `layer.image_path` - either
+        used AS GIVEN if it already exists (a document referencing the
+        user's own local images, not Moho's shipped library, needs no
+        rebasing at all), or, when `--image-dir` is set, rebased onto it
+        by re-joining everything in `image_path` from ITS OWN `Support/`
+        segment onward (case varies by OS - confirmed different casing
+        between the macOS install that reads this and the Windows one
+        that recorded a real reference document's own `image_path` - relies
+        on the filesystem being case-insensitive for the segments in
+        between, confirmed true for macOS's default APFS). The fallback
+        exists for a document (or a Moho version) that never populated
+        `image_fileref`, or whose `relativeTo` names something other than
+        `"Library"` - unconfirmed what other values look like, since every
+        ImageLayer in this repository's one reference document uses
+        `"Library"`.
+        """
+        search_dir = self.settings.image_search_dir
+        fileref = layer.image_fileref
+        if search_dir and fileref.get("relativeTo") == "Library" and fileref.get("path"):
+            for library_dir in self._library_dirs(search_dir):
+                candidate = os.path.join(library_dir, fileref["path"])
+                if os.path.exists(candidate):
+                    return candidate
+        raw_path = layer.image_path
+        if not raw_path:
+            return None
+        if os.path.exists(raw_path):
+            return raw_path
+        if not search_dir:
+            return None
+        parts = raw_path.replace("\\", "/").split("/")
+        try:
+            idx = next(i for i, p in enumerate(parts) if p.lower() == "support")
+        except StopIteration:
+            return None
+        candidate = os.path.join(search_dir, *parts[idx + 1:])
+        return candidate if os.path.exists(candidate) else None
+
+    def _resolve_psd(self, layer: Layer) -> Optional["PSDImage"]:
+        """The opened PSDImage for `layer`'s own `.psd`/`.psb` source
+        (resolved via _resolve_image_path), cached per RESOLVED local path
+        (several ImageLayers in one document typically share one PSD file,
+        and now that resolution also considers `image_fileref`, caching by
+        the pre-resolution `image_path` string alone would miss that
+        sharing whenever it differs in casing) - or None if psd-tools/
+        Pillow is unavailable, the file could not be resolved to a local
+        path at all, or it exists but cannot be opened (e.g. not actually
+        a PSD)."""
+        if PSDImage is None or Image is None:
+            return None
+        resolved = self._resolve_image_path(layer)
+        if resolved is None:
+            sys.stderr.write(
+                f"  ! image layer {layer.name!r}: cannot find {layer.image_path!r} locally"
+                + (f" (searched --image-dir {self.settings.image_search_dir!r})"
+                   if self.settings.image_search_dir else
+                   " (pass --image-dir to search a local Moho install for it)")
+                + "\n")
+            return None
+        if resolved not in self._psd_cache:
+            psd = None
+            try:
+                psd = PSDImage.open(resolved)
+            except (OSError, ValueError) as exc:
+                sys.stderr.write(f"  ! image layer {layer.name!r}: cannot open "
+                                 f"{resolved!r} ({exc})\n")
+            self._psd_cache[resolved] = psd
+        return self._psd_cache[resolved]
+
+    def _psd_layer_png(self, layer: Layer) -> Optional[tuple[bytes, int, int]]:
+        """(PNG bytes, width_px, height_px) for `layer`'s own referenced
+        image, already cropped to that layer's own bounding box - or None
+        if unresolvable.
+
+        `image_path` is NOT always the document's own shared PSD: some
+        ImageLayers instead name their OWN standalone image file (an
+        alternate pose exported as a plain PNG, confirmed on 2 of
+        `BoneStrengthTool.animeproj`'s 15 ImageLayers - both, not
+        coincidentally, the ones whose `psd_layerid` is -2, since they are
+        not really "a layer inside the shared PSD" at all). A `.psd`/`.psb`
+        path goes through psd-tools' own per-layer `composite()` (confirmed
+        to return a TIGHT crop the size of the layer's own bbox, not the
+        whole PSD canvas), matched by `psd_layerid` first - confirmed
+        exactly matching psd-tools' own `Layer.layer_id` for 13 of those 15
+        ImageLayers - falling back to matching by NAME on a -2 id, rather
+        than `psd_layer` (a plain positional index, confirmed NOT unique
+        across that same file's 15 ImageLayers - two distinct pairs share
+        one value each). Any other extension is opened directly as a plain
+        image, the whole file being that layer's own content (no "layer
+        inside it" to match at all). See the module docstring's IMAGE
+        LAYERS section. Cached per (image_path, psd_layerid, name), since
+        two ImageLayers can legitimately reference the same PSD layer.
+        """
+        key = (layer.image_path, layer.psd_layerid, layer.name)
+        if key in self._psd_layer_cache:
+            return self._psd_layer_cache[key]
+        result = None
+        if PSDImage is None:
+            sys.stderr.write(f"  ! image layer {layer.name!r}: skipped - the optional "
+                             f"'psd-tools' package is not installed "
+                             f"(pip install psd-tools)\n")
+            self._psd_layer_cache[key] = None
+            return None
+        if Image is None:
+            sys.stderr.write(f"  ! image layer {layer.name!r}: skipped - the optional "
+                             f"'Pillow' package is not installed (pip install Pillow)\n")
+            self._psd_layer_cache[key] = None
+            return None
+        is_psd = os.path.splitext(layer.image_path)[1].lower() in (".psd", ".psb")
+        if is_psd:
+            psd = self._resolve_psd(layer)
+            if psd is not None:
+                found = None
+                if layer.psd_layerid != -2:
+                    found = next((p for p in psd.descendants()
+                                 if getattr(p, "layer_id", None) == layer.psd_layerid), None)
+                if found is None:
+                    found = next((p for p in psd.descendants() if p.name == layer.name), None)
+                if found is None:
+                    sys.stderr.write(f"  ! image layer {layer.name!r}: no matching PSD layer "
+                                     f"(id {layer.psd_layerid}) in {layer.image_path!r}\n")
+                else:
+                    image = found.composite()
+                    if image is not None:
+                        buf = io.BytesIO()
+                        image.convert("RGBA").save(buf, format="PNG")
+                        result = (buf.getvalue(), image.width, image.height)
+        elif Image is not None:
+            resolved = self._resolve_image_path(layer)
+            if resolved is None:
+                sys.stderr.write(
+                    f"  ! image layer {layer.name!r}: cannot find {layer.image_path!r} locally"
+                    + (f" (searched under {self.settings.image_search_dir!r})"
+                       if self.settings.image_search_dir else
+                       " (pass --image-dir to search a local Moho install for it)")
+                    + "\n")
+            else:
+                try:
+                    with Image.open(resolved) as src:
+                        buf = io.BytesIO()
+                        src.convert("RGBA").save(buf, format="PNG")
+                        result = (buf.getvalue(), src.width, src.height)
+                except OSError as exc:
+                    sys.stderr.write(f"  ! image layer {layer.name!r}: cannot open "
+                                     f"{resolved!r} ({exc})\n")
+        self._psd_layer_cache[key] = result
+        return result
+
+    _IMAGE_TILE_COUNT = 16  # see _compute_image_layer_segments
+    _TILE_OVERLAP_PX = 20  # see _compute_image_layer_segments - hides the hairline seam between tiles
+
+    def _image_layer_segments(self, ancestors: Sequence[Layer], layer: Layer) -> list["ImageSegment"]:
+        """`layer`'s own raster crop, split into rectangular TILES along
+        its longer axis - see _compute_image_layer_segments for how and
+        why, and ImageSegment's own docstring for the single-segment
+        fallback shape every non-tiled layer still returns. Cached per
+        layer (id(layer)): the split is frame-independent (this layer's
+        own fixed local geometry only, not bone pose - see
+        _compute_image_layer_segments), so it is computed once and reused
+        for every sampled frame."""
+        key = id(layer)
+        cached = self._image_segment_cache.get(key)
+        if cached is None:
+            cached = self._compute_image_layer_segments(ancestors, layer)
+            self._image_segment_cache[key] = cached
+        return cached
+
+    def _compute_image_layer_segments(self, ancestors: Sequence[Layer],
+                                      layer: Layer) -> list["ImageSegment"]:
+        """The actual (uncached) work behind _image_layer_segments.
+
+        WHY: a `parent_bone == -3` ImageLayer with more than one bone
+        contributing to its `flexi_bone_subset` is flexibly (region) bound
+        - build_deform_chain's own docstring explains why that replaced an
+        earlier "unbind entirely" heuristic (real per-frame motion instead
+        of none). But a flexible blend of a WHOLE crop is still only one
+        affine transform, and a real bend - a knee folding, the shin+foot
+        rotating independently of the thigh - is not affine at all.
+        Confirmed directly against `BoneStrengthTool.animeproj`'s own
+        reference walk-cycle PNGs: at the peak of the stride (e.g. frame
+        19), the single-affine `back leg` renders nearly straight where the
+        reference shows a sharply bent knee.
+
+        TWO WRONG FIXES were tried and rejected before this one - both
+        confirmed wrong by the SAME reference frames, not by inspection:
+
+        1. Splitting the crop into one RIGID piece per bone (each an exact
+           parallelogram, no shear at all, `point_bone` forcing a single
+           bone's own `rest_to_pose`). This DID let the shin+foot rotate
+           away from the thigh, and DID stay connected at the joint
+           (confirmed: SkinBone.rest_to_pose for two bones sharing a joint
+           maps that one point to the identical posed position, always,
+           by construction of Skeleton.world_matrices' own parent-chain
+           composition). But it renders every OTHER frame - not just the
+           extreme one it was built to fix - visibly WRONG: comparing
+           against `moho/track/BoneStrengthTool/back-leg/`'s own per-frame
+           reference PNGs (isolated single-layer exports, not just the
+           full composite), the rigid version showed the leg swinging
+           through a dramatically larger arc than the reference at nearly
+           every sampled frame (1-24), even where the underlying bones'
+           OWN rest_to_pose angles differ only moderately. Root cause: a
+           RIGID piece applies one bone's FULL, un-blended rotation to
+           its entire region, while Moho's own render is a genuinely
+           SMOOTH per-pixel blend - snapping instantly from "all thigh"
+           to "all shin" the moment a point crosses outside a small
+           joint-disk (the fix that made rigid pieces connect at all)
+           is a much MORE ABRUPT transition than that smooth blend ever
+           produces, and abrupt-but-connected still reads as visibly
+           over-bent.
+        2. Per-bone PIXEL MASKING on top of (1) (ImageChops.multiply
+           against a classified owner mask) additionally introduced
+           DISCONNECTED DEBRIS: a bone's owned region is one connected
+           patch of local coordinate space, but this artwork's own baggy,
+           folded pant leg is not always one connected SHAPE at those same
+           coordinates (confirmed: back leg's own "back foot" region
+           intersected with the source alpha in 6 disconnected islands,
+           sizes 4015/1473/178/12/3/1 - a real, sizeable stray, not a
+           rounding error). A largest-connected-component filter fixed
+           the debris specifically, but (1)'s own over-bending remained.
+
+        THIS FIX drops rigid per-bone binding entirely: every tile below
+        uses the SAME flexible (region) blend the un-tiled case already
+        used (Skinner.deform across the whole subset, weighted - never
+        snapped to one bone), just evaluated over a much SMALLER local
+        extent than the whole crop. A smaller extent keeps the single
+        affine map each tile is still limited to much closer to exact:
+        measured directly on `back leg` at frame 19 (the extreme case),
+        the whole-crop blend's own parallelogram error is 105.88px; a
+        16-tile split brings the WORST tile down to under 10px, without
+        ever discarding a bone's own full rotation the way a rigid piece
+        does. Confirmed this actually fixes the over-bending: re-checked
+        against the same `back-leg`/`front-leg` reference PNGs used to
+        catch (1) and (2) above, matching visibly across the sampled
+        range instead of only at one frame.
+
+        HOW: split into `_IMAGE_TILE_COUNT` equal strips along whichever
+        of `image_width`/`image_height` is LONGER (a limb crop is far
+        taller than wide in every case in this document - torso, hood,
+        upper arms included - so this always tiles along the limb's own
+        length, never across it). Each tile's PNG is a plain rectangular
+        CROP (not a mask) - never introduces the disconnected-debris
+        defect (2) above, since a crop's pixels are contiguous in the
+        source image by construction. A tile whose crop is fully
+        transparent (nothing drawn there) is dropped. Falls back to a
+        single un-tiled ImageSegment (see ImageSegment) when: Pillow is
+        unavailable; the crop itself could not be resolved; the deform
+        chain has no SkinStep at all (an ancestor-only ImageLayer,
+        nothing to tile against); the SkinStep is already rigid
+        (`bound_bone_index >= 0`, already exactly affine, nothing a tile
+        split would improve); fewer than 2 subset bones actually
+        contribute (`strength > 0`); or tiling leaves 1 or 0 non-empty
+        tiles (nothing meaningful to split).
+        """
+        whole = [ImageSegment(None, "", None)]
+        if Image is None:
+            return whole
+        png = self._psd_layer_png(layer)
+        if png is None:
+            return whole
+        data, src_w, src_h = png
+        chain = build_deform_chain(ancestors, layer, 0.0, self)
+        skin_step = next((step for step in chain if isinstance(step, SkinStep)), None)
+        if skin_step is None or skin_step.bound_bone_index >= 0:
+            return whole
+        skeleton = skin_step.bone_layer.skeleton
+        if skeleton is None:
+            return whole
+        subset = self._effective_subset(skin_step)
+        rest = Skinner.build(skeleton, 0.0, self)
+        indices = subset if subset else range(len(rest.bones))
+        contributing = sum(1 for i in indices if rest.bones[i].strength > 0)
+        if contributing <= 1:
+            return whole
+
+        hw, hh = layer.image_width / 2.0, layer.image_height / 2.0
+        base = Image.open(io.BytesIO(data)).convert("RGBA")
+        n = self._IMAGE_TILE_COUNT
+        along_height = layer.image_height >= layer.image_width
+        # Two ADJACENT tiles are evaluated through slightly DIFFERENT
+        # flexible-blend transforms (each at its own local corners), so
+        # even though their nominal boundary is the exact same line in
+        # local space, the two tiles' own posed versions of that line
+        # land a hair apart - a small residual of the same root cause
+        # _compute_image_layer_segments' own docstring describes for the
+        # (much larger) whole-crop/rigid-piece cases, just now bounded by
+        # each tile's own small size instead of the whole limb's. Confirmed
+        # visible as a thin white seam between tiles once every other
+        # defect here was fixed. Padding each tile's OWN crop (and its
+        # matching local corners, so the affine fit still maps this larger
+        # crop correctly) by `_TILE_OVERLAP_PX` into its neighbour makes
+        # adjacent tiles physically overlap by a few pixels, hiding that
+        # hairline under whichever tile draws on top - cheaper and less
+        # fragile than trying to make two independently-evaluated blends
+        # agree exactly on a shared edge.
+        margin = self._TILE_OVERLAP_PX
+        segments = []
+        for t in range(n):
+            if along_height:
+                row0 = max(0, round(t * src_h / n) - (margin if t > 0 else 0))
+                row1 = min(src_h, round((t + 1) * src_h / n) + (margin if t < n - 1 else 0))
+                y_top = hh - row0 / src_h * 2.0 * hh
+                y_bot = hh - row1 / src_h * 2.0 * hh
+                top_left, top_right, bottom_left = Vec2(-hw, y_top), Vec2(hw, y_top), Vec2(-hw, y_bot)
+                crop_box = (0, row0, src_w, row1)
+            else:
+                col0 = max(0, round(t * src_w / n) - (margin if t > 0 else 0))
+                col1 = min(src_w, round((t + 1) * src_w / n) + (margin if t < n - 1 else 0))
+                x_left = -hw + col0 / src_w * 2.0 * hw
+                x_right = -hw + col1 / src_w * 2.0 * hw
+                top_left, top_right, bottom_left = Vec2(x_left, hh), Vec2(x_right, hh), Vec2(x_left, -hh)
+                crop_box = (col0, 0, col1, src_h)
+            tile_img = base.crop(crop_box)
+            if tile_img.getbbox() is None:
+                continue  # fully transparent slice - nothing to draw
+            buf = io.BytesIO()
+            tile_img.save(buf, format="PNG")
+            segments.append(ImageSegment((top_left, top_right, bottom_left), f"#{t}",
+                                         (buf.getvalue(), tile_img.width, tile_img.height)))
+        return segments if len(segments) > 1 else whole
+
+    def _render_image_layer(self, ancestors: Sequence[Layer], layer: Layer,
+                             chain: list["DeformStep"], frame: float,
+                             indent: str) -> tuple[str, list[Vec2]]:
+        """One ImageLayer's own PSD crop as one or more SVG `<image>`
+        elements, positioned by running its own 4 corners - in ITS OWN
+        local Moho-space, exactly like a MeshLayer's own points (see
+        Layer.image_width/image_height) - through the SAME deform chain
+        any mesh layer's points go through (ancestor transforms AND bone
+        deformation alike).
+
+        Normally one `<image>`: `_image_layer_segments` returns a single
+        ImageSegment (corners=None) for the common case, and this then
+        behaves exactly as before tiling existed. When that method DID
+        split the crop (a multi-bone flexible binding - see its own
+        docstring for why), one `<image>` is emitted per tile instead,
+        each still flexibly bound but over its own smaller local extent -
+        see _render_image_segment.
+        """
+        segments = self._image_layer_segments(ancestors, layer)
+        elements = []
+        all_pts: list[Vec2] = []
+        for segment in segments:
+            el, pts = self._render_image_segment(layer, chain, frame, indent, segment)
+            if el:
+                elements.append(el)
+            all_pts.extend(pts)
+        return "\n".join(elements), all_pts
+
+    def _render_image_segment(self, layer: Layer, chain: list["DeformStep"], frame: float,
+                              indent: str, segment: "ImageSegment") -> tuple[str, list[Vec2]]:
+        """One ImageSegment (see _image_layer_segments) as a single SVG
+        `<image>`.
+
+        Every segment - tiled or not - is flexibly bound (Skinner.deform
+        across every bone in the subset, weighted; never a single rigid
+        bone - see ImageSegment's own docstring for why an earlier rigid-
+        per-bone design was tried and rejected), so a chain of plain
+        matrices never guarantees a rectangle maps to a parallelogram
+        here: different corners can end up blended differently, and the
+        result is only APPROXIMATELY a parallelogram - the one affine map
+        Lottie/SVG can express for a single image layer, not an exact
+        reproduction of Moho's own per-pixel bend. The 4th corner is
+        computed anyway as a measure of how far off that approximation is
+        for this particular frame/tile - real and expected to be nonzero
+        on a bending layer (see build_deform_chain's own docstring for
+        why this is still preferred over rendering no deformation at
+        all), not a sign of a bug by itself; tiling (see
+        _compute_image_layer_segments) keeps it small by keeping each
+        piece's own local extent small, not by making any one piece
+        exactly affine.
+        """
+        png = segment.png if segment.png is not None else self._psd_layer_png(layer)
+        if png is None:
+            return "", []
+        data, src_w, src_h = png
+        to_px = self._deformed_pixel_mapper(chain, frame, -2)
+        if segment.corners is not None:
+            local_top_left, local_top_right, local_bottom_left = segment.corners
+        else:
+            hw, hh = layer.image_width / 2.0, layer.image_height / 2.0
+            local_top_left, local_top_right = Vec2(-hw, hh), Vec2(hw, hh)
+            local_bottom_left = Vec2(-hw, -hh)
+        # Local corners in Moho's own +y-is-UP convention (see the module
+        # docstring's COORDINATES section) - the source PNG's row 0 (its
+        # own TOP edge) is the +y edge here.
+        top_left = to_px(local_top_left)
+        top_right = to_px(local_top_right)
+        bottom_left = to_px(local_bottom_left)
+        bottom_right = to_px(local_top_right + local_bottom_left - local_top_left)
+        predicted = top_right + bottom_left - top_left
+        off = predicted.distance_to(bottom_right)
+        if off > 0.5:
+            sys.stderr.write(f"  ! image layer {layer.name!r}{segment.suffix} at frame {frame}: "
+                             f"flexible bone binding is not a true parallelogram here "
+                             f"(off by {off:.2f}px) - the single affine approximation used for "
+                             f"this image layer will look sheared on this frame\n")
+        a = (top_right.x - top_left.x) / src_w
+        b = (top_right.y - top_left.y) / src_w
+        c = (bottom_left.x - top_left.x) / src_h
+        d = (bottom_left.y - top_left.y) / src_h
+        b64 = base64.b64encode(data).decode("ascii")
+        name = svg_escape(layer.name + segment.suffix)
+        el = (f'{indent}<image id="{name}" href="data:image/png;base64,{b64}" '
+             f'width="{src_w}" height="{src_h}" '
+             f'transform="matrix({a:.6f} {b:.6f} {c:.6f} {d:.6f} '
+             f'{top_left.x:.3f} {top_left.y:.3f})"/>')
+        return el, [top_left, top_right, bottom_left, bottom_right]
+
     @staticmethod
     def _bake_tinted_frame(raw_png: bytes, hex_color: str, alpha: float) -> bytes:
         """One brush texture frame, pre-rendered as a solid-`hex_color` PNG
@@ -5244,8 +6143,8 @@ class Exporter:
                 paths += self._mask_source_shapes(child, chain_through_container, frame)
         return paths
 
-    def _mask_source_shapes_bezier(self, layer: Layer, ancestors: Sequence[Layer],
-                                    frame: float) -> list[tuple[list[dict], float, Optional[list[dict]]]]:
+    def _mask_source_shapes_bezier(self, layer: Layer, ancestors: Sequence[Layer], frame: float
+                                    ) -> list[tuple[list[dict], float, Optional[list[tuple[dict, bool]]]]]:
         """Bezier counterpart of _mask_source_shapes(), for a Lottie writer -
         same recursion, same (per-shape geometry, exclude_width) pairing,
         `build_path_bezier()` in place of `build_path_d()`, same per-source
@@ -5254,15 +6153,20 @@ class Exporter:
         Returns (beziers, exclude_width, exclude_band) triples, ONE MORE
         element than _mask_source_shapes's plain (path, exclude_width) SVG
         pairs: `exclude_band` is the same exclude_width band, ALREADY BUILT
-        as filled Lottie geometry (self.tapered_outliner.build_bezier at
-        that uniform width - correct because exclude_width is only ever
-        computed for a non-tapered, non-brush outline in the first place,
-        same restriction _mask_source_shapes itself applies), since a
-        Lottie consumer has no "stroke this path as a mask" primitive the
-        way an SVG <mask> does and must instead subtract an already-filled
-        band shape - see moho2lottie.py's LottieExporter._finalize_mask.
-        `exclude_band` is None exactly when `exclude_width` is 0.0."""
-        paths: list[tuple[list[dict], float, Optional[list[dict]]]] = []
+        as filled Lottie geometry - `TaperedStrokeOutliner.
+        build_bezier_with_holes` (NOT the plain build_bezier - see that
+        method's own docstring for why: a closed source outline's own
+        exclusion band is a RING, and only the "with_holes" tagging lets
+        moho2lottie.py's own _finalize_mask subtract just the ring instead
+        of the source's own entire silhouette) at that uniform width -
+        correct because exclude_width is only ever computed for a
+        non-tapered, non-brush outline in the first place, same
+        restriction _mask_source_shapes itself applies), since a Lottie
+        consumer has no "stroke this path as a mask" primitive the way an
+        SVG <mask> does and must instead subtract an already-filled band
+        shape. `exclude_band` is None exactly when `exclude_width` is
+        0.0."""
+        paths: list[tuple[list[dict], float, Optional[list[tuple[dict, bool]]]]] = []
         if layer.mesh is not None:
             self._active_actions = self._active_actions_along(ancestors, frame)
             try:
@@ -5285,7 +6189,7 @@ class Exporter:
                             line_width = self.eval(shape.style.line_width, frame)
                             exclude_width = self._stroke_width_px(line_width, point_width)
                             if exclude_width > 0:
-                                exclude_band = self.tapered_outliner.build_bezier(
+                                exclude_band = self.tapered_outliner.build_bezier_with_holes(
                                     geometries, shape.edges, to_px, exclude_width) or None
                     paths.append((beziers, exclude_width, exclude_band))
             finally:
@@ -5486,6 +6390,18 @@ class Exporter:
                             inner.append(f"{pad}</g>")
                         else:
                             inner.extend(body)
+                elif item.event == "image":
+                    el, pts = self._render_image_layer(
+                        item.ancestors, item.layer, item.deform_chain, frame, pad + "  ")
+                    pixel_points.extend(pts)
+                    if el:
+                        if nested_groups or member_clip:
+                            inner.append(f'{pad}<g id="{name}" '
+                                         f'data-moho-mask="{item.layer.masking}"{member_clip}>')
+                            inner.append(el)
+                            inner.append(f"{pad}</g>")
+                        else:
+                            inner.append(el)
                 else:  # "enter" - a container child; recurse into its own scope
                     # A GroupLayer/BoneLayer/SwitchLayer (or a TextLayer with
                     # no mesh_layer to synthesise a child from) - its own
@@ -5557,6 +6473,17 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 yield RenderItem("mesh", layer, ancestors, len(ancestors),
                                   exempt=child_exempt, geometries=geometries, to_px=to_px)
                 exporter._active_actions = []
+            elif layer.kind is LayerKind.IMAGE:
+                # A raster PSD crop, not a mesh - same deform chain a mesh
+                # layer would get (parent_bone/flexi_bone_subset are read
+                # off `layer` generically by build_deform_chain, so this
+                # needs no special-casing there), applied to this layer's
+                # own 4 corners instead of mesh points - see the module
+                # docstring's IMAGE LAYERS section and
+                # Exporter._render_image_layer.
+                chain = build_deform_chain(ancestors, layer, frame, exporter)
+                yield RenderItem("image", layer, ancestors, len(ancestors),
+                                  exempt=child_exempt, deform_chain=chain)
             elif layer.is_container:
                 # A GroupLayer/BoneLayer/SwitchLayer (or a TextLayer with no
                 # mesh_layer to synthesise a child from) - recurse into its
@@ -5565,9 +6492,10 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 # Moho's own still-draws-an-empty-<g> behaviour.
                 yield from walk(layer.children, layer, ancestors + (layer,),
                                  world_here, child_exempt)
-            # else: neither a mesh nor a container - e.g. an unresolved
-            # PatchLayer (see PATCH LAYERS) whose target never got a mesh -
-            # draws nothing at all, not even an empty "enter"/"exit" pair.
+            # else: neither a mesh, an image, nor a container - e.g. an
+            # unresolved PatchLayer (see PATCH LAYERS) whose target never
+            # got a mesh - draws nothing at all, not even an empty
+            # "enter"/"exit" pair.
 
         yield RenderItem("exit", container, ancestors, len(ancestors))
 
@@ -5982,6 +6910,19 @@ def main() -> None:
                              "the SVG - the standard \"@2x asset\" trick, noticeably sharper "
                              "for a fine/sparse brush texture at a roughly N^2 file-size cost "
                              "for that image. Pass 1.0 to composite at exact 1:1 size instead")
+    parser.add_argument("--image-dir", default=None, metavar="DIR",
+                        help="local directory standing in for the `Support/` folder of the Moho "
+                             "install an ImageLayer's source (e.g. a PSD in Moho's own shipped "
+                             "content library) lives under - e.g. "
+                             "/Applications/Moho.app/Contents/Resources/Support on macOS. Tries "
+                             "Layer.image_fileref first (a portable reference relative to "
+                             "whichever Library/ directory under DIR actually has it - Moho ships "
+                             "one per edition tier - confirmed to be what the Moho app itself "
+                             "resolves against), falling back to rebasing the absolute, often "
+                             "other-machine/OS `image_path` Moho ALSO records. Requires the "
+                             "optional psd-tools package (and Pillow); an ImageLayer whose source "
+                             "cannot be found or opened is skipped with a warning, exactly as if "
+                             "this flag were omitted")
     parser.add_argument("--smooth-joints", action="store_true",
                         help="approximate Moho's \"Smooth Joint for Bone Pair\": a layer bound "
                              "to exactly ONE bone deforms rigidly and tears away from the next "
@@ -6016,7 +6957,8 @@ def main() -> None:
                               brush_raster_supersample=args.brush_raster_supersample,
                               smooth_bone_joints=args.smooth_joints,
                               point_bone_binding=args.point_bones,
-                              bone_dynamics=args.bone_dynamics)
+                              bone_dynamics=args.bone_dynamics,
+                              image_search_dir=args.image_dir)
     document = load_document(args.project)
     exporter = Exporter(document, settings)
 

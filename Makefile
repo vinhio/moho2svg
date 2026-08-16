@@ -12,18 +12,48 @@ help:
 	@echo '  make svg-all                           every moho/ project in all four svg forms'
 	@echo '  make lottie-all                        every moho/ project -> out/lottie/'
 	@echo '  make lottie-all VALIDATE=--validate    also schema-validate each export'
+	@echo '  make out/lottie/BoneStrengthTool.json IMAGE_DIR=/Applications/Moho.app/Contents/Resources/Support'
+	@echo '                                        (or any SVG/lottie target) resolve ImageLayer sources -'
+	@echo '                                        see moho2svg.py --image-dir'
 	@echo '  make check-lottie                      verify lottie output (no player needed)'
 	@echo '  make check-reference                   compare geometry vs Moho 14.4 exports'
 	@echo '  make format                            pretty-print every moho/ project'
+	@echo ''
+	@echo 'Setup:'
+	@echo '  make venv                              create .venv and install optional packages'
+	@echo '                                        (Pillow, psd-tools); then source .venv/bin/activate'
 	@echo ''
 	@echo 'Single-file targets (build any project by name):'
 	@echo '  make out/svg/ori/Bandit.svg            one original export (full brush texture)'
 	@echo '  make out/svg/med/SketchBone.svg        one medium-density preview'
 	@echo '  make out/svg/fast/WhatIsBone.svg       one fast preview (no brush stamping)'
 	@echo '  make out/svg/raster/Bandit.svg         one raster brush export (needs Pillow)'
+	@echo '  make out/svg/ori/BoneStrengthTool.svg  IMAGE_DIR=/Applications/Moho.app/Contents/Resources/Support'
+	@echo '                                        (or any SVG target) resolve ImageLayer sources -'
+	@echo '                                        see moho2svg.py --image-dir'
 	@echo '  make out/svg/ori/png/SketchBone.png    render one ori SVG to PNG (3x)'
 	@echo '  make out/lottie/Bandit.json            one lottie export'
 	@echo '  make format/moho/Bandit                pretty-print one project (moho/Bandit.json)'
+# ---------------------------------------------------------------------------
+# One-time environment setup. The exporters never REQUIRE a third-party
+# package - every missing one falls back gracefully - but three are worth
+# installing: Pillow (fast brush-texture rendering, --brush-raster),
+# psd-tools (rendering an ImageLayer's referenced PSD layers via --image-dir;
+# it also needs Pillow), and pyclipper (moho2lottie.py pre-clips a
+# combo_mode==3 shape's own fill/outline against its group's base union at
+# EXPORT time instead of via a Lottie masksProperties mode "i" entry, which
+# is not reliably honoured by every real-world player - confirmed silently
+# ignored by both lottie-web's canvas renderer and LottieFiles' own preview
+# player; see moho2lottie.py's _clip_polygon_loops). The virtualenv is
+# gitignored; activate it once per shell before running any other target:
+# `make venv && source .venv/bin/activate`. (jsonschema stays out of the
+# venv - it is needed only by `moho2lottie.py --validate`, so
+# `pip install jsonschema` it on demand instead.)
+.PHONY: venv
+venv:
+	python3 -m venv .venv
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install Pillow psd-tools pyclipper
 # ---------------------------------------------------------------------------
 # Pattern rules: the output file IS the target, so you can build any project
 # by name from the command line, e.g.:
@@ -41,6 +71,20 @@ help:
 .SECONDEXPANSION:
 .PHONY: svg-all lottie-all format
 
+# IMAGE_DIR (empty/unset by default, exactly like moho2svg.py's own
+# --image-dir - neither guesses a Moho install path) - the local `Support/`
+# directory an ImageLayer's source (e.g. a PSD in Moho's own shipped content
+# library) resolves against, e.g.
+# IMAGE_DIR=/Applications/Moho.app/Contents/Resources/Support on macOS. Read
+# by BOTH the SVG and Lottie recipes below, so it applies to any target,
+# e.g. `make out/lottie/BoneStrengthTool.json IMAGE_DIR=...`. See
+# moho2svg.py's own --image-dir (same flag, same Exporter underneath) for
+# what it actually does - requires the optional psd-tools/Pillow packages
+# (`make venv`); an ImageLayer whose source cannot be found or opened is
+# skipped with a warning either way, IMAGE_DIR set or not.
+IMAGE_DIR ?=
+image_dir_flag = $(if $(IMAGE_DIR),--image-dir "$(IMAGE_DIR)")
+
 # Define the shared recipe bits once. $(1) is the output file; the input is
 # found by `ls`, mirroring the wildcard prerequisite order above. `$*` is the
 # pattern stem (expanded when the recipe runs, so it is the current target's
@@ -49,7 +93,7 @@ define export_svg_recipe
 	mkdir -p $(dir $(1))
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $(1)"; exit 1; fi; \
-	python3 moho2svg.py "$$src" --combined $(1) $(2)
+	python3 moho2svg.py "$$src" --combined $(1) $(2) $(image_dir_flag)
 endef
 
 # Original export: full brush texture at default spacing - the closest match
@@ -107,7 +151,7 @@ out/lottie/%.json: moho2lottie.py moho2svg.py Makefile $$(wildcard moho/$$*.anim
 	mkdir -p out/lottie
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $@"; exit 1; fi; \
-	python3 moho2lottie.py "$$src" --out $@ $(VALIDATE)
+	python3 moho2lottie.py "$$src" --out $@ $(VALIDATE) $(image_dir_flag)
 
 # Every project's lottie export (PROJECT_STEMS from above). A name with both
 # extensions (SketchBone) exports once, through the .animeproj; a .mohoproj

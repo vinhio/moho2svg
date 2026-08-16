@@ -14,10 +14,24 @@ constant this tool uses, see the module docstring at the top of
   exporting a document with textured brush styles still works, but the
   result can be very slow (or fail) to open in a browser/SVG viewer. See
   [§ 7](#7-brush-textures).
+- **`psd-tools`, optional** (`pip install psd-tools`) — only needed when an
+  `ImageLayer` references a PSD file (`--image-dir`); it also requires
+  Pillow. Absent, `ImageLayer` content is skipped with a counted warning.
 - A Moho project file: `.mohoproj` (Moho Pro) or `.animeproj` (Moho Debut).
   Both are plain JSON despite the extension.
 - Optionally, an SVG viewer for spot-checking output — a browser works fine;
   `rsvg-convert` is convenient for scripted PNG previews.
+
+Install the optional packages once, in a local virtualenv, then activate it
+in every new shell before running the exporter:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install Pillow psd-tools
+```
+
+Inside this repository, `make venv` does exactly the same (see the Makefile).
 
 ## 2. Basic commands
 
@@ -166,8 +180,8 @@ A document whose linework broadly uses a textured brush (rather than just
 one or two accent shapes) can end up with many thousands of individual
 stamped dabs once every matching style picks it up. How expensive that is
 *to view* (not to produce — `moho2svg.py` itself stays fast either way)
-depends entirely on whether **Pillow** (`pip install Pillow`) is installed
-where you run `moho2svg.py`:
+depends entirely on whether **Pillow** (`pip install Pillow`, or `make venv`
+— see § 1) is installed where you run `moho2svg.py`:
 
 - **Pillow installed (preferred)**: each *(brush, frame, colour, alpha)*
   combination actually used in the document is pre-rendered, once, into an

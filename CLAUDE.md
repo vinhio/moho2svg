@@ -41,24 +41,52 @@ writes a Moho document to a Lottie JSON animation instead of SVG. Every
 deformation is baked into canvas-pixel vertex positions, so every Lottie
 layer keeps an identity transform. See
 [`docs/moho-to-lottie-plan.md`](docs/moho-to-lottie-plan.md) for what is
-implemented (all 8 planned tasks, verified against all 19 sample documents)
-and what is deliberately out of scope (brush textures, `combo_mode` boolean
-combination, `ImageLayer`, Smart Warp — each produces a counted warning on
-stderr rather than a silent gap).
+implemented (all 8 planned tasks plus the post-plan additions — `combo_mode`
+boolean combination, missing keyframe easing, `pyclipper`-based combo_mode==3
+pre-clipping — verified against all 19 sample documents) and what is
+deliberately out of scope (brush textures, Smart Warp — each produces a
+counted warning on stderr rather than a silent gap).
+An `ImageLayer` renders through the shared exporter when the optional
+`psd-tools` package is installed (`--image-dir`), and is skipped with a
+counted warning otherwise. A combo_mode==3 (intersect) shape's own fill/
+outline is pre-clipped against its group's base union at export time when
+the optional `pyclipper` package is installed, instead of via a Lottie
+masksProperties mode "i" entry — confirmed that mode is silently ignored
+(not merely imprecise) by both lottie-web's canvas renderer and LottieFiles'
+own preview player, while an "a"/"s" entry on the exact same layer works
+correctly in both — see `moho2lottie.py`'s own `_clip_polygon_loops`
+docstring for the full evidence trail and why a hand-rolled polygon clipper
+was rejected in favour of this well-tested library. Falls back to the
+masksProperties "i" approximation, with a counted warning, when `pyclipper`
+is absent OR when a shape's clipped topology changes across the animation
+(confirmed on Bandit's own `Leg_F`/`Leg_F 2`: some combo_mode==3 members
+clip stably, at least one does not, split into a different number of
+disjoint pieces partway through — Lottie's own fixed-vertex-count
+keyframing cannot represent that, so it is left on the older path rather
+than guessed at).
 
 The script has no *required* third-party dependencies — only the stdlib
 (`argparse`, `base64`, `io`, `json`, `math`, `os`, `random`, `re`, `struct`,
 `sys`, `zipfile`, `dataclasses`, `enum`, `typing`). **Pillow is an optional
 dependency** (`try: from PIL import Image...`, gracefully absent otherwise)
 that enables a much faster brush-texture render path — see the performance
-note below.
+note below. **`psd-tools` is a second optional dependency** (`try:
+from psd_tools import PSDImage...`, gracefully absent otherwise) — only
+needed when an `ImageLayer` references a PSD (`--image-dir`); it also
+requires Pillow. **`pyclipper` is a third optional dependency** (`try:
+import pyclipper`, gracefully absent otherwise), used only by
+`moho2lottie.py` for the combo_mode==3 pre-clipping described above.
+`jsonschema` is optional too, used only by `moho2lottie.py --validate`. All
+of them install in one step with `make venv` (see Commands below).
 
 Repository layout:
 
 - `moho2svg.py` — the SVG exporter.
 - `moho2lottie.py` — the Lottie exporter (see above); reuses `moho2svg.py`
-  as a library, adds no new third-party dependency (`jsonschema` is optional,
-  used only by its own `--validate` flag).
+  as a library. Two of its own optional dependencies beyond what
+  `moho2svg.py` already needs: `pyclipper` (combo_mode==3 pre-clipping,
+  described above) and `jsonschema` (its own `--validate` flag); `psd-tools`
+  is optional too, via the shared exporter, for `ImageLayer`.
 - `tools/` — verification scripts. `check_bezier_roundtrip.py` (the Lottie
   path builder agrees with the SVG one) and `check_lottie_geometry.py` (an
   emitted Lottie file agrees with what the pipeline computes directly, at any
@@ -174,6 +202,16 @@ export of a `PatchLayer`-using document - see
 `docs/moho-project-file-format.md` § 11.
 
 ## Commands
+
+One-time setup — a local virtualenv with the optional packages (Pillow,
+psd-tools, pyclipper; see Dependencies above). Nothing here is required to
+run the scripts, but the brush-texture, ImageLayer and combo_mode==3
+pre-clipping paths want it:
+
+```bash
+make venv                                   # creates .venv, installs Pillow + psd-tools + pyclipper
+source .venv/bin/activate                   # once per shell, before the commands below
+```
 
 ```bash
 python3 moho2svg.py Project.mohoproj --list                       # list every layer (mesh point/shape counts for vector layers)
