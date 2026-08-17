@@ -1,6 +1,6 @@
 ---
 name: moho-rig-report
-description: Analyzes the layer/bone structure and special motion configurations (Smart Bone, IK, dynamics, wind/gravity physics, flip, switch, masking, cycle...) of a .mohoproj/.animeproj file, then publishes an HTML "rig map" Artifact (hierarchy tree + bone tables + notes) in the same style as the DarkMan.mohoproj report. Triggers when the user asks to analyze the rig/bones/layers of a Moho file, wants to see its "bone structure" or "how the parts move", or asks for "the same report/artifact as before" for a different Moho file.
+description: Analyzes the layer/bone structure and special motion configurations (Smart Bone, IK, dynamics, wind/gravity physics, flip, switch, masking, cycle...) of a .mohoproj/.animeproj file, then publishes an HTML "rig map" Artifact (hierarchy tree + bone tables + per-layer shape order with combo_mode boolean combination + notes) in the same style as the DarkMan.mohoproj report. Triggers when the user asks to analyze the rig/bones/layers of a Moho file, wants to see its "bone structure" or "how the parts move", or asks for "the same report/artifact as before" for a different Moho file.
 allowed-tools: Read, Bash, Write, Artifact
 user-invocable: true
 argument-hint: "<path to a .mohoproj/.animeproj file, or a filename under moho/>"
@@ -13,10 +13,12 @@ argument-hint: "<path to a .mohoproj/.animeproj file, or a filename under moho/>
 Reproduce the **exact style** of the "DarkMan Rig Map" artifact for any
 `.mohoproj`/`.animeproj` file in this repo: layer hierarchy tree, a detailed
 bone table per rig (parent, rest length, angle/pos/scale keyframe counts),
-and special motion configurations (Smart Bone, IK/Target Bone, bone
-angle-spring dynamics, flip_h/flip_v, wind/gravity physics, cycle,
-SwitchLayer, masking, PatchLayer, ImageLayer, Smart Warp) — published as an
-HTML Artifact.
+a per-vector-layer shape table (each shape in real draw order, with its
+`combo_mode` boolean combination — a layer draws MANY shapes and they
+combine and overlap in that order, so the report must show it), and special
+motion configurations (Smart Bone, IK/Target Bone, bone angle-spring
+dynamics, flip_h/flip_v, wind/gravity physics, cycle, SwitchLayer, masking,
+PatchLayer, ImageLayer, Smart Warp) — published as an HTML Artifact.
 
 **The report's own text stays in Vietnamese, exactly as the DarkMan and
 Bandit reports already are** — only this skill's own instructions
@@ -88,6 +90,16 @@ via Bash). The important blocks:
   don't edit it (the secondary tree, inside a collapsed `<details>` in the
   template — the real paint order).
 - `rigs_html` — paste verbatim into the `{{RIGS}}` marker, don't edit it.
+- `shapes_html` — paste verbatim into the `{{SHAPES}}` marker, don't edit
+  it. One collapsed `<details>` per vector layer, shapes listed in real
+  draw order (`mesh.draw_order()` — today always the `shapes` array order;
+  the `shape_order` channel is deliberately ignored, see
+  `Mesh.draw_order`'s docstring) with fill/outline, the `combo_mode` pill
+  (union / intersect / combo 2 chưa giải mã) and a style note (brush,
+  gradient fill, second effect, gradient line). If this string is EMPTY
+  (a file with no mesh-carrying layer, e.g. a pure ImageLayer rig), drop
+  the whole `<section id="shapes">...</section>` block when assembling in
+  step 4 — don't leave an empty shell.
 - `flags.*` — use these to **write** the callout/findings/notes (see step
   3); every entry already has a `path` like `parent ▸ child ▸ ...` for
   precise citation.
@@ -190,10 +202,13 @@ import json
 data = json.load(open('/tmp/<slug>-rig.json'))
 template = open('.claude/skills/moho-rig-report/template.html').read()
 # Replace each {{MARKER}} with the content written in step 3, and
-# {{TREE_PANEL}}/{{TREE_DRAW}}/{{RIGS}} with
-# data['tree_html_panel_order']/data['tree_html_draw_order']/data['rigs_html']
+# {{TREE_PANEL}}/{{TREE_DRAW}}/{{RIGS}}/{{SHAPES}} with
+# data['tree_html_panel_order']/data['tree_html_draw_order']/
+# data['rigs_html']/data['shapes_html']
 # verbatim (don't re-reverse anything - the script already reversed what
-# needed reversing).
+# needed reversing). When data['shapes_html'] is empty, delete the whole
+# <section id="shapes"> ... </section> block from the page (a rig with no
+# vector layer has nothing to show there).
 ...
 open('<scratchpad>/<slug>-rig.html', 'w').write(template)
 EOF

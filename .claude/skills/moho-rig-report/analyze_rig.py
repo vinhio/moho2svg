@@ -26,6 +26,12 @@ Walks a .mohoproj/.animeproj document with moho2svg.py's own document model
     skeleton-bearing layer, each containing a <table> of its bones (parent,
     rest length, angle/pos/scale keyframe counts, and a notes column for
     IK/auto-stretch/flip/angle-spring/wind)
+  - shapes_html: one <details class="rig">...</details> block per vector
+    (mesh-carrying) layer, listing its shapes in real draw order with each
+    shape's boolean combination mode (combo_mode), fill/outline presence and
+    a style note (brush / gradient / second effect). Empty string when no
+    vector layer carries shapes - the caller then drops the whole shapes
+    section from the assembled page (see SKILL.md step 4).
   - flags: every "special configuration" this pass can detect, pre-grouped
     so the caller does not need to re-derive them from tree_html/rigs_html:
     smart_bone_dials, ik_bones, angle_spring_bones, flip_bones, wind_rigs,
@@ -140,6 +146,82 @@ def build_tree_html(doc, panel_order: bool) -> str:
 
     rec(doc.layers)
     out.append("</ul>")
+    return "\n".join(out)
+
+
+def build_shapes_html(doc) -> str:
+    """One <details class="rig"> block per vector layer, shape by shape.
+
+    A MeshLayer paints MANY shapes, and each shape's position in the draw
+    order plus its boolean combination mode decide what the layer actually
+    looks like - two facts a rig report must not leave out. Ground truth,
+    read from the same model the exporter uses:
+
+    - Order: `mesh.draw_order()` - which today returns the `shapes` array
+      itself (the `shape_order` channel is deliberately ignored where the
+      two disagree - see Mesh.draw_order's own docstring for the three
+      independent pieces of evidence). A mesh whose raw
+      `anim_shape_order` is true (z-order animated by the animator - false
+      in every mesh of the 19-sample corpus) gets a warn pill instead of a
+      guess about which frame's order to print.
+    - combo_mode (Shape.combo_mode): 0/None = plain shape, 1 = union
+      member (same-group mode-1 shapes merge into one boolean union),
+      3 = intersect (clipped against its group's base union), 2 = not
+      decoded by the exporter (warn pill).
+    - Style note: brush stamp name, gradient fill, a second stacked fill
+      effect, or a gradient outline - the model's own ResolvedStyle.
+
+    Reuses the template's existing details/table/pill CSS - no new
+    stylesheet entries are needed for this section.
+    """
+    out = []
+    mesh_idx = 0
+    for parents, layer in doc.vector_layers():
+        mesh = layer.mesh
+        if not mesh.shapes:
+            continue
+        mesh_idx += 1
+        full_path = " ▸ ".join([p.name for p in parents] + [layer.name])
+        anim_order = bool((layer._raw.get("mesh") or {}).get("anim_shape_order"))
+        anim_pill = ' <span class="pill warn">anim shape order</span>' if anim_order else ""
+        out.append(f'<details class="rig" id="mesh-{mesh_idx}">')
+        out.append(
+            f'<summary>{esc(full_path)}{anim_pill} '
+            f'<span class="count">{len(mesh.draw_order())} shapes</span></summary>'
+        )
+        out.append('<div class="table-wrap"><table>')
+        out.append(
+            "<thead><tr><th>#</th><th>Shape</th><th>Fill</th><th>Outline</th>"
+            "<th>Kết hợp (combo_mode)</th><th>Style</th></tr></thead><tbody>"
+        )
+        for i, shape in enumerate(mesh.draw_order(), start=1):
+            combo = shape.combo_mode or 0
+            if combo == 1:
+                combo_html = '<span class="pill">union</span>'
+            elif combo == 3:
+                combo_html = '<span class="pill warn">intersect</span>'
+            elif combo == 2:
+                combo_html = '<span class="pill warn">combo 2 (chưa giải mã)</span>'
+            else:
+                combo_html = "—"
+            notes = []
+            if shape.style.brush_name:
+                notes.append(f"brush={shape.style.brush_name}")
+            if shape.style.fill_style:
+                notes.append("gradient fill")
+            if shape.style.fill_style2:
+                notes.append("+fill effect 2")
+            if shape.style.line_style:
+                notes.append("gradient line")
+            style_html = ", ".join(esc(n) for n in notes) if notes else "—"
+            out.append(
+                f'<tr><td class="num">{i}</td><td class="mono">{esc(shape.name)}</td>'
+                f"<td>{'✓' if shape.has_fill else '—'}</td>"
+                f"<td>{'✓' if shape.has_outline else '—'}</td>"
+                f"<td>{combo_html}</td><td>{style_html}</td></tr>"
+            )
+        out.append("</tbody></table></div>")
+        out.append("</details>")
     return "\n".join(out)
 
 
@@ -350,6 +432,7 @@ def main():
     tree_html_draw_order = build_tree_html(doc, panel_order=False)
     tree_html_panel_order = build_tree_html(doc, panel_order=True)
     rigs_html, flags, rig_count, total_bones = build_rigs_html_and_flags(doc)
+    shapes_html = build_shapes_html(doc)
 
     result = {
         "source_path": path,
@@ -382,6 +465,7 @@ def main():
         "tree_html_panel_order": tree_html_panel_order,
         "tree_html_draw_order": tree_html_draw_order,
         "rigs_html": rigs_html,
+        "shapes_html": shapes_html,
         "flags": flags,
     }
     print(json.dumps(result, ensure_ascii=False))
