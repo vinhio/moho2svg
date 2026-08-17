@@ -389,6 +389,46 @@ spot; the reference walks it clean across the frame. Only numeric and
 `{x, y[, z]}` values accumulate — a colour, bool or string has no meaningful
 "one period's worth of change" and replays unchanged.
 
+**Why "accumulating" needs no flag, even though Moho has one.** Moho's own
+scripting API carries `InterpSetting:IsAdditiveCycle()` /
+`SetAdditiveCycle(bool)`, so accumulate-vs-replay *is* a per-keyframe switch
+inside the application. It is not in the file. The scripting header
+(`pkg_moho.lua_pkg`) declares InterpSetting's members in exactly the order the
+JSON writes them:
+
+| Header member | JSON key | Notes |
+|---|---|---|
+| `int32 interpMode` | `im` | the enum of [§ 3.6](#36-im--the-interpolation-method-decoded) |
+| `real val1` | `v1` | cycle: relative frames back; `INTERP_NOISY`: noise amplitude; `INTERP_POSE`: pose index |
+| `real val2` | `v2` | cycle: absolute frame; `INTERP_NOISY`: noise scale |
+| `int32 interval` | `in` | 1 = every frame, 2 = animate on 2s, 3 = on 3s … |
+| `int32 hold` | `h` | frames to hold the previous value before interpolating |
+| `bool stagger` | `s` | **decoded here** — it is `stagger`, and nothing else |
+| `int32 tags` | `t` | keyframe colour |
+| `uint8 flags` | — | **not serialised**; this is where the additive-cycle bit lives |
+
+Verified against the corpus: every one of **948,873** interp entries carries
+exactly those seven keys — plus `b` on the 257 `INTERP_BEZIER` ones — and
+nothing else. So a reader cannot see the flag, and the behaviour that matches
+Moho's render is the accumulating one measured above, on a channel whose `s` is
+`false`.
+
+Checked directly rather than assumed: setting `s: true` on all 142 cycle
+markers in `Bandit.mohoproj` and re-rendering frame 80 with Moho itself changed
+**0 of 518,400 pixels**, while a control that changed `v1` from 15 to 8 moved
+**9.34%** of them. The experiment was sensitive; `s` is simply inert for a
+cycle.
+
+**One third-party formula, one off-by-one.** `AE_KeyTools:GetCycledValue` (see
+[docs/moho-mohoscripts-plan.md](moho-mohoscripts-plan.md)) computes this cycle
+with an identical period, an identical repeat count and an identical delta base
+— independent corroboration of the reading above, from someone with Moho's own
+API in hand. It differs on one detail, and is wrong there: it maps the frames
+where `(frame - end) mod period == 0` back to `R - 1` rather than to `end`,
+landing one delta short. On Bandit that puts frames 57/73/89 back by 383.5 px
+for a single frame, whereas Moho's own exported frames 55–59 march
+497 → 535 → 557 → 574 → 602 px with no such dip.
+
 **The marker must be ignored inside a Smart Bone action pose.** Moho writes it
 there too — `Bandit.mohoproj` carries the same `(v1=15, end=41)` cycle on
 `bones[0].anim_pos.actions[0].pose` as on the channel itself — but an action
@@ -518,6 +558,20 @@ already derived, or had wrong:
 - *"INTERP_POSE — val1 = index to the pose"* explains `im = 6`'s own
   `v1 = 0.0`, and is why those 1,495 entries are **pose references**, not the
   cycles the old `im & 4` test took them for.
+
+The same header also decodes the extra `b` block that only `im = 9`
+(`INTERP_BEZIER`) entries carry — 257 of them in this corpus, and the reason
+that method is still unimplemented. `InterpSetting` exposes exactly four
+per-component Bezier accessors, `BezierOutAngle` / `BezierInAngle` /
+`BezierOutPercentage` / `BezierInPercentage`, and `b` is a **list with one
+entry per component**, each `{"ao", "ai", "po", "pi"}` in that same order —
+e.g. `Bandit.mohoproj`'s `bones[3].anim_angle` carries
+`[{"ao": 0.000823, "ai": -3e-05, "po": 0.4375, "pi": 0.515625}]`. What the two
+units actually are is **not** decoded — the names say "angle" and "percentage",
+and the observed percentages do sit in `(0, 1)` while the angles are tiny, but
+no render has been measured against them yet. The key-name mapping is solid;
+the semantics still need the usual treatment before the method can be
+implemented.
 
 #### What "Smooth" actually computes
 

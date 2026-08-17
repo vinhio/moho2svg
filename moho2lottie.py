@@ -398,6 +398,48 @@ def _canonical_loop_start(loop: list) -> list:
     return loop[start:] + loop[:start]
 
 
+def _loop_start_at_point(loop: list, ref: tuple) -> list:
+    """`loop` re-ordered to start at the point ON IT closest to `ref`.
+
+    The closest point is usually mid-edge, so it is INSERTED as the new first
+    vertex rather than snapped to the nearest existing one - snapping would
+    quantise the anchor to whichever vertex happened to be nearby and reproduce
+    a smaller version of the very drift this exists to remove.
+
+    WHY AN EXTERNAL ANCHOR AT ALL.  Lottie interpolates vertex k of one
+    keyframe straight to vertex k of the next, so a clipped loop's vertex 0 has
+    to stay on the same PHYSICAL point of the shape from frame to frame.
+    `_canonical_loop_start`'s "topmost vertex" rule cannot do that for a shape
+    that ROTATES: the topmost point is a different physical point at every
+    angle, and when two candidates compete the winner flips.  Measured on
+    `Bandit.mohoproj` frames 40-59, comparing each frame's clipped loop against
+    the previous one and reporting the cyclic shift that best aligns them
+    (0 = perfect correspondence): `Leg_F`/`Leg_F 2`'s four intersect shapes
+    needed shifts of 13, 49, 50, 55 and 63 out of 64 - i.e. the vertex ring
+    slipping up to most of the way round - which is exactly the "S5/S6 spin"
+    this produced in a player.  Their own SUBJECT loops, by contrast, sat at
+    0 or +/-1 the whole time, which is why the anchor is taken from the subject.
+    """
+    if len(loop) < 2:
+        return loop
+    best = None
+    for i in range(len(loop)):
+        ax, ay = loop[i]
+        bx, by = loop[(i + 1) % len(loop)]
+        ex, ey = bx - ax, by - ay
+        span = ex * ex + ey * ey
+        t = 0.0 if span <= 0 else max(0.0, min(1.0, ((ref[0] - ax) * ex + (ref[1] - ay) * ey) / span))
+        px, py = ax + ex * t, ay + ey * t
+        d = (px - ref[0]) ** 2 + (py - ref[1]) ** 2
+        if best is None or d < best[0]:
+            best = (d, i, t, (px, py))
+    _d, i, t, point = best
+    tail = loop[i + 1:] + loop[:i + 1]        # everything after the cut, wrapping
+    if t <= 0.0:
+        return [loop[i]] + loop[i + 1:] + loop[:i]
+    return [point] + tail
+
+
 def _resample_loop(loop: list, n: int = _CLIP_RESAMPLE_POINTS) -> list:
     """Resample closed polygon `loop` to exactly `n` points, evenly spaced
     by ARC LENGTH around its perimeter - see _CLIP_RESAMPLE_POINTS's own
@@ -436,6 +478,63 @@ def _resample_loop(loop: list, n: int = _CLIP_RESAMPLE_POINTS) -> list:
         p0, p1 = pts[seg_i], pts[seg_i + 1]
         out.append((p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t))
     return out
+
+
+def _band_mask_plan(pairs: list, subtract: bool) -> tuple[list[int], list[str]]:
+    """(column order, mask mode per column) for a stroke band used as a MASK.
+
+    `pairs` is `TaperedStrokeOutliner.build_bezier_with_holes`' own output for
+    ONE band: (bezier, is_hole) per subpath, where a CLOSED run contributes two
+    counter-wound loops and an OPEN run just one.  `subtract` picks which way
+    the band is applied - True to carve it OUT of what the mask has so far
+    (_finalize_mask), False to add it back IN (_combo_mode_union_mask_
+    properties).
+
+    WHY THIS IS AREA-BASED AND NOT FLAG-BASED.  `is_hole` marks the SECOND
+    piece of a two-piece run, which is NOT reliably the inner loop: measured on
+    `Bandit.mohoproj`'s `Leg_F 2` at frame 60, shape 0's flagged piece has
+    |area| 15,413 against the unflagged 13,423 (so the flag is the OUTER loop),
+    while shape 1's flagged piece is 4,028 against 4,987 (the inner one).  The
+    winding sign flips with the source path's own direction too, so it cannot
+    stand in for containment either.  Within one run the outer loop is simply
+    the one with the larger absolute area - that IS well defined for a stroke
+    band - so this returns the outer loop FIRST and the inner second, because
+    masksProperties entries apply SEQUENTIALLY and "add outer, subtract inner"
+    is a ring while "subtract inner, add outer" is a filled disc.
+
+    Getting this wrong is silent and looks plausible: with both loops added as
+    "a" (what _combo_mode_union_mask_properties did), the band's own disc
+    cancelled the fill subtraction before it, leaving a union member's stroke
+    completely unmasked - on `Leg_F 2` that drew the shared S1/S2 boundary a
+    union must hide, as a dark ellipse across the ankle sitting on top of the
+    combo_mode==3 bands.
+    """
+    def abs_area(bez: dict) -> float:
+        v = bez.get("v") or []
+        total = 0.0
+        for i in range(len(v)):
+            x0, y0 = v[i]
+            x1, y1 = v[(i + 1) % len(v)]
+            total += x0 * y1 - x1 * y0
+        return abs(total) / 2.0
+
+    order: list[int] = []
+    modes: list[str] = []
+    outer_mode, inner_mode = ("s", "a") if subtract else ("a", "s")
+    i = 0
+    while i < len(pairs):
+        run = [i]
+        if i + 1 < len(pairs) and pairs[i + 1][1]:      # the run's second loop
+            run.append(i + 1)
+        i += len(run)
+        if len(run) == 2:
+            run.sort(key=lambda k: abs_area(pairs[k][0]), reverse=True)
+            order += run
+            modes += [outer_mode, inner_mode]
+        else:
+            order += run
+            modes.append(outer_mode)
+    return order, modes
 
 
 def _flatten_bezier_dict(bez: dict) -> list:
@@ -496,7 +595,54 @@ def _loops_to_bezier_dicts(loops: list) -> list:
     return out
 
 
-def _clip_polygon_loops(subject_loops: list, clip_loops: list) -> list:
+def _union_polygon_groups(groups: list) -> list:
+    """The UNION of several shapes' fill regions, as canonical polygons ready
+    to be used as a clip region by `_clip_polygon_loops`.
+
+    `groups` is one entry per SHAPE, each a list of that shape's own flattened
+    boundary loops.  The grouping is what makes this correct, and it is why the
+    callers keep per-shape lists rather than one flat pile of loops:
+
+    - WITHIN one shape, Moho's fill rule is even-odd (see moho2svg.py's module
+      docstring), so a shape whose boundary is several loops can have genuine
+      holes, and those must survive.
+    - ACROSS shapes the combination is a UNION, so two overlapping members must
+      cover their overlap, not cancel it.
+
+    Feeding every loop to one even-odd pass gets the second part exactly
+    backwards, and that was a real, visible defect: on `Bandit.mohoproj`'s
+    `Leg_F 2`, base members S1 and S2 overlap at the ankle and are wound
+    OPPOSITELY (signed areas +14,410 and -4,500 at frame 60), so an even-odd
+    (or a plain nonzero) clip region had a HOLE exactly over their overlap.
+    Every combo_mode==3 member pre-clipped against it lost its fill there,
+    leaving the base colour showing through in a region Moho fills - which is
+    how this was found.  Unioning per shape, with even-odd inside a shape and
+    nonzero between shapes, fixes it without losing a member's own holes.
+    """
+    if pyclipper is None:
+        return []
+    acc: list = []
+    for group in groups:
+        scaled = [[(round(x * _CLIP_SCALE), round(y * _CLIP_SCALE)) for x, y in loop]
+                  for loop in group if len(loop) >= 3]
+        if not scaled:
+            continue
+        if not acc:
+            # Canonicalise this shape's own even-odd loops into the
+            # outer-CCW/holes-CW form the nonzero rule below expects.
+            acc = pyclipper.SimplifyPolygons(scaled, pyclipper.PFT_EVENODD)
+            continue
+        pc = pyclipper.Pyclipper()
+        pc.AddPaths(acc, pyclipper.PT_SUBJECT, True)
+        pc.AddPaths(scaled, pyclipper.PT_CLIP, True)
+        acc = pc.Execute(pyclipper.CT_UNION,
+                          pyclipper.PFT_NONZERO,     # subject: already canonical
+                          pyclipper.PFT_EVENODD)     # clip: this shape's own rule
+    return [[(x / _CLIP_SCALE, y / _CLIP_SCALE) for x, y in loop] for loop in acc]
+
+
+def _clip_polygon_loops(subject_loops: list, clip_loops: list,
+                         anchor: tuple = None) -> list:
     """The true geometric intersection of `subject_loops` (one shape's own,
     possibly multi-subpath, flattened boundary) with `clip_loops` (the
     flattened boundary of everything it should be clipped to, e.g. a
@@ -537,13 +683,24 @@ def _clip_polygon_loops(subject_loops: list, clip_loops: list) -> list:
     pc = pyclipper.Pyclipper()
     pc.AddPaths(subj_int, pyclipper.PT_SUBJECT, True)
     pc.AddPaths(clip_int, pyclipper.PT_CLIP, True)
-    result = pc.Execute(pyclipper.CT_INTERSECTION, pyclipper.PFT_EVENODD, pyclipper.PFT_EVENODD)
+    # Subject: EVENODD, because that IS Moho's own within-a-shape fill rule.
+    # Clip: NONZERO, because `clip_loops` arrives already unioned and
+    # canonicalised by _union_polygon_groups - reading it as even-odd instead
+    # punches a hole through every overlap between two base members.
+    result = pc.Execute(pyclipper.CT_INTERSECTION, pyclipper.PFT_EVENODD, pyclipper.PFT_NONZERO)
     loops = [[(x / _CLIP_SCALE, y / _CLIP_SCALE) for x, y in loop] for loop in result]
     # Fixed-count resample (see _resample_loop) - NOT optional here: every
     # caller feeds this straight into a per-frame accumulator that
     # LottieExporter._assert_stable later requires to have an identical
     # vertex count on every frame.
-    return [_resample_loop(_canonical_loop_start(loop)) for loop in loops]
+    # `anchor` is a PHYSICAL point of the subject shape (see
+    # _loop_start_at_point): it keeps vertex 0 on the same place of the shape
+    # from frame to frame, which _canonical_loop_start's topmost-vertex rule
+    # cannot do for a rotating shape.  The old rule stays as the fallback for
+    # callers that have no anchor to give.
+    start = ((lambda loop: _loop_start_at_point(loop, anchor)) if anchor is not None
+             else _canonical_loop_start)
+    return [_resample_loop(start(loop)) for loop in loops]
 
 
 class LottieExporter:
@@ -785,7 +942,7 @@ class LottieExporter:
         # `pre_clipped` flag flips True, letting the chunk-processing loop
         # below skip masksProperties entirely for it - ONLY when the
         # attempt was made on every single frame (an inconsistent count
-        # means group_base_loops was momentarily empty on some frame - a
+        # means group_base_groups was momentarily empty on some frame - a
         # base member with zero area at that frame, not expected in this
         # corpus but left safe rather than misaligning the two lists) AND
         # its topology (subpath count, vertex count per subpath, open/
@@ -1082,6 +1239,13 @@ class LottieExporter:
         back OUT of the accumulated union regardless of layer order, the
         same "independent of paint order" property _mask_element gets
         from painting the band ON TOP in SVG.
+
+        Moho's "Expand mask by a pixel" (Layer.mask_expansion, `true` on 48
+        corpus layers) maps straight onto a Lottie mask's own native `x`
+        ("Expand") property, so a source carrying it contributes its FILL
+        entries with `x = 1` instead of 0.  The exclusion band entries below
+        never expand: they are the carve-out, and widening a subtraction would
+        eat into the mask rather than grow it.
         """
         n_sources = len(per_frame_sources[0])
         # per_frame_sources[f] is a list of (beziers, exclude_width,
@@ -1090,13 +1254,22 @@ class LottieExporter:
         # every source's FILL beziers to one list of subpath dicts per
         # frame first, exactly as before this fix - the union region a
         # source's exclusion band later carves into is unchanged.
-        fill_per_frame = [[subpath for beziers, _ew, _eb in sources for subpath in beziers]
-                           for sources in per_frame_sources]
-        self._assert_stable(layer, "<mask>", "mask", fill_per_frame)
-        entries = self._mask_entries(fill_per_frame, frames)
+        # Sources are grouped by their own `expand` flag so each group's fill
+        # entries can carry the matching Lottie `x` value; within a group the
+        # flattening order is unchanged.
+        entries = []
+        for expand_flag in (False, True):
+            fill_per_frame = [[subpath for beziers, _ew, _eb, ex in sources
+                               if ex == expand_flag for subpath in beziers]
+                              for sources in per_frame_sources]
+            if not any(fill_per_frame):
+                continue
+            self._assert_stable(layer, "<mask>", "mask", fill_per_frame)
+            entries += self._mask_entries(fill_per_frame, frames,
+                                          expand=1 if expand_flag else 0)
 
         for i in range(n_sources):
-            _beziers0, exclude_width0, band0 = per_frame_sources[0][i]
+            _beziers0, exclude_width0, band0, _expand0 = per_frame_sources[0][i]
             if exclude_width0 <= 0:
                 continue
             if not band0:
@@ -1112,15 +1285,18 @@ class LottieExporter:
             # loops) is structural, stable across frames exactly like
             # subpath count/closedness already must be (_assert_stable
             # below), so reading it once here is enough.
-            modes = ["a" if is_hole else "s" for _bez, is_hole in band0]
-            band_per_frame = [[bez for bez, _is_hole in (sources[i][2] or [])]
+            # Outer loop first, subtracting; inner added back - and decided by
+            # AREA, not by the `is_hole` flag, which is only "second piece of
+            # this run" (see _band_mask_plan for the measurement).
+            order, modes = _band_mask_plan(band0, subtract=True)
+            band_per_frame = [[(sources[i][2] or [])[k][0] for k in order]
                               for sources in per_frame_sources]
             self._assert_stable(layer, f"<mask exclusion {i}>", "mask exclusion band",
                                 band_per_frame)
             entries += self._mask_entries(band_per_frame, frames, mode=modes)
         return entries
 
-    def _mask_entries(self, per_frame_flat: list, frames, mode="a") -> list:
+    def _mask_entries(self, per_frame_flat: list, frames, mode="a", expand: float = 0) -> list:
         """One Lottie masksProperties entry per subpath in `per_frame_flat`
         (one flattened subpath list per frame - see _finalize_mask and
         _group_mask_entries, two of its callers).
@@ -1138,7 +1314,7 @@ class LottieExporter:
         columns = list(zip(*per_frame_flat))
         modes = mode if isinstance(mode, list) else [mode] * len(columns)
         return [{"inv": False, "mode": m, "pt": self._path_property(list(per_subpath), frames),
-                 "o": {"a": 0, "k": 100}, "x": {"a": 0, "k": 0}}
+                 "o": {"a": 0, "k": 100}, "x": {"a": 0, "k": expand}}
                 for per_subpath, m in zip(columns, modes)]
 
     def _group_mask_entries(self, layer, base_accs: list, frames) -> list:
@@ -1333,11 +1509,14 @@ class LottieExporter:
           3. Each other member's own outline, already built as filled band
              geometry at the group's stroke width in its own accumulator's
              `union_band_per_frame` (see _prepare_union_band_widths), added
-             back on top (mode "a") - restores a stroke-width-wide band
+             back on top - restores a stroke-width-wide band
              right at the hole's edge, so `member_acc`'s own stroke meets
              the neighbour's instead of stopping one stroke-width short
              at the crossing - see _mask_subtraction's own docstring for
-             why that band exists at all.
+             why that band exists at all.  A CLOSED neighbour's band is a
+             RING, so its outer loop goes in as "a" and its inner loop as
+             "s"; unioning both (which this method used to do) fills the
+             disc and cancels step 2 entirely - see the comment on that loop.
         """
         padding = self.exporter.settings.mask_padding
         box_per_frame_flat = []
@@ -1360,9 +1539,23 @@ class LottieExporter:
             fill_flat = [acc["fill_per_frame"][f] for f in range(len(frames))]
             entries += self._mask_entries(fill_flat, frames, mode="s")
         for acc in other_accs:
-            band_flat = [acc["union_band_per_frame"][f] for f in range(len(frames))]
+            # Each entry is (bezier, is_hole) - see _accumulate_frame's own use
+            # of build_bezier_with_holes.  A ring's OUTER loop adds the band
+            # back (mode "a"); its INNER loop must SUBTRACT (mode "s"), or the
+            # two together fill the whole disc and silently cancel the fill
+            # subtraction just above, leaving the member's stroke completely
+            # unmasked.  That was a real defect: on `Bandit.mohoproj`'s
+            # `Leg_F 2` both loops went in as "a", so the shared S1/S2 boundary
+            # a union must hide was drawn in full - visible in a player as a
+            # dark ellipse across the ankle, on top of the combo_mode==3 bands.
+            # The SVG writer never had it (its mask paints a plain stroke, with
+            # no ring to decompose - Exporter._mask_element).
+            pairs0 = acc["union_band_per_frame"][0] or []
+            order, modes = _band_mask_plan(pairs0, subtract=False)
+            band_flat = [[(acc["union_band_per_frame"][f] or [])[k][0] for k in order]
+                         for f in range(len(frames))]
             self._assert_stable(layer, acc["name"], "union exclusion band", band_flat)
-            entries += self._mask_entries(band_flat, frames, mode="a")
+            entries += self._mask_entries(band_flat, frames, mode=modes)
         return entries
 
     def _combined_mask_properties(self, layer, cross_mask, base_accs: list, frames):
@@ -1656,7 +1849,9 @@ class LottieExporter:
         # attempts a pyclipper clip and stays on the masksProperties "i"
         # fallback instead - see _clip_polygon_loops's own docstring for
         # why pre-clipping exists.
-        group_base_loops: list = []
+        # One entry per base SHAPE, each that shape's own loops - the grouping
+        # matters, see _union_polygon_groups.
+        group_base_groups: list = []
         for shape in mesh.shapes:
             if not shape.edges:
                 continue
@@ -1666,7 +1861,7 @@ class LottieExporter:
             shape_index += 1
 
             if acc["combo_mode"] == 0:
-                group_base_loops = []
+                group_base_groups = []
 
             # An ATTEMPT, not a decision: whether this frame's pyclipper
             # result ends up usable is not knowable until every frame has
@@ -1682,24 +1877,41 @@ class LottieExporter:
             # comment) - never mid-walk, since a per-frame decision could
             # flip-flop and leave the two lists misaligned.
             attempt_clip = (acc["combo_mode"] == 3 and pyclipper is not None
-                           and bool(group_base_loops))
+                           and bool(group_base_groups))
             if (acc["combo_mode"] == 3 and pyclipper is None
-                    and group_base_loops and first_time):
+                    and group_base_groups and first_time):
                 self.warnings["combo_mode3_no_pyclipper"] += 1
 
             fill_dicts = build_path_bezier(item.geometries, shape.edges, item.to_px)
             acc["fill_per_frame"].append(fill_dicts)
+            clip_region = _union_polygon_groups(group_base_groups) if attempt_clip else []
+            # A stable PHYSICAL anchor for the pre-clipped loops' vertex 0:
+            # the start point of this shape's lowest-numbered edge, i.e. one
+            # fixed mesh point, which moves smoothly with the deformation
+            # instead of hopping around the outline like a "topmost vertex"
+            # rule does.  See _loop_start_at_point for the measurement.
+            clip_anchor = None
+            if attempt_clip:
+                edge = min(shape.edges, key=lambda e: (e.curve, e.segment))
+                seg = item.geometries[edge.curve].segments[edge.segment]
+                anchor_px = item.to_px(seg.p0)
+                clip_anchor = (anchor_px.x, anchor_px.y)
             if attempt_clip:
                 acc["fill_per_frame_clip"].append(_loops_to_bezier_dicts(_clip_polygon_loops(
-                    [_flatten_bezier_dict(d) for d in fill_dicts], group_base_loops)))
+                    [_flatten_bezier_dict(d) for d in fill_dicts], clip_region, clip_anchor)))
             if acc["combo_mode"] in (0, 1):
-                group_base_loops.extend(
-                    _flatten_bezier_dict(d) for d in fill_dicts)
+                group_base_groups.append([_flatten_bezier_dict(d) for d in fill_dicts])
 
             band_width = union_band_widths.get(id(shape))
             if band_width is not None:
-                acc["union_band_per_frame"].append(exp.tapered_outliner.build_bezier(
-                    item.geometries, shape.edges, item.to_px, band_width))
+                # build_bezier_with_holes, NOT build_bezier: this band is
+                # consumed as a MASK, where a ring's inner loop has to be
+                # SUBTRACTED rather than unioned - see that method's own
+                # docstring, and _combo_mode_union_mask_properties for the
+                # bug that using the undecorated version caused.
+                acc["union_band_per_frame"].append(
+                    exp.tapered_outliner.build_bezier_with_holes(
+                        item.geometries, shape.edges, item.to_px, band_width))
 
             if acc["outline_kind"] == "taper":
                 width_px = exp._stroke_width_px(acc["line_width"], 1.0)
@@ -1709,7 +1921,7 @@ class LottieExporter:
                 if attempt_clip:
                     acc["outline_per_frame_clip"].append(_loops_to_bezier_dicts(
                         _clip_polygon_loops([_flatten_bezier_dict(d) for d in band],
-                                            group_base_loops)))
+                                            clip_region, clip_anchor)))
             elif acc["outline_kind"] == "stroke":
                 widths = self._point_widths(mesh, shape.edges, frame)
                 # Compare against the STORED tapered flag (from frame0), not
@@ -1754,15 +1966,19 @@ class LottieExporter:
                 # build_path_bezier()'s docstring for why an open path
                 # renders a genuinely different stroke join at the seam
                 # than a closed one.
+                # Stroke exposure (Exporter._stroke_trims): an OUTLINE is
+                # trimmed to its curve's start/end percentage, a fill never is,
+                # exactly as on the SVG side.
                 acc["outline_per_frame"].append(build_path_bezier(
                     item.geometries, shape.edges, item.to_px,
-                    visible_only=(acc["combo_mode"] != 3), close=False))
+                    visible_only=(acc["combo_mode"] != 3), close=False,
+                    trims=exp._stroke_trims(item.layer.mesh, item.geometries, frame)))
                 if attempt_clip:
                     band = exp.tapered_outliner.build_bezier(
                         item.geometries, shape.edges, item.to_px, width_px)
                     acc["outline_per_frame_clip"].append(_loops_to_bezier_dicts(
                         _clip_polygon_loops([_flatten_bezier_dict(d) for d in band],
-                                            group_base_loops)))
+                                            clip_region, clip_anchor)))
 
     def _new_accumulator(self, layer, shape, frame0: float) -> dict:
         """Build shape's per-frame accumulator, capturing everything that is

@@ -13,6 +13,17 @@ Usage: check_lottie_geometry.py <project> <lottie.json> [frame ...]
        check_lottie_geometry.py <project> <lottie.json> [frame ...] --require-gradients
        check_lottie_geometry.py <project> <lottie.json> [frame ...] --require-masks
 Exit status is 0 when every shape at every checked frame agrees.
+
+PASS THE SAME EXPORT FLAGS THE FILE WAS WRITTEN WITH.  `--point-bones`,
+`--wind-dynamics` and `--bone-dynamics` all change geometry, so this script
+accepts them too and recomputes with them; without that, a file exported with
+`--point-bones` is compared against a render made without it and every
+affected shape "disagrees" for no real reason.  That is exactly what happened
+once: the Makefile exported with `--wind-dynamics --point-bones` while this
+script ran with defaults, and `make check-lottie` failed on Bandit's `Ears`
+and `Leg_F` - real-looking output about a difference that only existed
+between the two invocations.  The Makefile now keeps both sides in step
+through one variable, `LOTTIE_EXPORT_FLAGS`.
 """
 
 import json
@@ -21,9 +32,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from moho2svg import Channel, Exporter, build_path_bezier, load_document, walk_render_tree
+from moho2svg import (Channel, Exporter, RenderSettings, build_path_bezier, load_document,
+                      walk_render_tree)
 from moho2lottie import (_clip_polygon_loops, _flatten_bezier_dict, _loops_to_bezier_dicts,
-                         pyclipper)
+                         _union_polygon_groups, pyclipper)
 
 # Same tolerance as check_bezier_roundtrip.py, deliberately: both scripts
 # compare build_path_bezier()-shaped data (rounded to 3 decimals, with
@@ -110,7 +122,8 @@ def split_into_chunks(groups: list) -> list:
     return chunks
 
 
-def expected_layers(project_path: str, frame: float, include_hidden: bool = False):
+def expected_layers(project_path: str, frame: float, include_hidden: bool = False,
+                     settings=None):
     """Every mesh layer's expected shape geometry at `frame`, in LOTTIE draw
     order (front to back reversed from Moho's own back-to-front walk) - see
     moho2lottie.LottieExporter._build_layers for why the reversal happens.
@@ -137,16 +150,21 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
     """
     Channel.reset_cache()
     doc = load_document(project_path)
-    exp = Exporter(doc)
+    # `settings` MUST match the flags the emitted file was written with: a
+    # geometry-changing flag like --point-bones on one side only makes every
+    # affected shape "disagree" for no real reason.  See main().
+    exp = Exporter(doc, settings)
     out = []
     for item in walk_render_tree(exp, frame, include_hidden):
         if item.event != "mesh":
             continue
         shapes_in_order = []
         blocks_by_shape = {}
-        # Flattened base-union loops for the CURRENT boolean group, exactly
-        # mirroring moho2lottie.LottieExporter._accumulate_frame's own
-        # `group_base_loops` - needed here because that writer, when
+        # Base-union loops for the CURRENT boolean group, ONE ENTRY PER SHAPE,
+        # exactly mirroring moho2lottie.LottieExporter._accumulate_frame's own
+        # `group_base_groups` - the per-shape grouping is load-bearing, see
+        # _union_polygon_groups (even-odd within a shape, union across shapes).
+        # Needed here because that writer, when
         # pyclipper is installed, pre-clips a combo_mode==3 member's own
         # fill/outline against this SAME running union instead of leaving
         # it raw (see _clip_polygon_loops's own docstring for why). This
@@ -158,21 +176,32 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
         # SECOND, alternate expected block (`block_clip`) here, and
         # check_frame accepts either one as a pass, rather than trying to
         # replicate the writer's cross-frame stability decision.
-        group_base_loops: list = []
+        group_base_groups: list = []
         for shape in item.layer.mesh.shapes:
             if not shape.edges:
                 continue
             if shape.combo_mode == 0:
-                group_base_loops = []
+                group_base_groups = []
             fill_beziers = build_path_bezier(item.geometries, shape.edges, item.to_px)
             if not fill_beziers:
                 continue
             can_clip = (shape.combo_mode == 3 and pyclipper is not None
-                       and bool(group_base_loops))
+                       and bool(group_base_groups))
+            clip_region = _union_polygon_groups(group_base_groups) if can_clip else []
+            # Same stable anchor the writer uses for pre-clipped loops' vertex
+            # 0 - see moho2lottie._loop_start_at_point.  Computed identically
+            # here, or this checker's "expected" geometry would differ from the
+            # writer's by a cyclic rotation of the vertex ring.
+            clip_anchor = None
+            if can_clip:
+                edge = min(shape.edges, key=lambda e: (e.curve, e.segment))
+                seg = item.geometries[edge.curve].segments[edge.segment]
+                anchor_px = item.to_px(seg.p0)
+                clip_anchor = (anchor_px.x, anchor_px.y)
             fill_clip = None
             if can_clip:
                 fill_clip = _loops_to_bezier_dicts(_clip_polygon_loops(
-                    [_flatten_bezier_dict(d) for d in fill_beziers], group_base_loops))
+                    [_flatten_bezier_dict(d) for d in fill_beziers], clip_region, clip_anchor))
             block, block_clip = [], []
             if shape.has_outline:
                 widths = [exp.eval(item.layer.mesh.points[i].width, frame)
@@ -208,7 +237,7 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
                     band = exp.tapered_outliner.build_bezier(
                         item.geometries, shape.edges, item.to_px, width_px)
                     band_clip = _loops_to_bezier_dicts(_clip_polygon_loops(
-                        [_flatten_bezier_dict(d) for d in band], group_base_loops))
+                        [_flatten_bezier_dict(d) for d in band], clip_region, clip_anchor))
                     if band_clip:
                         block_clip.append(("outline", band_clip))
             if shape.has_fill:
@@ -218,7 +247,7 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
             shapes_in_order.append(shape)
             blocks_by_shape[id(shape)] = (block, block_clip if can_clip else None)
             if shape.combo_mode in (0, 1):
-                group_base_loops.extend(_flatten_bezier_dict(d) for d in fill_beziers)
+                group_base_groups.append([_flatten_bezier_dict(d) for d in fill_beziers])
 
         chunks = split_into_chunks(split_boolean_groups(shapes_in_order))
         multi = len(chunks) > 1
@@ -344,9 +373,9 @@ def _layer_mismatches(name: str, frame: float, shape_blocks: list, got_shapes: l
 
 
 def check_frame(project_path: str, lottie: dict, frame: float,
-                 include_hidden: bool = False) -> int:
+                 include_hidden: bool = False, settings=None) -> int:
     """Compare one frame. Returns the number of disagreements found."""
-    expected = expected_layers(project_path, frame, include_hidden)
+    expected = expected_layers(project_path, frame, include_hidden, settings)
     got = emitted_layers(lottie, frame)
     failures = 0
 
@@ -419,6 +448,15 @@ def main() -> int:
     args = sys.argv[1:]
     require_gradients = "--require-gradients" in args
     require_masks = "--require-masks" in args
+    # Geometry-changing export flags.  These are NOT preferences of this
+    # script: they have to be whatever moho2lottie.py was run with, or the
+    # comparison is between two different renders.  The Makefile keeps both
+    # sides in step through its own LOTTIE_EXPORT_FLAGS variable.
+    settings = RenderSettings(
+        point_bone_binding="--point-bones" in args,
+        wind_dynamics="--wind-dynamics" in args,
+        bone_dynamics="--bone-dynamics" in args,
+    )
     args = [a for a in args if not a.startswith("--")]
     if len(args) < 2:
         print(__doc__)
@@ -430,9 +468,15 @@ def main() -> int:
     if frames is None:
         frames = [lottie["ip"], (lottie["ip"] + lottie["op"] - 1) / 2, lottie["op"] - 1]
 
+    active = [name for name, on in (("--point-bones", settings.point_bone_binding),
+                                     ("--wind-dynamics", settings.wind_dynamics),
+                                     ("--bone-dynamics", settings.bone_dynamics)) if on]
+    print(f"checking {os.path.basename(lottie_path)} with "
+          f"{' '.join(active) if active else 'default settings'}")
+
     failures = 0
     for frame in frames:
-        failures += check_frame(project_path, lottie, frame)
+        failures += check_frame(project_path, lottie, frame, settings=settings)
     if require_gradients:
         failures += check_gradients_present(project_path, lottie)
     if require_masks:

@@ -241,6 +241,14 @@ builds the three sample projects' Lottie exports and runs the two scripts
 under `tools/` — see `docs/moho-to-lottie-plan.md` Task 8 for what
 `check-lottie` actually asserts.
 
+Both use one variable, **`LOTTIE_EXPORT_FLAGS`** (default
+`--wind-dynamics --point-bones`), and they must: those flags change geometry,
+so `check_lottie_geometry.py` has to recompute with the same ones. It once did
+not — the export carried the flags and the check ran with defaults — and
+`make check-lottie` reported ~100 "geometry differs" lines that were purely
+the mismatch. Change the variable, never one call site
+(`make check-lottie LOTTIE_EXPORT_FLAGS=` runs both sides plain).
+
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and
 compare against a reference SVG Moho itself exported ("File > Export
@@ -395,7 +403,14 @@ afterward regardless of what you touched:
   bone in a document flips (silently correct on every document without one).
   See that method's own "NOTE ON SCALE" and "NOTE ON FLIP PROPAGATION" for
   the full evidence trail, including the exact regression this caused and
-  the verification commands to rerun.
+  the verification commands to rerun. It also applies **`fixed_angle`**
+  ("Independent angle", 65 bones / 11 documents): a flagged bone keeps its
+  parent's position but not the parent's *departure from its own rest
+  rotation*. Measured by rendering `TransformBoneTool.animeproj` with Moho
+  twice, flag on and forced off, so the flag's own effect is isolated — worth
+  up to 16 px, with about a third of it still unexplained. See that method's
+  "NOTE ON INDEPENDENT ANGLE" and `RenderSettings.fixed_angle_mode` (which
+  keeps the two rejected models available so the measurement can be re-run).
 - **`interp[].im` is the interpolation method**, and it is an ENUM, not a
   bitfield — decoded twice over, by rendering each value with Moho's own CLI
   and by Moho's own scripting header (`pkg_moho.lua_pkg`), which agree on all

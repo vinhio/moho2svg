@@ -464,17 +464,44 @@ playback time** is not, because nothing in the file contains its result.
 
 ### 3.2 Independent angle (`fixed_angle`)
 
-- **Confirmed**: `true` on **45 of 850 bones**, across 10 documents.
-- **Meaning (inference)**: the bone keeps a fixed angle in the skeleton's
-  space instead of inheriting its parent's rotation. This is Moho's
-  "Independent Angle" flag; `IndependentAngle.animeproj` is the tutorial file
-  for it and sets it on 9 bones.
-- **Effect of ignoring**: **unverified, and potentially visible.** If Moho
-  applies it while composing world matrices, then a rig whose parent bone
-  rotates will place the child at the wrong angle here. If instead the artist's
-  keys already encode the result, ignoring it is free. No reference render of
-  a `fixed_angle` rig was available to settle this. Treat as an open risk
-  [🟠 4/10 that it is safe to ignore in general].
+- **Confirmed**: `true` on **45 of 850 bones**, across 10 documents (65 bones
+  across 11 documents in the wider corpus this was re-measured on).
+- **Meaning — now measured and applied.** The bone keeps its parent's
+  **position** but not the parent's **rotation**:
+
+  ```
+  angle -= parent_world_angle(frame) - parent_world_angle(0)
+  ```
+
+  The parent's *departure from its own rest rotation* is removed — the same
+  shape control bones use ([§ 3.3](#33-control-bones)), and with the same
+  consequence that frame 0 is untouched, so a rig's rest pose cannot break.
+  See `Skeleton._world_matrices`' NOTE ON INDEPENDENT ANGLE.
+- **Effect of ignoring: visible, up to 16 px** on a 1280×720 canvas.
+  `TransformBoneTool.animeproj` was rendered by Moho **twice** — as authored,
+  and with every `fixed_angle` forced `false` — which isolates the flag's own
+  effect using Moho as the authority, cancelling every unrelated error here.
+  Only the two leg layers move; arms, body and head differ by exactly 0.00 px,
+  which is also the check that the experiment isolates what it claims:
+
+  | layer | Moho's own effect (mean / max px) | error `off` | error `rest` | error `absolute` |
+  |---|---|---|---|---|
+  | LegL | 7.17 / 15.46 | 7.17 / 15.46 | **4.93 / 8.17** | 6.62 / 12.03 |
+  | LegR | 5.82 / 16.17 | 5.82 / 16.17 | **3.43 / 7.16** | 4.32 / 8.15 |
+  | overall | — | 2.17 / 16.17 | **1.39 / 8.17** | 1.82 / 12.03 |
+
+  `absolute` is the other candidate reading — subtract the parent's whole world
+  angle, making the bone's world rotation its own local angle outright. It beats
+  ignoring the flag and loses to `rest` on every layer and both statistics.
+- **Residual, stated plainly**: `rest` recovers about a *third* of the effect.
+  The remainder is unexplained — plausibly this document's own baseline skinning
+  error (≈2× the effect size on those layers, so the delta comparison is
+  contaminated at second order), or an incompleteness for **nested** flagged
+  bones (`B11`/`B12` and `B15`/`B16` here are flagged bones whose parents are
+  also flagged) [🟢 8/10 that the direction and shape of the formula are right,
+  🟠 5/10 that it is complete].
+- `make check-reference` is unchanged by this: Bandit's two flagged bones move
+  its `Tail` group by 0.01–0.09 px and leave every other number identical.
 
 ### 3.3 Control bones
 
@@ -784,18 +811,38 @@ Two consequences that catch people out:
 - Smart Bone state is part of the skinning cache key: the same skeleton at the
   same frame can deform differently under different active actions.
 
+**Where the raw evaluator is not enough — a measured gap.** "Raw" means the
+dial's own *keyed* angle. A dial that is itself **driven** — by a control bone,
+by bone dynamics, or by another dial's action — resolves to a different angle,
+and Moho looks the pose up from the resolved one. A third-party tool
+(`AE_Utilities:SumActionInfluences`, see
+[moho-mohoscripts-plan.md](moho-mohoscripts-plan.md) § 2.10) uses the resolved
+`bone.fAngle` for exactly this reason; its own comment calls the keyed value
+"bad for nested smartbones".
+
+Measured over the corpus: **108 dial bones**, none driven by another dial's
+action, and exactly **two** driven by a control bone — `HeadTilt` in
+`Rabbit.animeproj` and in `BoneDynamics.animeproj`, both
+`angle_control_scale = 1.0`, `angle_control_delay = 0`. In both documents the
+*controller* never leaves its own rest angle, so the control offset is `0.0` at
+every frame and the selected pose frame is identical either way (checked frames
+0–60). Left unimplemented deliberately: nothing here can verify a fix, and
+feeding a resolved angle back into the machinery that resolves it needs the
+same cycle protection `Skeleton._control_offset` already carries. A document
+that turns a control bone which drives a dial would settle it
+[🟠 5/10 that ignoring this is safe in general].
+
 ---
 
 ## 4b. Vitruvian Bones — background, not evidence
 
-> **Not in the sample.** `bones_groups` (the field this section's own
-> mechanism points to) is present but **empty in every one of this
-> repository's 19 sample documents** - same status as `distortion_layer_uuid`
-> in § 5.1. This section comes from Moho's own shipped scripting API header
-> (a real file, `pkg_moho.lua_pkg` - see § 5.1b for the same source used the
-> same way) and from `mono-changelogs.md`'s own feature announcement, not
-> from any project file examined here. Orientation only - do **not**
-> implement against it. [🟠 3/10]
+> **Correction (2026-08).** This used to say `bones_groups` is "empty in every
+> one of this repository's 19 sample documents". That is no longer true:
+> `Night_Boy.mohoproj` carries one group, and its `active_bone` is
+> **animated**. The storage is now decoded and confirmed; what "active" *does*
+> is still not, and an implementation attempt was measured and rejected — see
+> § 4b.1 below. Still **do not implement against this** without new evidence.
+> [🟠 3/10 on the semantics; 🟢 9/10 on the field shape]
 
 **What it is.** Vitruvian Bones is a Moho Pro 13.5 feature
 (`mono-changelogs.md`): "you can have different sets of heads, each with its
@@ -831,17 +878,61 @@ corroborates the UI surface: `/Menus/Bone/EnableAllVitruvianBones`,
 AddToVitruvianGroup`, and channel names `VitruvianBones`/
 `VitruvianBonesConsolidated` under `/Animation/Channels/`.
 
-**Likely storage.** `bones_groups` — already present in this project's own
-raw JSON (`docs/moho-project-file-format.md` lists it as "ignored", and
-`schema/skeleton.schema.json` presumably has an empty-array placeholder for
-it) — is the obvious JSON home for `M_Skeleton`'s own group list, by
-straightforward name matching, exactly as `distortion_layer_uuid` was
-matched to `GetWarpLayer()`/`SetWarpLayer()` in § 5.1b. Not confirmed at the
-field-shape level (no sample document populates it), so the actual per-group
-JSON keys (name/active-bone/enabled/member-bone-list) are not known.
+### 4b.1 The storage, decoded — and the semantics, still not
+
+**The storage is confirmed**, and no longer an inference.
+`Night_Boy.mohoproj`'s bone layer carries exactly one group:
+
+```json
+{"type": "BoneGroup", "enabled": true, "name": "Group 5",
+ "bones": [101, 102, 103],
+ "active_bone": {"type": "Val", "when": [0, 1], "val": [2.0, 0.0], ...}}
+```
+
+`bones` holds **bone indices into that same skeleton** — here `B136`/`B137`/
+`B138`, three bones sharing parent 51 at rest angles 90°/124.6°/41.8°: one limb,
+three poses, exactly what the feature is for. `active_bone` is a **channel**, and
+this one **animates** (2.0 at frame 0, 0.0 at frame 1).
+
+Confirmed by **writing such a group by hand** into
+`TransformBoneTool.animeproj` (grouping bones 4 and 6) and rendering with Moho:
+it honours the hand-authored group, changing 2,862 px. So the key names and
+shapes above are right, not merely plausible.
+
+`active_bone` is **0-based into the group's own `bones` list**, and an
+out-of-range value falls back to the **first** member. Measured on that 2-member
+probe, all against a no-group baseline of the same document:
+
+| `active_bone` | Moho's render vs no-group baseline |
+|---|---|
+| 0 | 22 px (i.e. identical, that being anti-alias noise) |
+| 1 | **2,840 px** |
+| 2 | 22 px |
+| 3 | 22 px |
+
+**What "active" does is still unknown, and the obvious model is wrong.** The
+natural reading — only the active member deforms the mesh, its siblings go inert
+— was implemented here (strength 0 for an inactive member, which routes through
+the "this bone does not deform this mesh" gate `Skinner.deform` already has) and
+then **rejected on measurement**:
+
+- With the first member active, Moho changes 22 px against the no-group
+  baseline while that model changes **568 px**. Moho is telling us an inactive
+  sibling is *not* switched off.
+- Where both do change (second member active), the model covers only **33%** of
+  Moho's changed pixels, median distance 3.6 px, p90 36 px.
+
+Freezing an inactive member at its rest pose does not fit either: both probe
+bones are animated through frame 25, so that model would predict a visible
+change in both directions, and Moho shows one only.
+
+So the honest state is: shape known, selector semantics known, **effect
+unknown**. A rig that switches a limb visibly, plus its Moho render, would settle
+it; the probe recipe above is the cheap way to make one.
 
 **What to do today.**
-- **Do not guess the format** — same posture as Smart Warp.
+- **Do not guess the effect** — same posture as Smart Warp. The rejected
+  attempt above is recorded so it is not re-tried blind.
 - **Do detect it.** `moho2svg.py` now does: `walk_render_tree` warns once per
   `BoneLayer` whose `skeleton.bones_groups` is non-empty (`Skeleton.
   bones_groups`, a raw passthrough — see its own docstring), the same
@@ -849,10 +940,10 @@ JSON keys (name/active-bone/enabled/member-bone-list) are not known.
   Before this, a Vitruvian-Bones-using document would silently pose only
   the skeleton's OWN keyed angles, ignoring whichever bone the group's
   `fActiveBone` selector actually meant to be showing.
-- **To document it properly**, one file is enough — same recipe as § 5.3:
-  save a Vitruvian-Bones-using project into `moho/` and re-run the census
-  in [§ 9](#9-reproducing-the-numbers); `bones_groups` will stop being
-  empty and its own shape will be immediately visible.
+- ~~**To document it properly**, one file is enough~~ — **done**:
+  `Night_Boy.mohoproj` supplied it, and § 4b.1 above records the shape plus
+  what the selector does. What remains is a rig whose limb visibly switches,
+  to settle the *effect*.
 
 **Pin Bones (Anime Studio 12) — an unresolved lead, not a finding.**
 `mono-changelogs.md` also names "Pin Bones": "Add one point bones to alter,
@@ -1069,16 +1160,42 @@ but each one changes the picture when it is not.
 
 ### 6.3 Curve trimming (`start_percent` / `end_percent`)
 
-- **Confirmed**: `start_percent` is `-0.1` on all 3,045 curves;
-  `end_percent` is `1.1` on all but 3 (which are `1.008296`, the same "nose"
-  curve shared across three sibling tutorial files). Both are `Val`
-  **channels**, and none is keyframed.
-- The defaults deliberately extend slightly past both ends of the curve.
+**Now implemented for a plain stroke** (`Exporter._stroke_trims`,
+`CurveGeometry.trim_ranges`, `split_cubic`). Moho calls it **Stroke Exposure**;
+the channel id is `CHANNEL_CURVEEXP`.
+
+- **Confirmed**: `start_percent` is `-0.1` on all 3,045 curves; `end_percent`
+  is `1.1` on all but 3 (which are `1.008296`) in the 19-file set. In the wider
+  corpus **24 curves in `FoxAndGhost.animeproj` carry `end_percent = 0.9721`**.
+  Both are `Val` channels; none is keyframed anywhere here.
+- **A value outside `[0, 1]` means "not trimmed."** Moho's own bundled
+  `SS_CurveExposure` tool clamps its drag to `[-0.01, 1.01]` and writes those
+  as the untrimmed ends, while these documents carry `-0.1` / `1.1`. Both read
+  the same way: clamp into `[0, 1]`, and a full range means no trim.
+- **What it trims — measured, because the name does not settle it.** The
+  **outline only**; the shape's fill stays whole. Confirmed by forcing
+  `end_percent` to 0.5 and 0.75 on `TransformBoneTool.animeproj`'s `Body`
+  curve (5 points, closed, carrying both a fill and an outline) and rendering
+  with Moho: the purple body fill is untouched in both, the dark outline loses
+  its tail.
+- **The fraction is of ARC LENGTH, not segment-parameter space.** Both models
+  were implemented and scored against those Moho renders by changed-pixel IoU:
+  arc length **0.739 / 0.723** (at 50% / 75%) against segment-parameter
+  0.648 / 0.683. A one-segment curve cannot tell them apart, which is why the
+  purpose-made multi-segment probe was needed.
+- **Corpus reach is zero, and that is measured too**: re-rendering
+  `FoxAndGhost.animeproj` with Moho with those 24 curves forced back to
+  untrimmed changes **0 pixels** at 8 frames sampled across its 450-frame
+  range — the `Lazer Beam` / `Light Blade` / `Glow` layers holding them are
+  never drawn. So this exporter's own output is byte-identical on that
+  document, and the feature rests on the purpose-made probe.
+- **Not applied to a brush-textured or tapered outline**, which are built as a
+  stamped dab run or a filled band instead of a strokeable path. Moho *does*
+  trim those (the probe above is itself brush-styled), so this warns once per
+  mesh and kind rather than failing silently.
 - **Why it matters**: a keyframed `end_percent` is how Moho animates a line
-  drawing itself on. A reader that ignores the channel draws the whole line
-  from frame 0. Not exercised here, but it is a common animation technique,
-  so treat it as a likely gap for real production files rather than a rare
-  one.
+  drawing itself on. Nothing here keyframes it, but the machinery now honours
+  a keyframed value because the trim is evaluated per frame.
 
 ### 6.4 Deformer flags on a mesh layer
 
@@ -1241,7 +1358,8 @@ blend, which the falloff is already flagged as unvalidated for
 ([§ 2.4](#24-flexible-region-binding)).
 | `parent_bone == -3` | falls through to flexible binding, tiled into small pieces (each still flexibly bound, not snapped to one bone) so the one affine map per piece stays close to exact (confirmed the right call for ImageLayer motion against real per-frame reference PNGs - see moho2svg.py's IMAGE LAYERS section) |
 | Smart Warp / distortion layers | **not implemented, not detected** |
-| Point groups, curve profiles, `start_percent` / `end_percent` | ignored |
+| Point groups, curve profiles | ignored |
+| `start_percent` / `end_percent` (stroke exposure) | applied on a plain stroke ([§ 6.3](#63-curve-trimming-start_percent--end_percent)); warned on a brush/tapered outline |
 
 ---
 
@@ -1355,10 +1473,15 @@ blend, which the falloff is already flagged as unvalidated for
 
 3. **Smart Warp** — invisible here (0 files), but a document that uses it
    loses the whole deformation silently. Detection is cheap; support is not.
-4. **`end_percent` animation** — not exercised here, common in production.
+4. ~~**`end_percent` animation** — not exercised here, common in production.~~
+   **Implemented** for a plain stroke, per frame, measured against a
+   purpose-made Moho render ([§ 6.3](#63-curve-trimming-start_percent--end_percent));
+   still unapplied on brush/tapered outlines, which warn.
 5. **Control bones** — small in this sample, but a total miss where used.
 6. **IK with a moving target** — usually baked, occasionally not.
-7. **Independent angle (`fixed_angle`)** — 45 bones; effect unverified.
+7. ~~**Independent angle (`fixed_angle`)** — 45 bones; effect unverified.~~
+   **Measured and applied** — worth up to 16 px where used, and about a third
+   of that still unexplained ([§ 3.2](#32-independent-angle-fixed_angle)).
 8. **`offset`, `binding_mode == 2`, `parent_bone == -3`, `scaling_mode`** —
    undecoded, each observed in exactly one narrow place.
 

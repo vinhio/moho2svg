@@ -166,6 +166,20 @@ Reconstructing the control point (BezierReconstructor) requires two formulas:
      been validated on non-degenerate interior points (both neighbours farther
      than a few pixels away); see BezierReconstructor for the degenerate cases.
 
+     The "public Moho scripting snippet" rejected above has since been located:
+     it is `AE_Utilities:GetBezierValue`, shipped inside several third-party
+     Moho tools (see docs/moho-mohoscripts-plan.md).  Two things worth keeping:
+     it computes the handle LENGTH exactly as formula 1 does (independent
+     confirmation from someone with Moho's own API in hand), and its direction
+     is exactly the formula above at BIAS = -1, where the two blend weights
+     become equal and the blend collapses to normalize(next - prev).  So this
+     file does not disagree with that snippet so much as generalise it.
+     Re-measured across all 23 sample documents at two frames (255,568
+     handles): switching to BIAS = -1 moves the median handle by 1.10 degrees,
+     the mean by 7.23, p90 by 23.0, and moves 51.3% of all handles by more than
+     1 degree - and on Bandit.mohoproj alone the median is 3.40 degrees, which
+     reproduces the "3.4 degrees" measured above against Moho's own export.
+
 --------------------------------------------------------------------------------
 SHAPES, EDGES, AND WHY A "DIRECTION FLAG" IN THE FILE IS NOT TRUSTWORTHY
 --------------------------------------------------------------------------------
@@ -1993,6 +2007,37 @@ class Channel:
         those replay unchanged - the same split `_pose_offset` makes for
         Smart Bone poses, and for the same reason.
 
+        WHY THE ACCUMULATION IS UNCONDITIONAL.  Moho's own scripting API has
+        `InterpSetting:IsAdditiveCycle()` / `SetAdditiveCycle(bool)`, so
+        "accumulate or replay" IS a per-keyframe flag inside Moho.  It is not
+        in the file: the header (`pkg_moho.lua_pkg`) declares InterpSetting's
+        serialised members in exactly the order the JSON writes them -
+        interpMode, val1, val2, interval, hold, stagger, tags -> `im`, `v1`,
+        `v2`, `in`, `h`, `s`, `t` - and the additive bit lives in a further
+        `uint8 flags` member that no interp entry carries (verified: every one
+        of 948,873 entries across the corpus has exactly those seven keys,
+        plus `b` on the 257 INTERP_BEZIER ones, and nothing else).  So a
+        reader cannot see the flag, and the value that matches Moho's render
+        is the accumulating one - which is what the Bandit measurement above
+        already showed, on a channel whose `s` is false.
+
+        Two loose ends closed while checking this:
+        - `s` is `stagger`, NOT the additive flag.  Setting it true on all 142
+          cycle markers in `Bandit.mohoproj` and re-rendering frame 80 with
+          Moho itself changed 0 of 518,400 pixels, while the control (v1
+          15 -> 8) changed 9.34% - so the experiment was sensitive and the
+          flag is simply inert here.
+        - A third-party helper (`AE_KeyTools:GetCycledValue`, see
+          docs/moho-mohoscripts-plan.md) computes this same cycle with an
+          identical period, identical repeat count and an identical delta
+          base, which is independent corroboration of the reading in
+          _parse_cycles.  It differs on one detail and is WRONG there: it maps
+          the frames where `(frame - end) % period == 0` back to
+          `resume - 1` instead of to `end`, which lands one delta short.  On
+          Bandit that would drop frames 57/73/89 back by 383.5 px for a single
+          frame; Moho's own exported frames 55-59 march 497 -> 535 -> 557 ->
+          574 -> 602 px with no such dip.
+
         Args:
           cycle: the marker being applied.
           frame: a frame strictly after `cycle.end`.
@@ -2006,7 +2051,18 @@ class Channel:
         # The mapped frame is always <= cycle.end, so it can only be caught by
         # an EARLIER cycle on the same channel (a nested region, which is
         # correct) - the recursion cannot loop.
-        base = self.eval_raw(cycle.resume + (past - (repeats - 1) * period))
+        #
+        # ... with one exception, which is why the min() is here: a FRACTIONAL
+        # frame in the open interval (end, end + 1) has no image under this map
+        # at all - it sits before the first replayed frame - and the arithmetic
+        # hands back the very frame it was given, so eval_raw would recurse
+        # into itself forever.  Neither exporter can reach it (both evaluate
+        # integer frames only; `--frame` is an int), and it was found by an
+        # ad-hoc sub-frame probe rather than by a real document, so the guard
+        # picks the cheapest defensible answer - hold the cycle's last
+        # keyframe - rather than inventing an interpolation nothing needs yet.
+        mapped = min(cycle.resume + (past - (repeats - 1) * period), cycle.end)
+        base = self.eval_raw(mapped)
         if isinstance(base, bool) or not isinstance(base, (int, float, dict)):
             return base
         end_value = self.eval_raw(cycle.end)
@@ -2317,6 +2373,31 @@ class Channel:
         within a segment by construction (its tangents are clamped so the
         curve cannot leave its own endpoints), so the value is strictly
         ordered and there is exactly one crossing.
+
+        CROSS-CHECKED against a third-party implementation of the same
+        inversion, `AE_Utilities:FindSmartBoneFrame` (see
+        docs/moho-mohoscripts-plan.md).  It agrees on the shape of the problem
+        - scan the pose curve for the bracketing pair, then interpolate within
+        it - and differs on three details, all of which this file already
+        handles at least as well:
+
+        - It samples the curve at every INTEGER frame and then interpolates
+          LINEARLY inside that one-frame span, where this method bisects the
+          real cubic between keyframes.  Its own callers then mostly snap the
+          result back to an integer frame anyway.  The measurement above (ears
+          IoU 91.7% -> 52.8% when the curve was treated as linear) is why the
+          exact inversion is worth having.
+        - It starts its scan at frame 2 when the action is longer than one
+          frame, skipping the [0, 1] span entirely.  That is a workaround for
+          the very common authoring pattern of an action keyed at BOTH frame 0
+          and frame 1 with the same value (`Rabbit.animeproj`'s `HeadTilt`
+          pose is keyed [0, 1, 51, 101]); the flat span makes the sub-frame
+          ambiguous.  Handled here by the `abs(b - a) < 1e-12` branch, which
+          answers frame `when[i]` instead of skipping anything.
+        - When no crossing exists it compares only the LAST two samples and
+          snaps to the nearer.  Here the target is clamped into the channel's
+          own value range before scanning, with an explicit nearest-keyframe
+          fallback at the end, which is the same intent applied to both ends.
         """
         when, val = self.when, self.val
         if len(when) < 2:
@@ -2697,6 +2778,10 @@ class Bone:
     scale_control_parent: int
     scale_control_scale: float
     scale_control_delay: float
+    # Moho's "Independent angle" checkbox (Bone Constraints, manual ch. 5.01):
+    # this bone does not inherit its parent's ROTATION, only its position.
+    # Applied in Skeleton._world_matrices - see its NOTE ON INDEPENDENT ANGLE.
+    fixed_angle: bool = False
 
     def dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
         """Whether this bone's ANGLE dynamics is switched on at `frame`.
@@ -2846,6 +2931,7 @@ class Bone:
             scale_control_parent=raw.get("scale_control_parent", -1),
             scale_control_scale=raw.get("scale_control_scale", 1.0),
             scale_control_delay=raw.get("scale_control_delay", 0) or 0,
+            fixed_angle=bool(raw.get("fixed_angle", False)),
         )
 
 
@@ -2868,6 +2954,37 @@ class Skeleton:
         # walk_render_tree can warn a document likely uses the feature,
         # not to read it.
         self.bones_groups = bones_groups
+        # {active-action context: per-bone rest world angle} - see
+        # _rest_orient_angles, which is the only reader.
+        self._rest_orient_cache: dict[tuple, list[float]] = {}
+
+    # VITRUVIAN BONES (`bones_groups`) - shape decoded, semantics NOT, and an
+    # implementation attempt was measured and rejected.  See
+    # docs/moho-rigging-and-deformation.md § 4b for the full evidence; the
+    # short version, because it is the kind of thing a future reader will
+    # otherwise re-attempt:
+    #
+    #   The storage, from `Night_Boy.mohoproj` (this corpus' only user):
+    #     {"type": "BoneGroup", "enabled": true, "name": "Group 5",
+    #      "bones": [101, 102, 103],        # bone indices in THIS skeleton
+    #      "active_bone": <Val channel>}    # keyed [0, 1] -> [2.0, 0.0]
+    #   Confirmed by AUTHORING such a group by hand into
+    #   `TransformBoneTool.animeproj` and rendering with Moho: it honours it,
+    #   changing 2,862 px.  So the field names and shape are right.
+    #
+    #   `active_bone` is 0-based into the group's OWN `bones` list, and an
+    #   out-of-range value falls back to the first member (measured: on a
+    #   2-member group, values 0, 2 and 3 all render identically to having no
+    #   group at all, while 1 differs by 2,840 px).
+    #
+    #   What "active" DOES is still unknown.  The obvious model - only the
+    #   active member deforms the mesh, siblings inert - was implemented here
+    #   (strength 0 for an inactive member) and REJECTED on measurement: it
+    #   changes 568 px where Moho changes 22, and where both change it covers
+    #   only 33% of Moho's own changed pixels.  Moho's own numbers say an
+    #   inactive sibling is NOT switched off.  So this stays detected-and-
+    #   warned (walk_render_tree) rather than guessed at.
+
 
     @staticmethod
     def _build(raw: Optional[dict]) -> Optional["Skeleton"]:
@@ -2915,6 +3032,74 @@ class Skeleton:
         and a linear one - and none won across layers: `1/s` improved that
         document's body from 30.3 to 24.5 px while making its tail and one
         ear worse.  Left out rather than guessed.
+
+        NOTE ON INDEPENDENT ANGLE (`fixed_angle`).  Moho's Bone Constraints
+        panel has an "Independent angle" checkbox (manual ch. 5.01), true on
+        65 of this corpus' bones across 11 documents.  It was carried as an
+        OPEN RISK for a long time - "unverified, and potentially visible" -
+        because no reference render of such a rig was available.  Now
+        measured, and it IS visible: honouring it means a flagged bone keeps
+        its parent's POSITION but not the parent's ROTATION.
+
+            angle -= parent_world_angle(frame) - parent_world_angle(0)
+
+        i.e. the parent's DEPARTURE FROM ITS OWN REST ROTATION is removed -
+        the same "departure from rest" shape `_control_offset` uses, and for
+        the same reason: at frame 0 the correction is zero, so the rig's rest
+        pose is untouched.
+
+        HOW IT WAS MEASURED, and why not the other obvious reading.  Two
+        candidate formulations exist, both taken from third-party Moho tools
+        that had Moho's own API in hand (docs/moho-mohoscripts-plan.md § 2.2):
+        this one, and "absolute" - subtract the parent's whole world angle, so
+        the bone's world rotation becomes its own local angle outright.
+        `TransformBoneTool.animeproj` was rendered by Moho TWICE, once as
+        authored (4 flagged bones, one under a chain that swings 145deg) and
+        once with every `fixed_angle` forced false.  The difference between
+        those two renders is the flag's effect isolated - measured by Moho, so
+        every unrelated modelling error in this file cancels out.  Only the two
+        leg layers move (arms/body/head differ by exactly 0.00 px, which is
+        also the check that the experiment isolates what it claims):
+
+            layer   Moho's own effect     error vs that effect, mean / max px
+                    mean / max px         off          rest         absolute
+            LegL     7.17 / 15.46      7.17 / 15.46  4.93 / 8.17  6.62 / 12.03
+            LegR     5.82 / 16.17      5.82 / 16.17  3.43 / 7.16  4.32 /  8.15
+            overall                    2.17 / 16.17  1.39 / 8.17  1.82 / 12.03
+
+        So "rest" wins on every layer and both statistics, "absolute" is
+        better than ignoring the flag but clearly worse than "rest", and
+        ignoring it costs up to 16 px on a 1280x720 canvas.  `make
+        check-reference` is unchanged by this (Bandit's two flagged bones move
+        its Tail group by 0.01-0.09 px, every other number identical).
+
+        RESIDUAL, stated plainly: "rest" recovers only about a third of the
+        effect (7.17 -> 4.93 and 5.82 -> 3.43 px).  The rest is not explained.
+        It may be this document's own baseline skinning error - our absolute
+        error on those same leg layers is 10.7 px mean with the flag ignored,
+        i.e. ~2x the effect being measured, so the delta comparison is itself
+        contaminated at second order - or the model may be incomplete for
+        NESTED flagged bones (this document has two such pairs: B11/B12 and
+        B15/B16, each a flagged bone whose parent is also flagged).  Recorded
+        rather than tuned away.  Reproduce with:
+
+            python3 - <<'EOF'   # write a no-flag twin
+            import json; d = json.load(open("moho/TransformBoneTool.animeproj"))
+            def w(o):
+                if isinstance(o, dict):
+                    if o.get("fixed_angle"): o["fixed_angle"] = False
+                    for v in o.values(): w(v)
+                elif isinstance(o, list):
+                    for v in o: w(v)
+            w(d); json.dump(d, open("moho/_tmp_tbt_noflag.animeproj", "w"))
+            EOF
+            Moho -r moho/TransformBoneTool.animeproj -f SVG -start 1 -end 120 \
+                 -o moho/track/TransformBoneTool/svg/TBT.svg
+            Moho -r moho/_tmp_tbt_noflag.animeproj -f SVG -start 1 -end 120 \
+                 -o moho/track/_tmp_tbt_noflag/TBT.svg
+
+        then diff per-layer bbox centres between the two reference sets and
+        against this exporter under each `RenderSettings.fixed_angle_mode`.
 
         NOTE ON FLIP PROPAGATION - REGRESSION, FOUND AND FIXED ONCE ALREADY.
         `flip_h`/`flip_v` were first implemented in commit "Fix bone
@@ -3237,10 +3422,42 @@ class Skeleton:
             delta += upstream
         return float(gain if gain is not None else 1.0) * delta
 
+    def _rest_orient_angles(self, exporter: "Exporter") -> list[float]:
+        """Every bone's world ROTATION at frame 0, in radians - Moho's
+        `Bone.fRestMatrix` angle, recomputed rather than stored.
+
+        Only `fixed_angle` bones need it (see _world_matrices' NOTE ON
+        INDEPENDENT ANGLE), so it is built on first use and cached per active
+        Smart Bone context: an action can pose the rig at frame 0 too, and the
+        rest angle has to be read in the same context as the live one or the
+        subtraction leaves a constant tilt behind.
+        """
+        key = tuple(exporter._active_actions)
+        cached = self._rest_orient_cache.get(key)
+        if cached is None:
+            _, orient = self._solve(0.0, exporter, {}, rest=True)
+            cached = [math.atan2(m.b, m.a) if m is not None else 0.0 for m in orient]
+            self._rest_orient_cache[key] = cached
+        return cached
+
     def _world_matrices(self, frame: float, exporter: "Exporter",
                          dynamic: dict[int, float]) -> list[Mat2D]:
+        """The world matrix of every bone - _solve's result without the
+        orientation-only matrices its `fixed_angle` support needs."""
+        return self._solve(frame, exporter, dynamic)[0]
+
+    def _solve(self, frame: float, exporter: "Exporter",
+                dynamic: dict[int, float],
+                rest: bool = False) -> tuple[list[Mat2D], list[Optional[Mat2D]]]:
         """world_matrices' body, with the simulated angles passed in rather
-        than fetched.
+        than fetched.  Returns both the world matrices and the rotation-only
+        `orient` matrices, the latter because `fixed_angle` needs a parent's
+        world ROTATION separated from its scale.
+
+        `rest` suppresses the `fixed_angle` correction itself, which is what
+        makes _rest_orient_angles' frame-0 solve terminate instead of
+        recursing into this method forever.  At frame 0 the "rest" correction
+        is zero by construction anyway, so nothing is lost.
 
         Split out so Skeleton.dynamic_angles can build the KEYED pose - the
         pose with no dynamics applied, `dynamic = {}` - without recursing
@@ -3304,6 +3521,16 @@ class Skeleton:
             angle_offset = self._control_offset(i, "angle", frame, exporter)
             if angle_offset is not None:
                 angle += angle_offset
+            # "Independent angle": drop the parent's rotation, keep its
+            # position - see NOTE ON INDEPENDENT ANGLE.
+            if bone.fixed_angle and parent >= 0 and not rest and orient[parent] is not None:
+                mode = exporter.settings.fixed_angle_mode
+                if mode != "off":
+                    parent_now = math.atan2(orient[parent].b, orient[parent].a)
+                    if mode == "absolute":
+                        angle -= parent_now
+                    else:                     # "rest"
+                        angle -= parent_now - self._rest_orient_angles(exporter)[parent]
             c, s = math.cos(angle), math.sin(angle)
             # flip_h/flip_v negate one column each, exactly as
             # Layer.local_matrix does for a layer's own flips - column 1 is
@@ -3338,7 +3565,7 @@ class Skeleton:
                 orient[i] = o
                 out[i] = Mat2D(o.a * scale, o.b * scale, o.c * across, o.d * across,
                                 origin.x, origin.y)
-        return out  # type: ignore[return-value]
+        return out, orient  # type: ignore[return-value]
 
     def dynamic_angles(self, frame: float, exporter: "Exporter") -> dict[int, float]:
         """Simulated angle for every bone whose dynamics switch is on AT
@@ -3943,13 +4170,23 @@ class Curve:
     (the last wraps back to the first); otherwise one fewer segment than
     points."""
 
-    def __init__(self, closed: bool, points: list[CurvePoint]):
+    def __init__(self, closed: bool, points: list[CurvePoint],
+                  start_percent: Any = None, end_percent: Any = None):
         self.closed = closed
         self.points = points
+        # Moho's "Stroke Exposure" (manual ch. 3.xx's Curve Exposure tool,
+        # channel id CHANNEL_CURVEEXP): how much of this curve's OUTLINE is
+        # drawn, as a fraction of its length.  Raw channels - see
+        # Exporter._stroke_trims for the sentinel convention and what is
+        # measured about them.  None on a `1021`-generation file, which has
+        # neither field.
+        self.start_percent = start_percent
+        self.end_percent = end_percent
 
     @staticmethod
     def _build(raw: dict) -> "Curve":
-        return Curve(bool(raw["closed"]), [CurvePoint._build(p) for p in raw["points"]])
+        return Curve(bool(raw["closed"]), [CurvePoint._build(p) for p in raw["points"]],
+                      raw.get("start_percent"), raw.get("end_percent"))
 
     def segment_count(self) -> int:
         n = len(self.points)
@@ -4294,6 +4531,67 @@ class Layer:
         masking on with an EMPTY base mask (the common case).  Measured -
         see the module docstring's MASKING section."""
         return self._raw.get("group_mask") or 0
+
+    @property
+    def exclude_lines_from_mask(self) -> bool:
+        """Moho's "Exclude Strokes" checkbox on a MASK SOURCE - the manual
+        (ch. 12.05) is one sentence: "Check this option to exclude outlines
+        from the mask."  `true` on 67 layers corpus-wide, `false` on 1,504.
+
+        DECODED BUT DELIBERATELY NOT APPLIED, and the reason is worth keeping,
+        because the obvious wiring is wrong.  This file ALREADY carves a band
+        along a mask source's own outline out of the mask
+        (`_mask_source_shapes`' `exclude_width`) - but that models a DIFFERENT
+        Moho behaviour, "the source's own stroke stays visible on top of what
+        it masks", confirmed against the Moho app on Bandit's
+        BellyTexture/Head_DarkBlue pair (see the module docstring's MASKING
+        section).  Gating that carve-out on this flag was tried and reverted:
+
+        - Moho's own effect, isolated by rendering a document twice with the
+          flag forced both ways: 336 px on `Spacewoman.mohoproj` frame 27,
+          inside y 309-421.
+        - Our gated version changed 2,412 px across y 225-590, and the two
+          sets DID NOT OVERLAP AT ALL (0 px).  Different mechanism, different
+          pixels: "outlines do not contribute alpha" leaves the inner half of
+          the stroke band inside the mask, while carving the band removes it.
+
+        Correctly modelling this needs the mask to be `fill UNION stroke band`
+        when the flag is false, which the current fill-silhouette-plus-carve
+        mask cannot express - a redesign, not a conditional.  Effect sizes if
+        it is ever worth doing: 26-56 px per frame on plain outlines
+        (`OffsetBoneTool`, `WhatIsBone`, `Spacewoman`, 48 frames each), and
+        2,191 px on one `SketchBone.mohoproj` frame where the flagged outlines
+        are BRUSH strokes - which this file excludes from mask exclusion
+        anyway, so that larger case is doubly out of reach today.
+
+        Also from the manual (ch. 01, "what's new in 14"): Moho only uses its
+        better mask anti-aliasing when EXACTLY ONE layer in a group has
+        Exclude Strokes on, falling back to an older method otherwise - so
+        even Moho's own output here is not one single algorithm."""
+        return bool(self._raw.get("exclude_lines_from_mask", False))
+
+    @property
+    def mask_expansion(self) -> bool:
+        """Moho's "Expand mask by a pixel" checkbox on a mask source - the
+        manual (ch. 12.05), again one sentence: "Adds an additional pixel
+        around a layer mask."  It exists to kill the 1-pixel fringe that an
+        exactly-coincident mask edge leaves between the mask and what it
+        clips.  `true` on 48 layers corpus-wide.
+
+        Measured, so it is applied rather than assumed: forcing it false on
+        `SketchBone.mohoproj`'s 8 flagged layers moves 650 pixels of MOHO'S
+        OWN render at frame 1 (0.07% of a 1280x720 frame, along the eye/mouth
+        mask edges).  Small, but a real edge treatment rather than noise.
+
+        Moho's own UI only offers it on an "add" mode source (see the
+        LK_MaskSettings evidence in docs/moho-mohoscripts-plan.md § 2.8), and
+        that is the only place it is honoured here: _mask_element paints a
+        2px-wide white stroke along such an op's own path, which grows the
+        white silhouette by one pixel on each side, and moho2lottie.py sets
+        the Lottie mask's own native `x` ("Expand") property to 1 instead.
+        ONE CANVAS pixel, in both cases - an SVG scaled up scales its
+        expansion with it, where Moho's is one DEVICE pixel of the render."""
+        return bool(self._raw.get("mask_expansion", False))
 
     @property
     def camera_immune(self) -> bool:
@@ -4752,12 +5050,58 @@ class CurveGeometry:
     def __init__(self, closed: bool, segments: list[SegmentGeometry], point_widths: list[float]):
         self.closed = closed
         self.segments = segments
+        self._segment_lengths: Optional[list[float]] = None   # see segment_lengths
         self.point_widths = point_widths   # parallel to the curve's OWN point
                                              # list (curve.points), not the
                                              # mesh's - index accordingly.
 
     def segment_count(self) -> int:
         return len(self.segments)
+
+    def segment_lengths(self, samples: int = 12) -> list[float]:
+        """Approximate arc length of every segment, by polyline sampling.
+
+        Only stroke exposure needs these (see Exporter._stroke_trims), so they
+        are computed on demand and cached per CurveGeometry - which is already
+        per (mesh, frame), so the cache lifetime is right."""
+        if self._segment_lengths is None:
+            lengths = []
+            for sg in self.segments:
+                prev, total = sg.p0, 0.0
+                for i in range(1, samples + 1):
+                    pt = cubic_bezier_point(sg.p0, sg.c1, sg.c2, sg.p1, i / samples)
+                    total += prev.distance_to(pt)
+                    prev = pt
+                lengths.append(total)
+            self._segment_lengths = lengths
+        return self._segment_lengths
+
+    def trim_ranges(self, start: float, end: float
+                     ) -> dict[int, tuple[float, float]]:
+        """{segment index: (t0, t1)} for the part of this curve an outline
+        should draw, given a start/end fraction of its own ARC LENGTH.  A
+        segment absent from the result is not drawn at all.
+
+        Fractions outside [0, 1] mean "not trimmed" - see
+        Exporter._stroke_trims for that sentinel convention.  Measured to be
+        arc length rather than segment-parameter space: see _stroke_trims."""
+        lengths = self.segment_lengths()
+        total = sum(lengths)
+        if total <= 0.0:
+            return {}
+        lo, hi = max(0.0, start) * total, min(1.0, end) * total
+        out: dict[int, tuple[float, float]] = {}
+        walked = 0.0
+        for i, seg_len in enumerate(lengths):
+            seg_start, seg_end = walked, walked + seg_len
+            walked = seg_end
+            if seg_len <= 0.0 or seg_end <= lo or seg_start >= hi:
+                continue
+            t0 = max(0.0, (lo - seg_start) / seg_len)
+            t1 = min(1.0, (hi - seg_start) / seg_len)
+            if t1 > t0:
+                out[i] = (t0, t1)
+        return out
 
     @staticmethod
     def build(curve: Curve, positions: list[Vec2], reconstructor: "BezierReconstructor",
@@ -4895,6 +5239,37 @@ class PathTracer:
         return out
 
 
+def split_cubic(p0: Vec2, c1: Vec2, c2: Vec2, p1: Vec2,
+                 t0: float, t1: float) -> tuple[Vec2, Vec2, Vec2, Vec2]:
+    """The sub-curve of one cubic between parameters `t0` and `t1`, as its own
+    four control points - two de Casteljau splits, exact (a cubic's sub-curve
+    is another cubic, so nothing is approximated here).
+
+    Used by stroke exposure (see Exporter._stroke_trims): a partly-drawn
+    outline needs the fractional first/last segment cut at the right place,
+    not dropped or kept whole."""
+    def at(a: Vec2, b: Vec2, t: float) -> Vec2:
+        return Vec2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+
+    def right_of(q0, q1, q2, q3, t):        # the [t, 1] half of a cubic
+        a, b, c = at(q0, q1, t), at(q1, q2, t), at(q2, q3, t)
+        d, e = at(a, b, t), at(b, c, t)
+        return (at(d, e, t), e, c, q3)
+
+    def left_of(q0, q1, q2, q3, t):          # the [0, t] half
+        a, b, c = at(q0, q1, t), at(q1, q2, t), at(q2, q3, t)
+        d, e = at(a, b, t), at(b, c, t)
+        return (q0, a, d, at(d, e, t))
+
+    if t0 > 0.0:
+        p0, c1, c2, p1 = right_of(p0, c1, c2, p1, t0)
+        # `t1` was expressed on the ORIGINAL curve; rescale onto the remainder.
+        t1 = 1.0 if t0 >= 1.0 else (t1 - t0) / (1.0 - t0)
+    if t1 < 1.0:
+        p0, c1, c2, p1 = left_of(p0, c1, c2, p1, max(0.0, t1))
+    return p0, c1, c2, p1
+
+
 def cubic_bezier_point(p0: Vec2, c1: Vec2, c2: Vec2, p1: Vec2, t: float) -> Vec2:
     u = 1.0 - t
     return Vec2(
@@ -4903,9 +5278,38 @@ def cubic_bezier_point(p0: Vec2, c1: Vec2, c2: Vec2, p1: Vec2, t: float) -> Vec2
     )
 
 
+def trimmed_segment(seg: "TracedSegment", trims: Optional[dict[int, dict[int, tuple[float, float]]]]
+                    ) -> Optional[tuple[Vec2, Vec2, Vec2, Vec2]]:
+    """`seg`'s control points after stroke exposure, or None when exposure
+    drops this segment entirely.  Returns the segment unchanged (its own four
+    points) when `trims` says nothing about it, which is the normal case.
+
+    The trim is expressed in the CURVE's own direction, while a TracedSegment
+    may have been walked backwards (`seg.reversed` - see PathTracer), so a
+    reversed segment's range is mirrored onto (1 - t1, 1 - t0) before
+    splitting.  Getting that wrong trims the wrong END of a stroke, which is
+    silent and looks plausible, so it is spelled out here rather than left to
+    the call sites."""
+    if trims is None:
+        return (seg.p0, seg.c1, seg.c2, seg.p1)
+    per_curve = trims.get(seg.curve)
+    if per_curve is None:
+        return (seg.p0, seg.c1, seg.c2, seg.p1)
+    span = per_curve.get(seg.segment)
+    if span is None:
+        return None
+    t0, t1 = span
+    if seg.reversed:
+        t0, t1 = 1.0 - t1, 1.0 - t0
+    if t0 <= 0.0 and t1 >= 1.0:
+        return (seg.p0, seg.c1, seg.c2, seg.p1)
+    return split_cubic(seg.p0, seg.c1, seg.c2, seg.p1, t0, t1)
+
+
 def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
                   to_px: Callable[[Vec2], Vec2], visible_only: bool = False,
-                  close: bool = True) -> str:
+                  close: bool = True,
+                  trims: Optional[dict[int, dict[int, tuple[float, float]]]] = None) -> str:
     """Build one shape's SVG path data ("d" attribute) from its (unordered)
     edge list.
 
@@ -4919,6 +5323,11 @@ def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
     its start.  Pass close=True for fills; NEVER for a plain (non-tapered)
     stroke - see the module docstring's FILL RULE... section for why Moho's
     own exporter never closes a stroke path either.
+
+    `trims` is stroke exposure - {curve index: {segment index: (t0, t1)}},
+    as CurveGeometry.trim_ranges builds it.  Pass it for an OUTLINE only: Moho
+    trims a curve's stroke and leaves the shape's fill whole (measured - see
+    Exporter._stroke_trims).
     """
     traced = PathTracer.trace(geometries, edges)
     d: list[str] = []
@@ -4928,6 +5337,13 @@ def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
         if visible_only and not geometries[seg.curve].segments[seg.segment].on:
             last = None
             continue
+        cut = trimmed_segment(seg, trims)
+        if cut is None:
+            last = None
+            continue
+        if trims is not None:
+            seg = TracedSegment(cut[0], cut[1], cut[2], cut[3], seg.is_new_subpath,
+                                 seg.reversed, seg.curve, seg.segment)
         if last is None or last.distance_to(seg.p0) > 1e-9:
             if close and first is not None and last is not None and last.distance_to(first) < 1e-9:
                 d.append("Z")
@@ -4944,7 +5360,9 @@ def build_path_d(geometries: list[CurveGeometry], edges: Sequence[Edge],
 
 def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
                        to_px: Callable[[Vec2], Vec2],
-                       visible_only: bool = False, close: bool = True) -> list[dict]:
+                       visible_only: bool = False, close: bool = True,
+                       trims: Optional[dict[int, dict[int, tuple[float, float]]]] = None
+                       ) -> list[dict]:
     """Build one shape's outline as Lottie bezier dicts - the Lottie
     counterpart of build_path_d().
 
@@ -5014,6 +5432,14 @@ def build_path_bezier(geometries: list[CurveGeometry], edges: Sequence[Edge],
             close_current()
             last = None
             continue
+        cut = trimmed_segment(seg, trims)      # stroke exposure - see build_path_d
+        if cut is None:
+            close_current()
+            last = None
+            continue
+        if trims is not None:
+            seg = TracedSegment(cut[0], cut[1], cut[2], cut[3], seg.is_new_subpath,
+                                 seg.reversed, seg.curve, seg.segment)
         if current is None or last is None or last.distance_to(seg.p0) > 1e-9:
             close_current()
             m = to_px(seg.p0)
@@ -5195,12 +5621,28 @@ class TaperedStrokeOutliner:
         not just a stroke-width sliver along Body's edge, taking the
         whole eye down to nothing (found by bisecting a real lottie-web
         render frame-by-frame down to this one exclusion entry). The fix
-        is for a mask consumer to use mode "s" for a `is_hole=False`
-        entry and mode "a" for a `is_hole=True` one instead of "s" for
-        both - see moho2lottie.py's own _finalize_mask, the one place
-        this actually matters (_combo_mode_union_mask_properties's own
-        union-band usage is mode "a" throughout already, for which
-        adding a subset twice is harmless, so it does not need this).
+        is for a mask consumer to tell the two loops apart and give them
+        OPPOSITE modes - see moho2lottie.py's own `_band_mask_plan`, which
+        both mask consumers now go through.
+
+        TWO CORRECTIONS to what this docstring used to say, both measured:
+
+        - It claimed `_combo_mode_union_mask_properties`' own union-band
+          usage "is mode 'a' throughout already, for which adding a subset
+          twice is harmless, so it does not need this".  It is not
+          harmless: adding BOTH loops unions them into the outer loop's
+          whole disc, which cancelled the fill subtraction that band was
+          meant to sit at the edge of, leaving a union member's stroke
+          entirely unmasked (visible on `Bandit.mohoproj`'s `Leg_F 2` as
+          the shared S1/S2 boundary drawn across the ankle).
+        - It described `is_hole` as the inner loop.  `is_hole` only marks
+          the SECOND piece of a two-piece run, and which piece is
+          geometrically outer varies: measured on that same `Leg_F 2` at
+          frame 60, shape 0's flagged piece has |area| 15,413 against the
+          unflagged 13,423 (flag = OUTER), while shape 1's is 4,028
+          against 4,987 (flag = inner).  A mask consumer must therefore
+          compare AREAS, not read the flag - which is what
+          `_band_mask_plan` does.
         """
         out: list[tuple[dict, bool]] = []
         for run in self._traced_runs(geometries, edges):
@@ -5766,9 +6208,11 @@ def png_dimensions(data: bytes) -> tuple[int, int]:
 class RenderSettings:
     """Tunable constants controlling how a Document is rendered.  Everything
     here except `bone_weight_falloff`, `bezier_samples_per_segment`,
-    `mask_padding` and `viewbox_padding` corresponds to a CLI flag (see
-    main()); those four have never needed adjusting against a real reference
-    document and so were never wired up to one."""
+    `mask_padding`, `viewbox_padding` and `fixed_angle_mode` corresponds to a
+    CLI flag (see main()); those five have never needed adjusting against a
+    real reference document and so were never wired up to one.
+    (`fixed_angle_mode` is a settled measurement, not a preference - it exists
+    so Skeleton._world_matrices' NOTE ON INDEPENDENT ANGLE can be re-run.)"""
     stroke_width_scale: float = 2.0          # --stroke-mul; Exporter._stroke_width_px
     tangent_bias: float = 0.19                 # BezierReconstructor
     bone_weight_falloff: str = "inv_d2"          # key into BONE_WEIGHT_FALLOFFS
@@ -5776,6 +6220,11 @@ class RenderSettings:
     point_bone_binding: bool = False    # --point-bones; Exporter._geometry_and_mapper
     bone_dynamics: bool = False         # --bone-dynamics; Skeleton.dynamic_angles
     wind_dynamics: bool = False         # --wind-dynamics; Skeleton.dynamic_angles
+    # How to honour a bone's `fixed_angle` ("Independent angle") flag:
+    # "rest" (measured best - see Skeleton._world_matrices' NOTE ON INDEPENDENT
+    # ANGLE), "absolute" (the rejected variant), or "off" (pre-2026-08
+    # behaviour, kept so the measurement can be re-run).
+    fixed_angle_mode: str = "rest"      # Skeleton._world_matrices
     forced_mask_containers: frozenset[str] = field(default_factory=frozenset)  # --mask-container
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0
@@ -5857,7 +6306,7 @@ class RenderItem:
     # `exempt`, exactly as it is in Moho.  Note this is a DIFFERENT field
     # from `mask_sources` above, which is what an "enter" container
     # contributes to ITS OWN children in the older flat model.
-    mask_ops: Sequence[tuple[str, str, float]] = ()
+    mask_ops: Sequence[tuple[str, str, float, bool]] = ()
     mask_base_full: bool = False
     # True when this item's own container masks it at all.  Needed because an
     # empty `mask_ops` over an empty base is a REAL mask that hides
@@ -6132,6 +6581,24 @@ class Exporter:
         `WhatIsBone`, `AddBone` or `ControlBones` registers a foreign action
         on its own angle - so the Smart Bone behaviour verified against
         `moho/SketchBone/ears/` and `moho/SketchBone/hand/` is untouched.
+
+        KNOWN GAP: `current` is the dial's OWN KEYED angle.  A dial that is
+        itself driven - by a control bone, by bone dynamics, or by another
+        dial's action - has a resolved angle that differs, and Moho selects
+        the pose from the resolved one.  A third-party tool
+        (`AE_Utilities:SumActionInfluences`) uses the resolved `bone.fAngle`
+        for exactly this reason, its comment calling the keyed value "bad for
+        nested smartbones".  Measured over the corpus: 108 dial bones, none
+        driven by another dial's action, and exactly two driven by a control
+        bone - `HeadTilt` in `Rabbit.animeproj` and in
+        `BoneDynamics.animeproj`, both `angle_control_scale = 1.0`,
+        `delay = 0`.  In both documents the CONTROLLER never departs from its
+        own rest angle, so `_control_offset` returns 0.0 at every frame and
+        the selected pose frame is identical either way (checked frames
+        0-60).  Left as-is deliberately: the fix cannot be verified anywhere
+        in this corpus, and feeding a resolved angle back into the machinery
+        that resolves it needs the same cycle protection `_control_offset`
+        already carries.  See docs/moho-mohoscripts-plan.md § 2.10.
         """
         names = bone_layer.action_names
         skeleton = bone_layer.skeleton
@@ -7491,7 +7958,7 @@ class Exporter:
             return {}
         base_full = container.group_mask == GROUP_MASK_REVEAL_ALL
         plan: dict[int, tuple[bool, tuple]] = {}
-        ops: list[tuple[str, str, float]] = []
+        ops: list[tuple[str, str, float, bool]] = []
         for child in container.children:
             mode = child.masking
             if mode not in MASK_EXEMPT:            # MASK_MASKED, or anything unknown
@@ -7514,7 +7981,11 @@ class Exporter:
                 if (child.visible_at(frame, self) and not child.edit_only
                         and (child.is_container or child.alpha_at(frame, self) > 0.0)):
                     kind = "sub" if mode in MASK_SUBTRACTS else "add"
-                    ops = ops + [(kind, d, w) for d, w in
+                    # `expand` is Moho's "Expand mask by a pixel", carried per
+                    # op because it is a property of the CONTRIBUTING layer -
+                    # see Layer.mask_expansion and _mask_element.
+                    expand = kind == "add" and child.mask_expansion
+                    ops = ops + [(kind, d, w, expand) for d, w in
                                   self._mask_source_shapes(child, chain_through_container,
                                                             frame)]
         return plan
@@ -7575,13 +8046,73 @@ class Exporter:
                 paths += self._mask_source_shapes_bezier(child, ancestors + (layer,), frame)
         return paths
 
+    def _stroke_trims(self, mesh: Mesh, geometries: list[CurveGeometry], frame: float
+                       ) -> Optional[dict[int, dict[int, tuple[float, float]]]]:
+        """Stroke exposure for every trimmed curve of `mesh`, or None when the
+        mesh has none - which is the overwhelmingly common case, so the whole
+        feature costs one cheap scan per mesh and nothing else.
+
+        WHAT MOHO STORES.  Each curve carries `start_percent`/`end_percent`
+        (AS 7.0, channel id `CHANNEL_CURVEEXP`, Moho's "Stroke Exposure" tool),
+        as a fraction of the curve.  A value OUTSIDE [0, 1] means "not
+        trimmed": Moho's own bundled tool writes `-0.01` and `1.01` for the
+        untrimmed ends (`SS_CurveExposure`, which clamps its drag to
+        [-0.01, 1.01] and only shows 0-100% in its own fields), while the
+        documents here carry `-0.1` and `1.1`.  Both are handled by simply
+        clamping into [0, 1] and treating a full range as no trim.
+
+        WHAT IT AFFECTS - MEASURED, because the name alone does not say.  Moho
+        trims the OUTLINE only and leaves the shape's FILL whole.  Confirmed by
+        rendering a purpose-made variant of `TransformBoneTool.animeproj` whose
+        `Body` curve (a 5-point CLOSED curve carrying both a fill and an
+        outline) has `end_percent` forced to 0.5 and 0.75: Moho's own render
+        keeps the full purple body fill in both, and drops the corresponding
+        tail of the dark outline around it.  So this is passed to
+        `build_path_d`/`build_path_bezier` for an outline and never for a fill.
+
+        CORPUS REACH IS ZERO, deliberately recorded: the only trimmed curves in
+        this repository's documents are 24 in `FoxAndGhost.animeproj`
+        (`end_percent = 0.9721` on a 2-point `Lazer Beam`/`Light Blade`/`Glow`
+        curve), and rendering that document with Moho with those values forced
+        back to untrimmed changes exactly 0 pixels at 8 sampled frames across
+        its whole 450-frame range - those layers are never drawn.  Hence the
+        purpose-made probe above.
+
+        The fraction is of ARC LENGTH, not of segment-parameter space.  On a
+        1-segment curve the two are identical (which is why FoxAndGhost could
+        not have settled it), and on the multi-segment probe above arc length
+        is what matches Moho - see `CurveGeometry.trim_ranges`."""
+        trims: dict[int, dict[int, tuple[float, float]]] = {}
+        for i, curve in enumerate(mesh.curves):
+            if curve.start_percent is None and curve.end_percent is None:
+                continue                      # `1021` generation: no such field
+            start = self.eval(curve.start_percent, frame) if curve.start_percent is not None else 0.0
+            end = self.eval(curve.end_percent, frame) if curve.end_percent is not None else 1.0
+            if start <= 0.0 and end >= 1.0:
+                continue                      # the untrimmed sentinel, or exactly full
+            if i >= len(geometries):
+                continue
+            ranges = geometries[i].trim_ranges(start, end)
+            if ranges != {j: (0.0, 1.0) for j in range(geometries[i].segment_count())}:
+                trims[i] = ranges
+        return trims or None
+
     def _mask_sources_bezier(self, container: Optional[Layer],
                               chain_through_container: Sequence[Layer],
-                              frame: float) -> list[tuple[list[dict], float, Optional[list[dict]]]]:
+                              frame: float
+                              ) -> list[tuple[list[dict], float, Optional[list[dict]], bool]]:
         """Bezier counterpart of _mask_sources(), for a Lottie writer - same
         group_mask/masking rules, same per-source Smart Bone context fix
         (see _mask_sources's own docstring), `_mask_source_shapes_bezier`
-        in place of `_mask_source_shapes`."""
+        in place of `_mask_source_shapes`.
+
+        One element MORE than `_mask_source_shapes_bezier`'s own triples: the
+        contributing child's `mask_expansion` (Moho's "Expand mask by a
+        pixel"), which a Lottie writer maps onto its mask entry's own native
+        `x` ("Expand") property.  It is attached here rather than inside
+        `_mask_source_shapes_bezier` because it is a property of the
+        CONTRIBUTING LAYER, not of a shape - the same reason `_mask_plan`
+        attaches it per op on the SVG side."""
         if container is None:
             return []
         forced = container.name in self.settings.forced_mask_containers
@@ -7590,10 +8121,12 @@ class Exporter:
         paths = []
         for child in container.children:
             if child.masking == 2:
-                paths += self._mask_source_shapes_bezier(child, chain_through_container, frame)
+                expand = child.mask_expansion
+                paths += [(b, w, band, expand) for b, w, band in
+                          self._mask_source_shapes_bezier(child, chain_through_container, frame)]
         return paths
 
-    def _mask_element(self, ops: Sequence[tuple[str, str, float]], mask_id: str,
+    def _mask_element(self, ops: Sequence[tuple[str, str, float, bool]], mask_id: str,
                        indent: str, base_full: bool = False) -> str:
         """Build a <mask> from one `_mask_plan` entry: an ordered run of
         ("add"|"sub", path, exclude_width) ops over a base that is either
@@ -7605,6 +8138,14 @@ class Exporter:
         incremental accumulation.  A full base is a white rectangle painted
         first, sized to the whole document canvas (plus the mask padding),
         since with nothing subtracted such a mask must not clip anything.
+
+        An op flagged `expand` (Moho's "Expand mask by a pixel", add modes
+        only - see Layer.mask_expansion) then gets a 2px-wide WHITE stroke
+        along its own path, which grows that silhouette by one pixel on each
+        side.  Painted after the fills, so it also covers a neighbouring
+        "sub" op's fill where they meet - which is what "expand the mask"
+        means - but before the black carve strokes below, so the one
+        behaviour already confirmed against the Moho app still wins.
 
         Then, painted last so they win over every fill, each op carrying a
         nonzero exclude_width gets its own stroke, that width wide, in BLACK.
@@ -7619,10 +8160,12 @@ class Exporter:
                          f'width="{self.document.width + 2 * pad:.1f}" '
                          f'height="{self.document.height + 2 * pad:.1f}" fill="white"/>')
         parts += [f'<path d="{d}" fill="{"black" if kind == "sub" else "white"}" '
-                  f'fill-rule="nonzero"/>' for kind, d, _w in ops]
+                  f'fill-rule="nonzero"/>' for kind, d, _w, _x in ops]
+        parts += [f'<path d="{d}" fill="none" stroke="white" stroke-width="2"/>'
+                  for _kind, d, _w, expand in ops if expand]
         parts += [f'<path d="{d}" fill="none" stroke="black" stroke-width="{w:.3f}"/>'
-                  for _kind, d, w in ops if w > 0]
-        boxes = [parse_path_bbox([d for _k, d, _w in ops], pad)] if ops else []
+                  for _kind, d, w, _x in ops if w > 0]
+        boxes = [parse_path_bbox([d for _k, d, _w, _x in ops], pad)] if ops else []
         if base_full:
             boxes.append((-pad, -pad, self.document.width + 2 * pad,
                            self.document.height + 2 * pad))
@@ -8248,6 +8791,10 @@ class ShapeGroupRenderer:
         self.to_px = to_px
         self.frame = frame
         self.indent = indent
+        # Stroke exposure, once per mesh: None unless some curve is trimmed -
+        # see Exporter._stroke_trims.  Outlines only; a fill is never trimmed.
+        self._trims = exporter._stroke_trims(mesh, geometries, frame)
+        self._warned_trim_kinds: set[str] = set()
         # A resolved PatchLayer shares its target's Mesh/Shape objects
         # verbatim (Document._resolve_patch_layers), so `shape.has_outline`
         # itself cannot be overridden without also affecting the target's own
@@ -8271,6 +8818,27 @@ class ShapeGroupRenderer:
         return self.defs + self.body, self.pixel_points
 
     # -- per-shape ------------------------------------------------------------
+
+    def _warn_untrimmed_outline(self, shape: Shape, kind: str) -> None:
+        """Warn once per mesh and kind that a trimmed curve's outline is drawn
+        by an outliner that cannot trim.
+
+        Stroke exposure is applied to a PLAIN stroke (see
+        Exporter._stroke_trims), where the geometry is one path this file can
+        cut with `split_cubic`.  A brush-textured or tapered outline is built
+        as a stamped dab run or a filled outline band instead, and trimming
+        those needs the trim pushed down into those builders - not done, so it
+        is announced rather than silently ignored.  Moho DOES trim them: the
+        purpose-made probe in `_stroke_trims` is itself a brush-styled outline,
+        and Moho trims it.  This is exactly the case that would need doing
+        first if a real document ever depends on it."""
+        if self._trims is None or kind in self._warned_trim_kinds:
+            return
+        if not any(e.curve in self._trims for e in shape.edges):
+            return
+        self._warned_trim_kinds.add(kind)
+        sys.stderr.write(f"  ! shape: stroke exposure (start/end percent) on a {kind} "
+                         f"outline is not applied - see Exporter._stroke_trims\n")
 
     def _point_widths(self, edges: Sequence[Edge]) -> list[float]:
         point_indices = {self.mesh.curves[e.curve].points[e.segment].point_index for e in edges}
@@ -8390,6 +8958,7 @@ class ShapeGroupRenderer:
                 # so the base passed in here must NOT already have `widths`'
                 # own (possibly-uniform) value baked in the way
                 # `stroke_width_px` above does for the non-brush paths.
+                self._warn_untrimmed_outline(shape, "brush-textured")
                 diameter_px = exp._stroke_width_px(line_width, 1.0)
                 diameter_px = diameter_px if diameter_px > 0 else 1.0
                 spacing_frac = style.brush_spacing if style.brush_spacing > 0 else 0.25
@@ -8402,6 +8971,7 @@ class ShapeGroupRenderer:
                     random_interval=brush_asset.random_interval,
                     spacing_scale=exp.settings.brush_spacing_mul)
             elif tapered:
+                self._warn_untrimmed_outline(shape, "tapered")
                 taper_path = exp.tapered_outliner.build(self.geometries, shape.edges,
                                                          self.to_px, stroke_width_px)
             else:
@@ -8429,7 +8999,8 @@ class ShapeGroupRenderer:
                 # gap of its own; only one combo_mode == 3 reference example
                 # exists so far.
                 stroke_path = build_path_d(self.geometries, shape.edges, self.to_px,
-                                           visible_only=(combo_mode != 3), close=False)
+                                           visible_only=(combo_mode != 3), close=False,
+                                           trims=self._trims)
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
                                         line_hex, line_alpha, cap, stroke_path, taper_path,

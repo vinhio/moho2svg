@@ -56,7 +56,7 @@
       "description": "Fields common to every channel regardless of `type`. `when`, `val`, and `interp` are always exactly the same length (verified with zero exceptions across the entire sample set).",
       "required": ["type", "when", "val", "interp"],
       "properties": {
-        "ref": { "type": "boolean", "description": "Observed false on every sampled channel. Meaning not decoded." },
+        "ref": { "type": "boolean", "description": "Marks a channel whose keyframes come from an action inserted BY REFERENCE rather than by copy - manual ch. 17.02: \"Moho will insert a special keyframe in the Mainline that refers back to the action you used ... changes will automatically be reflected in the mainline\", as against Insert Copy, which just copies the keyframes in. NOT read by either exporter. An earlier revision of this schema recorded it as \"false on every sampled channel\", which was a 19-file artefact: across the 46-file set it is true on 1,431 channels in 5 documents (Bandit, BoneStrengthTool, FoxAndGhost, Gathered-02Wire2, OffsetBoneTool). Whether ignoring it changes any rendered pixel is UNMEASURED." },
         "mute": { "type": "boolean", "description": "Disables the channel when true. Observed false on every sampled channel - untested whether this tool's evaluator (which ignores it) would misbehave on a genuinely muted channel." },
         "when": {
           "type": "array",

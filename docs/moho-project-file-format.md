@@ -415,7 +415,7 @@ This is the important gap list: every field here changes what Moho draws.
 | `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. |
 | `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (648 instances), always at identical defaults | 3D-extrusion rendering settings, entirely inert in every sample because `3d_mode` is `0` everywhere. |
 | `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. |
-| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `mask_expansion`, `modification_date` | mixed | — | Editor state, or (for `render_only` / `mask_expansion`) undecoded render toggles that are off in every sample. |
+| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `modification_date` | mixed | — | Editor state, or (for `render_only`) an undecoded render toggle that is off in every sample. `mask_expansion` moved out of this list — decoded and applied, see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes). |
 | `metadata`, `script_data` | obj | see [§ 6.4](#64-type-specific-fields) | Editor/script bookkeeping bags, key sets now enumerated. |
 
 ### 6.3a Layer opacity
@@ -470,7 +470,8 @@ hidden by either visibility mechanism.
   look. `extra_sketchy: true` with `extra_lines: 5` on **2 layers** (in
   `SketchBone`), so those two layers should render with repeated jittered
   strokes and do not.
-- `gap_filling`, `exclude_lines_from_mask`, `antialiasing`.
+- `gap_filling`, `antialiasing` (`exclude_lines_from_mask` is decoded but
+  deliberately not applied — see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes)).
 - `triangulated`, `squashable_deformer`, `frame_zero_deformer` — three
   deformer flags that exist **only in the `1045` format generation** (all 21
   `MeshLayer`s of `Bandit.mohoproj`; absent from every `1038` and `1021`
@@ -496,8 +497,13 @@ shading at all. Full field list in `schema/layer.schema.json`'s
 `Mesh3DOptions`.
 
 **`BoneLayer`** — `skeleton` and `actions` are used. `skeleton` is
-`{type, binding_mode, bones}`, plus `bones_groups` in the `1045` document
-(present but empty there). `binding_mode` is `1` on 41 of the 42 skeletons
+`{type, binding_mode, bones}`, plus `bones_groups` in the `1045` documents —
+empty in most, and **populated in `Night_Boy.mohoproj`**, whose one entry is
+`{type: "BoneGroup", enabled, name, bones: [101, 102, 103], active_bone:
+<Val channel>}`: Vitruvian Bones, decoded down to the selector but not to its
+effect (see
+[`moho-rigging-and-deformation.md` § 4b.1](moho-rigging-and-deformation.md#4b1-the-storage-decoded--and-the-semantics-still-not)).
+`binding_mode` is `1` on 41 of the 42 skeletons
 that actually hold bones, and **`2` on one** (`OffsetBoneTool.animeproj`,
 layer `Happy Dance`) — an earlier revision of this document claimed `1`
 everywhere, which was too strong. Its meaning is not decoded, and this tool
@@ -705,7 +711,7 @@ open (one fewer segment than points).
 | `points` | list of curve points (below) | **yes** |
 | `closed` | bool | **yes** |
 | `num_points` | int, matches `len(points)` | no (redundant) |
-| `start_percent` / `end_percent` | `Val` channels; `start_percent` is `-0.1` on all 3,045 curves (19-file total); `end_percent` is `1.1` on all but 3, which are `1.008296` (the same "nose" curve, shared across 3 sibling tutorial documents — **19-file finding**, still a single unkeyframed value, so no animated behaviour difference) | no — these trim the drawn portion of a line. The defaults extend slightly past both ends. **A keyframed `end_percent` is how Moho animates a line drawing itself on, and this tool would draw the whole line instead.** |
+| `start_percent` / `end_percent` | `Val` channels; `start_percent` is `-0.1` on all 3,045 curves (19-file total); `end_percent` is `1.1` on all but 3, which are `1.008296`; **24 curves in `FoxAndGhost.animeproj` carry `0.9721`** | **yes, for a plain stroke** — Moho's "Stroke Exposure", trimming the OUTLINE by a fraction of the curve's ARC LENGTH (the fill is never trimmed), with a value outside `[0, 1]` meaning untrimmed. Measured against a purpose-made Moho render — see [`moho-rigging-and-deformation.md` § 6.3](moho-rigging-and-deformation.md#63-curve-trimming-start_percent--end_percent). A brush-textured or tapered outline warns instead. |
 | `profile_layer_uuid`, `profile_curve_id`, `profile_repeat`, `profile_offset` | `""`, `-1`, `16`, `0.0` | no — a "curve profile" that repeats another curve's shape along this one. Unset in all samples. |
 
 Curve point fields — all seven, all used:
@@ -1213,8 +1219,10 @@ Bone fields **not** used, grouped by what they would change:
   the *tool* without ever keyframing a reparent. So `anim_parent` is fully
   redundant with `parent` across this whole sample set, and the risk is
   theoretical until a document that actually keyframes it turns up.
-- **Constraints and IK**: `constraints`, `min_constraint`, `max_constraint`,
-  `fixed_angle`, `ik_lock`, `ik_global_angle`, `ik_parent_target`,
+- **Constraints and IK** (`fixed_angle` has since been decoded and applied —
+  see [`moho-rigging-and-deformation.md` § 3.2](moho-rigging-and-deformation.md#32-independent-angle-fixed_angle)):
+  `constraints`, `min_constraint`, `max_constraint`,
+  `ik_lock`, `ik_global_angle`, `ik_parent_target`,
   `ignored_by_ik`, `bone_enable_arc_solver`, `target_bone`,
   `angle_control_parent` / `_scale` / `_delay`, `pos_control_parent` /
   `_scale` / `_delay`, `scale_control_parent` / `_scale` / `_delay`. All at
@@ -1409,8 +1417,42 @@ silhouette is, recursively, whatever its own `masking == 2` child/children
 define (the same shapes that already act as *that* container's internal
 `group_mask` source).
 
-`mask_expansion` (a bool on every layer, `false` throughout) presumably grows
-or shrinks the mask edge; it is not used.
+### 10.5 `mask_expansion` and `exclude_lines_from_mask` — the two checkboxes
+
+Both sit on a mask **source** and both are now decoded. The manual (ch. 12.05)
+gives each one sentence, and Moho's own render was used to measure each in
+isolation, by exporting the same document twice with the flag forced both ways.
+
+| Field | Manual | Corpus | Moho's own effect | Status |
+|---|---|---|---|---|
+| `mask_expansion` | *"Adds an additional pixel around a layer mask."* | `true` on **48 layers** | 650 px on `SketchBone.mohoproj` frame 1 (0.07% of 1280×720), along the eye/mouth mask edges | **applied** |
+| `exclude_lines_from_mask` | *"Check this option to exclude outlines from the mask."* | `true` on **67 layers** | 2,191 px on the same frame (0.24%); 26–56 px per frame where the outlines are plain rather than brush | decoded, **deliberately not applied** |
+
+An earlier note here called `mask_expansion` "a bool on every layer, `false`
+throughout … not used". That was a 19-file reading; it is `true` on 48 layers in
+the wider corpus.
+
+**`mask_expansion` is applied** as a 2 px white stroke along the contributing
+op's own path inside the `<mask>` (growing the white silhouette by one pixel per
+side), and in Lottie as the mask entry's own native `x` ("Expand") property set
+to 1. Verified by the two-pole method: our changed pixels sit a **median of 0 px**
+(p90 1 px) from Moho's own changed pixels, in the same bounding box, at about
+half the count — the residual being anti-aliasing, which the two renderers do
+differently anyway.
+
+**`exclude_lines_from_mask` is not applied, and that is a decision, not an
+oversight.** This exporter already carves a band along a mask source's own
+outline OUT of the mask, but that models a different behaviour (the source's own
+stroke staying visible on top — see below). Gating that carve-out on this flag
+was tried and reverted: on `Spacewoman.mohoproj` frame 27, Moho's flag moves 336
+px inside y 309–421 while the gated version moved 2,412 px across y 225–590,
+with **zero overlap**. Excluding outlines leaves the inner half of the stroke
+band inside the mask; carving the band removes it. Doing this properly needs the
+mask to be `fill ∪ stroke band` when the flag is false, which the current
+fill-silhouette-plus-carve model cannot express. One more wrinkle from the manual
+(ch. 01): Moho only uses its improved mask anti-aliasing when **exactly one**
+layer in a group has Exclude Strokes on, and falls back to an older method
+otherwise — so Moho's own behaviour here is not a single algorithm either.
 
 **A `masking == 2` sibling's own stroke stays fully visible on top of
 whatever it masks.** Confirmed directly against the Moho app on
@@ -1760,8 +1802,6 @@ This is a living reverse-engineering effort, not a specification. Fields whose
 - `bone.scaling_mode` (`0`/`2`), `skeleton.binding_mode` (`1` on 41
   skeletons, `2` on one — **corrects an earlier "always `1`" claim**),
   `bone.offset` (non-zero on 5 bones — see [§ 9](#9-bones-and-skinning)),
-  `bone.fixed_angle` ("independent angle", `true` on 45 bones; whether the
-  result is already baked into `anim_angle` is unverified),
   `mesh.curve_interpretation` (`0`/`1`), `quality_flags` (a bit field),
   `face_camera_mode` (always `2`), `shape.fill_allowed`,
   `PatchLayer.target_layer_id`, `fill_style_id`/`line_style_id`/

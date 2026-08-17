@@ -24,7 +24,15 @@ instead of symlinked). Output moved under `out/`: `svg/` → `out/svg/ori/`,
 tracked. Every export is built by a pattern rule with the output file as the
 target (`make out/svg/ori/Bandit.svg`), `make svg-all` and `make lottie-all`
 cover every project under `moho/`, `make check-lottie` depends on the three
-sample exports, and `make format/moho/NAME` writes `moho/NAME.json`. The
+sample exports, and `make format/moho/NAME` writes `moho/NAME.json`.
+
+Both the Lottie export rule and `check-lottie` take their export flags from
+one variable, `LOTTIE_EXPORT_FLAGS` (default `--wind-dynamics --point-bones`).
+That coupling is load-bearing: both flags change geometry, so a check that ran
+with defaults against files exported with them reported ~100 spurious
+"geometry differs" lines. `check_lottie_geometry.py` therefore accepts
+`--point-bones` / `--wind-dynamics` / `--bone-dynamics` itself and prints which
+it used. The
 historical `make gen` commands in the task steps and run logs below refer to
 the old Makefile and are kept as a record.
 
@@ -1728,6 +1736,137 @@ not a structural defect), with zero frames left above the 3% threshold
 that previously flagged frames 35-41 and 102-114. Without `pyclipper`
 installed, or on a document where this never applies, output is
 byte-identical to before this fix.
+
+#### Two fill-rule defects found later in this same machinery (2026-08)
+
+Both were reported as one visible bug: on `Bandit.mohoproj`'s `Leg_F 2`, the
+union of `S1`/`S2` appeared to draw *over* the `combo_mode==3` members `S5`/`S6`
+in a player. Two independent causes, both in the Lottie writer only — the SVG
+writer never had either, and `make check-lottie` could not see them because
+both sides of that check shared the same code.
+
+**1. The clip region was read even-odd, so two overlapping base members
+cancelled.** `_clip_polygon_loops` ran
+`Execute(CT_INTERSECTION, PFT_EVENODD, PFT_EVENODD)` over a *flat* pile of every
+base member's loops. `Leg_F 2`'s `S1` and `S2` overlap at the ankle **and are
+wound oppositely** (signed areas +14,410 and −4,500 at frame 60), so the clip
+region had a HOLE exactly over their overlap and every intersect member lost its
+fill there — the base colour showed through a region Moho fills. Fixed by
+`_union_polygon_groups`: keep **one entry per base shape**, union them with
+even-odd *within* a shape (Moho's own rule, so a member's real holes survive) and
+nonzero *between* shapes, then intersect with `PFT_NONZERO` on the clip side. The
+writer and `check_lottie_geometry.py` both now carry per-shape groups.
+
+**2. A stroke band used as a mask unioned both of its loops.**
+`_combo_mode_union_mask_properties` added a neighbour's outline band back with
+mode `"a"` for every subpath. For a CLOSED neighbour that band is a ring, so
+adding both loops fills the whole disc and cancels the fill subtraction from step
+2 of that same mask — leaving the member's stroke completely unmasked, which drew
+the shared `S1`/`S2` boundary a union must hide as a dark ellipse across the
+ankle, on top of the intersect bands. Fixed by `_band_mask_plan`, now used by
+**both** mask consumers, which also corrects a second wrong assumption:
+`build_bezier_with_holes`' `is_hole` marks only the *second piece of a run*, not
+the inner loop (measured on that same layer: shape 0's flagged piece is the
+outer one, shape 1's the inner), so the outer loop is identified by **area** and
+emitted first, since masksProperties entries apply sequentially.
+
+Verified by replaying the emitted Lottie the way a player composites it
+(`lottie_sim.py`, session scratchpad) and diffing against the SVG writer's own
+render of the same layer at frame 60: **13.8% → 12.1% → 2.2%** of the leg region
+differing, the remainder being anti-aliasing. Fix 1 also made every one of
+Bandit's 14 intersect shapes pre-clip stably, so the masksProperties fallback
+warning disappears for that document entirely. `make check-lottie`,
+`make check-reference`, and `--validate` on all four intersect-using documents
+(`Bandit`, `Cocon`, `Spacewoman`, `Whale`) all pass.
+
+**How much of fix 2 a real player can actually see: none, on this document.**
+Three builds were A/B/C-tested in a real Lottie player — pristine, current, and
+current-but-with-fix-2-reverted. Legs and arms are wrong in pristine and right in
+both of the others; `Eye_Upper`/`Eye_Back` are right in all three. So fix 1 (plus
+the vertex-anchor fix below) is what the player shows, while **fix 2 makes no
+visible difference here** even though the mask region it produces is measurably
+closer to the SVG writer's own: for `Eye_Upper#0` at frame 60, mask area
+155,252 px² (SVG, the reference) versus **158,102 px² with fix 2** and
+164,462 px² without it. Its justification is that semantic agreement, not a
+rendered symptom — the ankle ellipse that first motivated it showed up in
+`lottie_sim.py`'s approximate mask compositing and not in the player. Kept on
+those grounds, and recorded this way so nobody re-derives it from a symptom that
+a player never showed.
+
+The `Eye_Upper`/`Eye_Back` case that motivated `build_bezier_with_holes` was
+checked directly, since fix 2 touches exactly its machinery: their **visible**
+region (own geometry ∩ accumulated mask, computed with polygon algebra rather
+than pixels) changes by **2–6 px² out of 5,000–6,400**, i.e. 0.04–0.09%, which is
+resampling noise on the boundary; their frame-to-frame vertex slip stays ≤2/64
+across all 103 frames; and the ~6,400 px² of mask that fix 2 does change never
+intersects those layers' own geometry at any frame (0.0 px², measured at frames
+25/40/60/80/100/120).
+
+#### 3. A pre-clipped shape appeared to SPIN (vertex correspondence)
+
+Reported next, on the same layers plus `Leg_F`, `Arm_F`, `Arm_B`: the intersect
+members visibly rotated during playback. Not a geometry error — every single
+keyframe was correct — but a **correspondence** error. Lottie interpolates
+vertex *k* of one keyframe straight to vertex *k* of the next, so vertex 0 has to
+stay on the same physical point of the shape. `_canonical_loop_start` anchored it
+to the loop's *topmost* vertex, which is a different physical point at every
+angle, and which flips outright when two candidates compete.
+
+Measured by taking each frame's clipped loop and finding the cyclic shift that
+best aligns it with the previous frame's (0 = perfect correspondence), over
+Bandit frames 40–59:
+
+| | worst \|shift\| of 64 |
+|---|---|
+| topmost-vertex rule | **55** (also 13, 49, 50) |
+| anchored to a physical point | **4**, and 0 or ±1 on most pairs |
+
+Fixed by `_loop_start_at_point`: each clipped loop is re-ordered to start at the
+point on it closest to a **stable physical anchor** — the start of the shape's
+lowest-numbered edge, i.e. one fixed mesh point, which moves smoothly with the
+deformation. The anchor is computed identically in the writer and in
+`check_lottie_geometry.py` (it has to be, or the checker's expectation would
+differ from the writer's by a rotation of the vertex ring), so the whole thing
+stays stateless and per-frame.
+
+What a player actually shows between keyframes, measured as the distance from a
+linear interpolation of frames *k* and *k+1* to the true shape at *k+0.5*:
+
+| | mean | worst |
+|---|---|---|
+| topmost-vertex rule | 5.26 px | 36.89 px |
+| anchored | **2.34 px** | **17.48 px** |
+| *floor* — the same measurement on the UNCLIPPED shapes, whose vertices are mesh points and so correspond perfectly | 2.77 px | 19.71 px |
+
+The anchored result is at (in fact slightly below) the floor, so what remains is
+the inherent error of linearly interpolating a fast-moving shape between
+one-frame keyframes — the same error every ordinary shape in the document
+already carries — not a correspondence defect.
+
+`_canonical_loop_start` is kept as the fallback for a caller with no anchor, and
+its docstring already predicted this failure ("two competing 'topmost' candidates
+could still flip which one wins at some frame").
+
+**Confirmed in a real player**, which is the only check that closes this: with all
+three fixes in, `Leg_F`, `Leg_F 2`, `Arm_F`, `Arm_B`, `Eye_Upper` and `Eye_Back`
+all render correctly; before them, the four leg/arm layers were wrong and the two
+eye layers were already right. The eyes were briefly suspected of a regression —
+worth recording, because the investigation is the reusable part: their emitted
+geometry differs from pristine by ≤1.3 px after aligning vertex phase, their
+visible region by 0.04–0.09%, and their frame-to-frame vertex slip is ≤2/64 over
+all 103 frames, so no mechanism in these fixes could have moved them. The report
+turned out to come from an intermediate build made mid-fix (after fix 1, before
+fixes 2 and 3).
+
+#### Also found while probing this: a sub-frame cycle evaluation hung
+
+`Channel._cycle_value` mapped a FRACTIONAL frame in `(end, end + 1)` back onto
+itself, so `eval_raw` recursed until the stack blew. Unreachable from either
+exporter (both evaluate integer frames; `--frame` is an `int`), found only by an
+ad-hoc sub-frame probe, and now guarded by clamping the mapped frame to
+`cycle.end` — the cheapest defensible answer (hold the last keyframe) rather than
+inventing a sub-frame interpolation nothing needs yet. Integer-frame values are
+bit-for-bit unchanged, and `make check-reference` confirms it.
 
 ---
 

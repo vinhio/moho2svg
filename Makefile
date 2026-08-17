@@ -146,12 +146,19 @@ out/svg/ori/png/%.png: out/svg/ori/%.svg
 # package - see moho2lottie.py's own --validate). See
 # docs/moho-to-lottie-plan.md. Same pattern-rule style as the SVG exports:
 # the output file is the target, e.g. `make out/lottie/Bandit.json`.
+#
+# LOTTIE_EXPORT_FLAGS exists so the export and the geometry check cannot drift
+# apart. Both flags below CHANGE GEOMETRY, so check_lottie_geometry.py has to
+# recompute with the same ones - it once ran with defaults against files
+# exported with these, and reported ~100 "geometry differs" lines that were
+# purely the flag mismatch. Change this variable, not the two call sites.
 VALIDATE ?=
+LOTTIE_EXPORT_FLAGS ?= --wind-dynamics --point-bones
 out/lottie/%.json: moho2lottie.py moho2svg.py Makefile $$(wildcard moho/$$*.animeproj moho/$$*.mohoproj)
 	mkdir -p out/lottie
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $@"; exit 1; fi; \
-	python3 moho2lottie.py "$$src" --out $@ --wind-dynamics --point-bones $(VALIDATE) $(image_dir_flag)
+	python3 moho2lottie.py "$$src" --out $@ $(LOTTIE_EXPORT_FLAGS) $(VALIDATE) $(image_dir_flag)
 
 # Every project's lottie export (PROJECT_STEMS from above). A name with both
 # extensions (SketchBone) exports once, through the .animeproj; a .mohoproj
@@ -161,11 +168,15 @@ lottie-all: $(addprefix out/lottie/,$(addsuffix .json,$(PROJECT_STEMS)))
 # Runs both check scripts under tools/ against the lottie output of the
 # sample projects - see their own docstrings for what each actually checks
 # and why neither needs a Lottie player or a third-party package.
+#
+# The geometry check gets the SAME $(LOTTIE_EXPORT_FLAGS) the export above
+# used, because those flags change geometry; passing them here is what makes
+# this a check of the writer rather than a diff of two different renders.
 check-lottie: out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
 	python3 tools/check_bezier_roundtrip.py
-	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json 25 60 100 127 --require-masks
-	python3 tools/check_lottie_geometry.py moho/SketchBone.animeproj out/lottie/SketchBone.json 1 77 86 120 --require-gradients
-	python3 tools/check_lottie_geometry.py moho/WhatIsBone.animeproj out/lottie/WhatIsBone.json 1 120 240 --require-masks --require-gradients
+	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json 25 60 100 127 --require-masks $(LOTTIE_EXPORT_FLAGS)
+	python3 tools/check_lottie_geometry.py moho/SketchBone.animeproj out/lottie/SketchBone.json 1 77 86 120 --require-gradients $(LOTTIE_EXPORT_FLAGS)
+	python3 tools/check_lottie_geometry.py moho/WhatIsBone.animeproj out/lottie/WhatIsBone.json 1 120 240 --require-masks --require-gradients $(LOTTIE_EXPORT_FLAGS)
 
 # Compares this exporter's own geometry against the frames MOHO ITSELF
 # exported, which is the only ground truth in the repository - see the
