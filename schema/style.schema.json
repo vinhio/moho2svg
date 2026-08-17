@@ -27,23 +27,30 @@
         "fill_style": {
           "oneOf": [
             { "$ref": "#/$defs/Gradient" },
-            { "$ref": "#/$defs/Crayon" }
+            { "$ref": "#/$defs/Crayon" },
+            { "$ref": "#/$defs/Halo" },
+            { "$ref": "#/$defs/Shaded" },
+            { "$ref": "#/$defs/SoftStyle" }
           ],
-          "description": "A styled fill effect. Confirmed present BOTH on a named style AND inline on a shape's own style object (e.g. OffsetBoneTool.animeproj's \"pant-shades\" shape carries its own fill_style of type SS_Crayon directly). Two variants observed as a fill: SS_Gradient2 (1196 occurrences across 17 files, format versions 1021 and 1038) and SS_Crayon (19 occurrences in 1 file, version 1038). moho2svg.py only reads SS_Gradient2; SS_Crayon is not decoded and falls back to the shape's flat fill_color." },
-        "fill_style_id": { "type": "integer", "description": "Not decoded - an internal reference id, observed values include 9 and 12." },
+          "description": "A styled fill effect. Present BOTH on a named style AND inline on a shape's own style object; neither is rare (1160 named-style vs 652 inline across the 46-file sample set). Five variants observed as a fill: SS_Gradient2 (1401), SS_Halo (198), SS_Shaded (96), SS_Soft (91) and SS_Crayon (26). moho2svg.py only renders SS_Gradient2; every other variant emits a per-shape stderr warning and falls back to the shape's flat fill_color." },
+        "fill_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect KIND, as an integer parallel to the effect object's own `type` string: 0 = SS_Shaded, 2 = SS_Soft, 4 = SS_Halo, 9 = SS_Gradient2, 10 = SS_Texture2, 11 = SS_Shadow, 12 = SS_Crayon. Confirmed to agree with `type` in all 2003 effect instances across the sample set, with no exceptions - so it is redundant with `type` rather than an independent reference id (an earlier revision of this schema recorded it as \"not decoded\"). The enum lists every kind seen in ANY of the three slots, not just this one." },
         "line_style": {
           "oneOf": [
             { "$ref": "#/$defs/Gradient" },
             { "$ref": "#/$defs/SoftStyle" },
+            { "$ref": "#/$defs/Shaded" },
             { "$ref": "#/$defs/ShadowStyle" }
           ],
-          "description": "A styled STROKE effect rather than a fill. Rare. Three variants observed as a line: SS_Gradient2 (116 occurrences across 16 files), SS_Soft (9 occurrences, 3 files) and SS_Shadow (3 occurrences, 3 files) - all in format version 1038. NOT read by moho2svg.py - a style carrying any line_style renders its stroke as a flat colour instead. Note the fill/line variant sets are disjoint in the sample: SS_Crayon only ever appears as a fill_style, SS_Soft/SS_Shadow only ever as a line_style, and SS_Gradient2 appears as both." },
-        "line_style_id": { "type": "integer", "description": "Not decoded. Observed values include 9, 2, 11." },
+          "description": "A styled STROKE effect rather than a fill. Four variants observed as a line: SS_Gradient2 (116 occurrences across 16 files), SS_Soft (40), SS_Shaded (18) and SS_Shadow (3). Unlike fill_style, every one of these sits on a NAMED style; none is inline on a shape. moho2svg.py reads this slot and renders SS_Gradient2 as a real paint server on the outline (`stroke` for a uniform-width outline, `fill` for a tapered one); the other three warn and draw a flat stroke. One caveat worth knowing: a gradient outline on a BRUSH stroke is also warned and drawn flat, because a brush tints image pixels rather than painting with a paint server - and all 6 drawn gradient outlines in the sample set are brush strokes." },
+        "line_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." },
         "fill_style2": {
-          "$ref": "#/$defs/Texture2",
-          "description": "A SECOND fill effect slot, layered on top of `fill_style`. Only ever observed holding SS_Texture2 (12 occurrences across 3 files, format version 1038). Not read by moho2svg.py - a shape using it exports without the texture."
+          "oneOf": [
+            { "$ref": "#/$defs/Texture2" },
+            { "$ref": "#/$defs/SoftStyle" }
+          ],
+          "description": "A SECOND fill effect slot, layered on top of `fill_style`. Two variants observed: SS_Texture2 (12 occurrences across 3 files) and SS_Soft (2, in DarkMan.mohoproj). Not rendered by moho2svg.py, which warns per shape and exports without the second effect."
         },
-        "fill_style2_id": { "type": "integer", "description": "Not decoded; observed constant 10. Same kind of internal reference id as fill_style_id/line_style_id." },
+        "fill_style2_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." },
 
         "brush_name": { "type": "string", "description": "Identifies a brush texture asset by name, possibly with an old-style numeric suffix baked in (e.g. Brush567_0_20_50.png names the file Brush567.png) - see docs/moho-project-file-format.md §8.5 for the full resolution algorithm. Empty string means no brush (plain uniform stroke)." },
         "brush_jitter": { "type": "number", "description": "Random rotation spread per dab, in RADIANS." },
@@ -106,12 +113,42 @@
 
     "SoftStyle": {
       "type": "object",
-      "description": "A soft/blurred stroke effect, used only as a line_style. Not decoded - not read by moho2svg.py.",
+      "description": "The \"Soft Edge\" effect (manual ch. 13.02): blurs the edge of whatever it styles. Usable in all three slots, and most often a FILL - 91 fill_style vs 40 line_style vs 2 fill_style2 occurrences (an earlier revision of this schema described it as line-only, before the sample set grew). Not rendered by moho2svg.py, which warns per shape and draws the plain colour underneath.",
       "required": ["type"],
       "properties": {
         "type": { "const": "SS_Soft" },
-        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "threshold": { "type": "boolean", "description": "Observed as a plain boolean here (not wrapped in a channel), unlike LayerShadow/LayerShading/PerspectiveShadow's own threshold field which IS a BoolChannel - confirmed by direct inspection (TargetBone.animeproj)." }
+        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - how soft the edge is." },
+        "threshold": { "type": "boolean", "description": "Observed as a plain boolean here (not wrapped in a channel), unlike LayerShadow/LayerShading/PerspectiveShadow's own threshold field which IS a BoolChannel - confirmed by direct inspection (TargetBone.animeproj). Manual: applied after the blur, to smooth corners." }
+      },
+      "additionalProperties": true
+    },
+
+    "Halo": {
+      "type": "object",
+      "description": "The \"Halo\" fill effect (manual ch. 13.02): a coloured, blurred rim inside the edge of the fill. Observed only as a fill_style - 198 occurrences across 10 files, which makes it the most-used effect in the sample set after SS_Gradient2. Not rendered by moho2svg.py, which warns per shape and draws the flat fill_color instead. Field names below are matched to the manual's own dialog labels.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Halo" },
+        "halo_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Inset Radius\" - the radius of the inner area. In Moho space units (observed 0.002778)." },
+        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - the softness around the halo." },
+        "halo_color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Halo Color\"." },
+        "halo_only": { "type": "boolean", "description": "Manual: \"Halo Only\" - draw the halo without the fill underneath it." }
+      },
+      "additionalProperties": true
+    },
+
+    "Shaded": {
+      "type": "object",
+      "description": "The \"Shaded\" fill effect (manual ch. 13.02): an inner drop shadow cast within the shape by a directional light. 96 fill_style and 18 line_style occurrences across 10 files. Distinct from ShadowStyle (SS_Shadow), which is a different effect with a different field set, and from the LAYER-level shadow in layer.schema.json. Not rendered by moho2svg.py, which warns per shape. Field names below are matched to the manual's own dialog labels.",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "SS_Shaded" },
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Light Angle\", in radians, zero at the BOTTOM of the dial (observed 2.356194 = 135 degrees)." },
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Offset\" - how far the shadow is offset from the filled area, in Moho space units." },
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur\" - the softness of the shadow." },
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Shadow Color\" (observed black at alpha 0.07451 - these are subtle by default)." },
+        "shadow_only": { "type": "boolean", "description": "Manual: \"Shadow Only\" - draw the shadow without the fill underneath it." },
+        "threshold": { "type": "boolean", "description": "Manual: applied after the blur, to smooth corners. A plain boolean, like SoftStyle's own." }
       },
       "additionalProperties": true
     },

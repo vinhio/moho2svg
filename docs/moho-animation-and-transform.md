@@ -164,7 +164,15 @@ are **not decoded** from file evidence - see [§ 3.2b](#32b-background-from-moho
 for what Moho's own API says these fields are (`stagger`/`interval`), still
 not confirmed against any sample document that varies them.
 
-### 3.2 `t` — the interpolation type
+### 3.2 `t` — NOT the interpolation type
+
+> **Correction (46-file pass).** This section is kept for its counts, but its
+> premise was wrong. `t` is **not** the interpolation type — `im` is, and it is
+> now fully decoded in [§ 3.6](#36-im--the-interpolation-method-decoded).
+> `t` is most likely the keyframe's **label colour** (`tags` in Moho's own
+> scripting header, "used for keyframe color"). Looking for the easing enum in
+> this field is why `moho2svg.py` carried an *inferred* easing curve for so
+> long: `t` is 0 almost everywhere, so the enum looked undecodable.
 
 **Confirmed** distribution over 604,139 entries:
 
@@ -325,8 +333,16 @@ Those are exactly the values you get from a 4-bit field using bits 1, 2, 4 and
 it is the untouched default and carries no information. `(-1.0, -1.0)` appears
 on channels the animator has actually worked on.
 
-Everything else appears only together with the `im` bit-4 flag, on a channel's
-final keyframe:
+Everything else appears only together with `im == 5`, on a channel's final
+keyframe:
+
+> **Correction (46-file pass).** This used to say "the `im` bit-4 flag", and
+> `Channel._parse_cycles` tested `im & 4`, i.e. it accepted `im` 4, 5, 6 and 7
+> alike. `im` is an **enum** of interpolation methods, not a bitfield — see
+> [§ 3.6](#36-im--the-interpolation-method) — and only `5` is Cycle. Over the
+> 46-file corpus the bitmask produced **4,539** cycle specs where only
+> **3,040** are real: 1,495 came from `im = 6` with `v1 = 0.0` (a zero-length
+> cycle) and 4 from `im = 4` with `v1 = 0.5` (a half-frame one).
 
 | `(v1, v2)` | Count |
 |---|---|
@@ -457,7 +473,99 @@ This is the timing curve that makes Moho's motion ease in and out. Only a
 handful of keyframes in these 19 documents use it explicitly; everything else
 relies on the default (`t = 0`) curve, whose exact shape is **not decoded**.
 
-### 3.6 What `moho2svg.py` does instead
+### 3.6 `im` — the interpolation method, decoded
+
+`im` is the interpolation method for the segment **leaving** keyframe `i`
+(confirmed directly: a three-keyframe channel with `im = 0` on its first
+keyframe and `im = 1` on its second renders a perfectly linear first segment
+and a curved second one). It is an **enum**, not a bitfield.
+
+Two fully independent routes agree on all twelve values.
+
+**Route 1 — measurement.** One layer was given a two-keyframe translation,
+`im` was set to each value in turn, and Moho's own CLI rendered the whole
+frame range so the layer's per-frame centroid traced the curve directly.
+
+**Route 2 — Moho's own scripting header.**
+`Contents/Resources/Support/Pro/Extra Files/Lua Interfaces/pkg_moho.lua_pkg`
+declares twelve `INTERP_*` constants. Read in declaration order they are
+exactly the twelve values the corpus contains:
+
+| `im` | Constant | Measured curve | Corpus entries |
+|---|---|---|---|
+| 0 | `INTERP_LINEAR` | exactly linear | 54,456 |
+| 1 | `INTERP_SMOOTH` | Moho's default — see below | 1,656,205 |
+| 2 | `INTERP_EASE` | a stronger S-curve than Smooth | 2,582 |
+| 3 | `INTERP_STEP` | exactly step: holds, then jumps | 151,483 |
+| 4 | `INTERP_NOISY` | non-monotone, overshoots ~7% | 7 |
+| 5 | `INTERP_CYCLE` | the cycle marker ([§ 3.4](#34-v1--v2-and-the-cycle-marker)) | 3,136 |
+| 6 | `INTERP_POSE` | exactly linear | 1,495 |
+| 7 | `INTERP_EASE_IN` | S-curve weighted to the start | 27 |
+| 8 | `INTERP_EASE_OUT` | S-curve weighted to the end | 34 |
+| 9 | `INTERP_BEZIER` | needs its own `b` handles | 238 |
+| 10 | `INTERP_BOUNCE` | oscillates about the path | 798 |
+| 11 | `INTERP_ELASTIC` | overshoots ~27%, then settles | 2,916 |
+
+Three of the header's own comments cross-check things this repository had
+already derived, or had wrong:
+
+- *"INTERP_CYCLE — val1 = relative starting frame … val2 = absolute starting
+  frame, use -1 to ignore this field"* is exactly what
+  [§ 3.4](#34-v1--v2-and-the-cycle-marker) derived from rendered output alone.
+- *"INTERP_NOISY — val1 = noise amplitude, val2 = noise scale. good values:
+  0.1, 0.5"* explains the `(0.1, 0.5)` pair sitting on 601,344 entries: it is
+  the **noise default**, written whatever the mode. It never meant anything.
+- *"INTERP_POSE — val1 = index to the pose"* explains `im = 6`'s own
+  `v1 = 0.0`, and is why those 1,495 entries are **pose references**, not the
+  cycles the old `im & 4` test took them for.
+
+#### What "Smooth" actually computes
+
+`INTERP_SMOOTH` is a cubic Hermite spline with Catmull-Rom tangents — the
+centred difference **in time** across a keyframe's two neighbours — subject to
+two rules, both measured: the tangent is **zero at the channel's first and
+last keyframes**, and **zero wherever either adjacent segment is flat** (which
+is what keeps a held value held instead of bulging out of it). There is no
+monotone clamp otherwise; a sign change between adjacent slopes does *not*
+flatten the tangent, and Moho lets the curve overshoot there.
+
+Mean |error| against Moho's own renders, in Moho units (1 unit = 360 px at
+720p):
+
+| keyframes / values | plain Catmull-Rom | this model | + a 3× clamp |
+|---|---|---|---|
+| 1, 9, 25 → −0.6, −0.3, +0.6 | 0.000013 | 0.000013 | 0.000013 |
+| 1, 13, 25 → −0.6, +0.6, −0.6 | 0.000010 | 0.000010 | 0.000010 |
+| 1, 9, 25 → −0.6, −0.6, +0.6 | 0.053008 | **0.000008** | 0.000008 |
+| 1, 17, 25 → −0.6, +0.6, +0.6 | 0.052992 | **0.000008** | 0.000008 |
+| 1, 9, 25 → −0.6, −0.55, +0.6 | 0.006567 | 0.006567 | 0.026559 |
+| 1, 7, 15, 25 → −0.6, .1, −.2, +0.6 | 0.004265 | 0.004265 | 0.012502 |
+| **total** | 0.116855 | **0.010871** | 0.030863 |
+
+The last two rows are the ones this model does *not* reproduce exactly (~2 px
+at 720p); whatever second-order rule Moho applies to a very lopsided pair of
+slopes is still undecoded, and every clamp variant tried made things worse
+elsewhere.
+
+**A rejected variant, recorded because it looked better.** Additionally
+flattening the tangent where adjacent slopes change sign scores *better* on
+`SketchBone.mohoproj`'s reference frames (summed mean error 17.00 px vs 19.85
+px, against the old inferred curve's 23.94 px) — but it is not what Moho
+computes: solving the Hermite segment out of the fourth measured layout gives
+a tangent of 0.0277/frame where that variant would use 0. A whole-rig centroid
+comparison runs through bone skinning and everything else, so it can be
+improved by a curve that happens to cancel an unrelated error. A direct
+measurement of the curve cannot.
+
+**Effect on the tracked reference frames**, replacing the old inferred cubic:
+
+| document | change |
+|---|---|
+| `Bandit.mohoproj` (103 frames) | Muzzle max dx **4.80 → 0.79**, Belly max dx **3.65 → 0.91** |
+| `SketchBone.mohoproj` (12) | mean dx/dy fell for 5 of 7 groups |
+| `BoneDynamics.animeproj` (29) | mean dy fell for all 4 groups; several maxima rose, moving that document's fence (see `tools/check_reference_frames.py`) |
+
+### 3.7 What `moho2svg.py` does instead
 
 **Smart Bone poses are applied as an OFFSET, not a replacement** (added in
 `Channel.eval` / `_pose_offset`). A pose contributes
@@ -474,13 +582,17 @@ Frame 0 is unchanged (dials sit at rest, so the offset is zero), so the
 exported SVGs stay byte-identical to the pre-change output. Only numeric and
 `{x,y,z}` vector channels are offset; colour/bool/string poses still replace.
 
-`Channel.eval_raw` ignores `interp` completely and interpolates with a
-**monotone cubic** between the two bracketing keyframes, clamped at both ends.
-(An earlier revision interpolated **linearly**; that is no longer true — see
-`Channel._segment`.) Moho's own easing curve is not recoverable from the file
-(`interp.t` is 0 on 602,784 of 604,139 entries with an undecoded enum), so the
-shape was inferred by scoring rendered output against Moho's own arms-only
-render of `SketchBone.animeproj` (`moho/SketchBone/hand/`, 120 frames):
+`Channel.eval_raw` now **reads `interp[].im`** and dispatches on it
+([§ 3.6](#36-im--the-interpolation-method-decoded)): Linear, Smooth, Step and
+Pose are each reproduced from a measured curve, and Cycle is handled by
+`_parse_cycles`. Together those cover 99.4% of the corpus' keyframes.
+
+The seven remaining methods (Ease, Noisy, Ease In, Ease Out, Bezier, Bounce,
+Elastic — 0.4% of entries) still fall back to the **monotone cubic** described
+below. That curve was chosen before `im` was decoded, when the easing enum was
+believed to live in `interp.t` and therefore to be unrecoverable; the shape was
+inferred by scoring rendered output against Moho's own arms-only render of
+`SketchBone.animeproj` (`moho/SketchBone/hand/`, 120 frames):
 
 | interpolation | all frames IoU | frames 44–54 IoU |
 |---|---|---|
@@ -828,12 +940,87 @@ drawn rather than nothing.
 
 `doc.animated_values` holds five channels: `camera_track` (`Vec3`),
 `camera_pan_tilt` (`Vec2`), `camera_zoom` (`Val`), `camera_roll` (`Val`) and
-`timeline_markers` (`String`). All have exactly one keyframe at frame 0 in all
-19 documents, so no sample animates the camera.
+`timeline_markers` (`String`).
 
-`moho2svg.py` reads none of them and renders with an implicit fixed camera.
-`Rabbit.animeproj` has a genuinely non-default `camera_track` and
-`camera_zoom`, so framing in that document is not guaranteed to match Moho's.
+> **Correction (46-file pass).** An earlier revision of this section said
+> "All have exactly one keyframe at frame 0 in all 19 documents, so no sample
+> animates the camera", and that `moho2svg.py` "reads none of them". Both
+> statements were true of the 19-file corpus and are **false** now. Across the
+> 46 files, **12 animate `camera_track` and 10 animate `camera_zoom`**.
+> `camera_roll` and `camera_pan_tilt` are still never non-default anywhere.
+
+### 9.1 The projection
+
+The camera is a real perspective camera. For a point on the `z = 0` plane —
+which is where 4,556 of the corpus' 4,590 layer-translation keyframes sit — it
+reduces to a plain 2D scale-and-translate:
+
+```
+half_fov = (pi / 6) / camera_zoom          # 30 degrees at zoom 1
+scale    = (height_px / 2) / (camera_z * tan(half_fov))
+pixel_x  = (moho_x - camera_x) * scale + width_px / 2
+pixel_y  = height_px / 2 - (moho_y - camera_y) * scale
+```
+
+Both halves of that were **measured**, not assumed. One small layer of
+`Snow-girl-cut51.mohoproj` was rendered by Moho's own CLI at 7 combinations of
+`(camera_zoom, camera_z)`, each at three pan values, and `scale` was read off
+the centroid displacement between pan values:
+
+| `camera_zoom` | `camera_z` | measured scale | model | error |
+|---|---|---|---|---|
+| 1 | 3.732051 | 167.049 | 167.077 | +0.017% |
+| 2 | 3.732051 | 360.000 | 360.000 | 0.000% |
+| 3 | 3.732051 | 547.069 | 547.062 | −0.001% |
+| 4 | 3.732051 | 732.705 | 732.699 | −0.001% |
+| 6 | 3.732051 | 1102.557 | 1102.562 | +0.000% |
+| 2 | 1.7321 | 775.672 | 775.670 | −0.000% |
+| 2 | 5.0 | 268.720 | 268.708 | −0.005% |
+
+- **Pan is a pure translation.** The scale implied by a 0.25-unit pan and by a
+  0.5-unit pan agreed to five significant figures at every setting, which
+  rules out a look-at camera that would rotate as it pans.
+- **Half-FOV is exactly `30 / zoom` degrees.** Solving the equation for
+  `half_fov` at each measured scale gives 30.000, 15.000, 10.000, 7.500 and
+  5.000 degrees at zoom 1, 2, 3, 4 and 6.
+
+### 9.2 Why the default camera looks like no camera at all
+
+Moho's default is `camera_track = {0, 0, 2 + sqrt(3)}` with `camera_zoom = 2`,
+and `(2 + sqrt(3)) · tan(15°) = 1` **exactly**. So the default `scale` is
+exactly `height/2` and the mapping collapses to the plain one in
+[§ 4](#4-coordinate-system) of `moho-project-file-format.md`. That is why
+ignoring the camera went unnoticed for so long — and why the exporters now
+snap a default camera back to the exact legacy arithmetic, leaving output for
+the ~34 documents that never touch the camera byte-for-byte unchanged.
+
+### 9.3 What it cost to ignore
+
+On `Snow-girl-cut51.mohoproj`, whose camera zooms from 2 to 13.5 by frame 100,
+comparing this repository's own render against Moho's PNG of the same frame:
+
+| | mean abs difference | pixels differing by >20 |
+|---|---|---|
+| frame 1 (camera still at default) | 20.20 | 383,444 / 921,600 |
+| frame 100, camera ignored | 58.88 | **837,653 / 921,600 (91%)** |
+| frame 100, camera applied | 16.65 | 357,991 / 921,600 |
+
+The last row is *better* than the default-camera control frame, so what is
+left is the pre-existing brush/shape-effect gap, not framing.
+
+### 9.4 `camera_immune`, and what is still not modelled
+
+A layer with `camera_immune` (manual ch. 12.02, "Immune to camera movements")
+projects through the **default** camera instead, so it stays put on screen
+while the camera moves — meant for backgrounds, titles and logos. The flag is
+inherited by descendants. `--local` also bypasses the camera, since it means
+"raw mesh coordinates at canvas scale".
+
+Still not modelled: per-layer **parallax** (a layer translated in z should
+divide by `camera_z − layer_z`, not `camera_z`), `camera_roll` and
+`camera_pan_tilt`. The latter two are never non-default in the corpus; a
+non-zero layer z occurs in 6 documents, 2 of which (`Gathered-01Intro2`,
+`Snow-girl-cut2`) also animate the camera.
 
 ---
 

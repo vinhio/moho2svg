@@ -352,8 +352,36 @@ things are exact and confirmed; others are approximations. Before relying on
 an unusual result, check the module docstring's KNOWN GAPS section, which
 lists (with the reasoning behind each):
 
+- The **document camera** is applied (position and zoom), so `--frame N` on a
+  document whose camera moves now frames the shot the way Moho does. What is
+  still missing is per-layer **parallax** — a layer pushed away from the
+  camera in z is projected as if it sat at z = 0 — plus `camera_roll` and
+  `camera_pan_tilt`, neither of which any sample document uses. A layer marked
+  "Immune to camera movements" correctly stays put.
 - Boolean shape combination mode `combo_mode == 2` is not reverse-engineered.
 - Gradient centre/radius placement is approximate, not pixel-matched.
+- **Shape effects other than gradients are not drawn.** A shape can carry a
+  halo, shaded, soft-edge, texture, drop-shadow or crayon effect over its fill
+  or its outline; only the gradient is rendered. Each of the others prints a
+  per-shape warning like `! shape X: fill effect SS_Halo not supported` and
+  then draws the plain colour underneath. This is the largest remaining
+  appearance gap: `SS_Halo` alone covers 198 shapes across 10 of the sample
+  documents. Note that comparing against a reference SVG will *not* reveal
+  it — Moho's own SVG export drops these blurred effects too (its export of a
+  document with 108 halo shapes contains no filter or blur elements at all),
+  so only a raster render shows them.
+- A **gradient outline** is drawn, but not on a brush stroke (a brush tints
+  image pixels rather than painting with a paint server, so there is nothing
+  for a gradient to attach to); that case warns and draws a flat stroke.
+- **Layer blend modes are applied** as CSS `mix-blend-mode`, with
+  `isolation:isolate` on the containing group so a blending layer stops at its
+  own container, the way Moho composites. Multiply/Screen/Overlay are
+  confirmed against a real Moho render; the ten rarer modes are mapped from
+  the Moho application's own menu order and are unverified, because no sample
+  document uses any of them. **This needs a viewer that supports
+  `mix-blend-mode`** — every current browser does, as does `rsvg-convert`, but
+  an older or minimal SVG renderer may ignore it and show the pre-blend
+  artwork.
 - The flexible bone-binding weight falloff is a best-of-four heuristic, not
   a decoded formula, and disagrees between the two documents that have more
   than one candidate falloff to score against. A mesh point can instead be

@@ -43,8 +43,12 @@ layer keeps an identity transform. See
 [`docs/moho-to-lottie-plan.md`](docs/moho-to-lottie-plan.md) for what is
 implemented (all 8 planned tasks plus the post-plan additions — `combo_mode`
 boolean combination, missing keyframe easing, `pyclipper`-based combo_mode==3
-pre-clipping — verified against all 19 sample documents) and what is
-deliberately out of scope: brush textures (a counted warning); layers with
+pre-clipping, and layer blend modes as Lottie `bm` — verified against all 19
+sample documents) and what is
+deliberately out of scope: shape effects other than gradients, and a
+*container's* blend mode (both counted warnings — a container becomes no
+Lottie layer of its own in this writer's flat model, so there is nothing left
+to carry the blend); brush textures (a counted warning); layers with
 particle/audio/note/3D-Poser types, and Smart Warp (a per-layer stderr
 warning, shared code between both exporters via `walk_render_tree` —
 `Exporter._warned_unsupported_layers`/`_warned_smart_warp_layers` — not
@@ -186,24 +190,17 @@ replace the current name/suffix-guessing asset lookup with an authoritative
 one, if that heuristic ever proves insufficient - see
 `docs/moho-project-file-format.md` § 8.1).
 
-**`PatchLayer` is now rendered** (`Document._resolve_patch_layers`) - it
+**`PatchLayer` is rendered, and its own transform is a CLIP REGION.** It
 carries no mesh of its own, only a `target_layer_uuid` naming another layer
-whose mesh it reuses, redrawn at the patch's own position in the draw order
-(patches a seam a later-drawn layer would otherwise leave, e.g. a hand's
-"ayasi-Patch" reusing the palm mesh "ayasi" between two finger layers).
-**Confirmed the patch's OWN transform/parent_bone/flexi_bone_subset/origin
-must NOT be used** - every PatchLayer found across this repo's reference
-documents carries a bizarre, unrelated-looking own transform (e.g. a 0.147x
-non-uniform Y squash + rotation on "ayasi-Patch"; ~0.49x uniform scale on
-AddBone's leg patches) while its target has the identity transform;
-rendering with the patch's own transform reproduced exactly that: a
-squashed sliver floating away from where the target actually renders
-(confirmed wrong by diffing rendered output against the target's own
-position). The target's transform is used instead, so a resolved patch
-renders as an exact duplicate of its target at a different point in the
-draw order - a heuristic, not confirmed pixel-for-pixel against a real Moho
-export of a `PatchLayer`-using document - see
-`docs/moho-project-file-format.md` § 11.
+whose mesh it reuses, redrawn at the patch's own point in the draw order.
+Its own transform/parent_bone are **wrong for that artwork** (using them
+renders a squashed sliver, confirmed) and **right for its clip**: the manual
+(ch. 11.15) describes a patch as "a new CIRCLE ... position and scale [it] so
+that the lines are covered", and measurement against Moho's own renders pins
+the disc down exactly - radius 0.1 Moho units times the patch's own scale,
+centred on its own translation, and following its own bone binding. See
+`Exporter._patch_clip_path` for the three experiments and
+`docs/moho-project-file-format.md` § 12.1.
 
 ## Commands
 
@@ -272,7 +269,78 @@ scale in `Skeleton.world_matrices`) are intentionally preserved because they
 match real Moho output and are flagged rather than "corrected". See the
 docstring's KNOWN GAPS section for what is genuinely unresolved (combo_mode 2,
 gradient placement precision, bone-weight-falloff shape, brush stroke
-approximations, and the `PatchLayer` heuristic below).
+approximations, unrendered shape effects, and the `PatchLayer` heuristic
+below).
+
+**The document camera** (`animated_values.camera_track`/`camera_zoom`) is
+applied, and has its own docstring section (CAMERA) plus
+`moho-animation-and-transform.md` § 9. The half vertical FOV is exactly
+`30 / camera_zoom` degrees — measured against Moho's own renders, not
+guessed. Moho's default camera (`z = 2 + sqrt(3)`, `zoom = 2`) satisfies
+`(2 + sqrt(3)) · tan(15°) = 1` exactly, so it *is* the plain `height/2`
+mapping this file used before the camera existed; `CameraView.at` snaps a
+default camera back to that exact arithmetic so the ~34 documents that never
+touch the camera keep byte-identical output. 12 of the 46 sample documents
+animate it; ignoring it put 91% of the canvas wrong on one checked frame.
+A `camera_immune` layer (and its descendants) projects through the default
+camera instead. Not modelled: per-layer parallax, `camera_roll`,
+`camera_pan_tilt`.
+
+**`layer_effects.visibility`** — the animated show/hide from the General tab
+— is also applied now (`Layer.visible_at`). The manual is explicit that it is
+independent of the static `visible` flag; a layer draws only when both are
+true. 190 layers across 14 sample documents use it.
+
+**`layer_effects.alpha`** — the layer's own opacity, from that same
+Compositing Effects group — is applied now too (`Layer.alpha_at`), on LEAF
+layers. Measured as a plain linear blend (a layer at 0.5 lands on the exact
+midpoint of its 1.0/0.0 renders, mean error 0.13/255), so it maps straight
+onto SVG `opacity` and Lottie's transform `o`. 139 leaf layers across 15
+documents set it, 11 of them animated. A **container's** own alpha is
+deliberately *not* applied: three models were measured against Moho and the
+best of them still scored worse than ignoring it, so it warns instead (5
+layers corpus-wide) — see `Layer.alpha_at` for the table. Two knock-on
+rules, both measured: a layer faded to nothing contributes nothing to a
+mask, and neither does one hidden by either visibility mechanism.
+
+**Masking is a pair of ENUMs, and the mask is built INCREMENTALLY.**
+`group_mask` on the container is 0 = off, 1 = "Reveal all" (mask starts
+full), 2 = "Hide all" (starts empty); each child's `masking` is one of eight
+modes (clip / don't mask / add / subtract / add-invisibly /
+subtract-invisibly / clear-then-add / clear-then-add-invisibly). Decoded
+twice over and in agreement — Moho's own scripting header's `MM_*`
+declaration order, and rendering every value with Moho itself. Three rules
+that are easy to get wrong, all measured: every non-zero mode draws
+*unclipped*; `masking` is completely *inert* when `group_mask == 0` (even
+the invisible modes do not hide the layer then); and a layer that does not
+render contributes nothing to the mask. `Exporter._mask_plan` returns one
+mask state **per child**, not one per container — ten containers in the
+corpus have a masked child sitting below a later "clear", and collapsing
+those would clip it with a mask built out of a layer drawn after it. See the
+module docstring's MASKING section and
+`moho-project-file-format.md` § 10 for the measurement tables.
+
+**Shape effects and layer blend modes** have their own two docstring sections
+(SHAPE EFFECTS, LAYER BLEND MODES). Two things there are worth knowing before
+touching either:
+
+- A shape's effect can sit in any of three slots (`fill_style`, `fill_style2`,
+  `line_style`) and be any of seven kinds; **only `SS_Gradient2` is
+  rendered**, and everything else warns per shape. `SS_Halo` alone covers 198
+  drawn shapes across 10 documents, which makes it the biggest remaining
+  appearance gap. Each slot's parallel `<slot>_id` integer is now decoded — it
+  is just the effect kind, agreeing with the `type` string in all 2,003
+  instances.
+- **A reference SVG cannot validate any of this.** Moho's own SVG export drops
+  the blurred/composited effects (confirmed: its export of a document with 108
+  halo shapes and 13 blend-mode layers has zero `filter`/`feGaussianBlur` and
+  zero `mix-blend-mode`, while its PNG render of the same frame shows both —
+  note this is specific to those effects, since that same exporter does emit
+  gradients for other documents). Verify that class of change against a **raster**
+  render instead — `/Applications/Moho.app/Contents/MacOS/Moho -r FILE -f PNG
+  -start N -end N -o OUT.png` renders headlessly and is how the blend-mode
+  mapping here was confirmed. (`-f SVG` works headlessly too, and is the way
+  to produce new `moho/track/` reference frames for geometry work.)
 
 ### Pipeline, in order
 
@@ -314,7 +382,7 @@ separate transform traversals, and a field-to-stage cross-reference table, see
    child/visibility as it goes).
 9. **CLI** (`main`) is argument parsing and file I/O only.
 
-### Three subsystems worth extra care before touching
+### Subsystems worth extra care before touching
 
 These have each caused a real regression once already — read the cited
 docstring before changing anything nearby, and re-run `make check-reference`
@@ -328,12 +396,35 @@ afterward regardless of what you touched:
   See that method's own "NOTE ON SCALE" and "NOTE ON FLIP PROPAGATION" for
   the full evidence trail, including the exact regression this caused and
   the verification commands to rerun.
+- **`interp[].im` is the interpolation method**, and it is an ENUM, not a
+  bitfield — decoded twice over, by rendering each value with Moho's own CLI
+  and by Moho's own scripting header (`pkg_moho.lua_pkg`), which agree on all
+  twelve. `Channel._segment` dispatches on it: Linear, Smooth, Step and Pose
+  each have an exactly-measured curve (99.4% of all keyframes); the other
+  seven fall back to the older inferred cubic. **`Channel._smooth` is the one
+  to read before touching easing** — it carries the measured tables and, just
+  as importantly, a rejected variant that scores better on one rig while
+  being provably not what Moho computes.
 - **`Channel._parse_cycles` / `_cycle_value`** — a channel's "cycle" marker
-  (`interp[i].im & 4`) makes it *replay* an earlier stretch after its last
+  (`interp[i].im == 5`) makes it *replay* an earlier stretch after its last
   keyframe, but the replay **accumulates** the per-cycle delta rather than
   repeating the same values (a walk cycle walks somewhere, it doesn't walk
-  in place). See `moho-animation-and-transform.md` § 3.4 for how this was
-  decoded and validated against a real Moho render.
+  in place). The test used to be `im & 4`, which also swept up `im = 6`
+  (`INTERP_POSE`) and produced 1,495 zero-length phantom cycles across the
+  corpus; see `moho-animation-and-transform.md` § 3.4 and § 3.6.
+- **`Skeleton._control_offset`** (control bones — one bone driving another's
+  angle/position/scale, `*_control_parent`/`_scale`/`_delay`) applies the
+  controller's **departure from its own rest pose**, not its absolute value:
+  `own_keyed(t) + control_scale × (ctrl_local(t − delay) − ctrl_local(0))`.
+  Measured against Moho's own renders on `Clay_Crocodile.mohoproj` (8 frames,
+  ratio 0.95–1.07 against departure, 1.3–4.4 against the raw value, so the
+  rest subtraction is not a detail); the world-angle variant is ruled out by
+  the same data. The delay's **sign** (earlier, not later) is measured
+  separately on `Whale.mohoproj`. Chains resolve recursively with cycle
+  protection. **This currently changes no exported pixel** on the corpus —
+  every document using it drives ImageLayers or `strength = 0` bones — so
+  `make check-reference` cannot catch a regression here; see
+  `moho-rigging-and-deformation.md` § 3.3 for the reproduction commands.
 - **`Skeleton.dynamic_angles`** (bone dynamics / spring physics, behind
   `--bone-dynamics`, off by default) drives the spring from the *parent's*
   world rotation, not the bone's own keyed angle — a bone with a constant

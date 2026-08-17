@@ -150,10 +150,45 @@ LOTTIE_VERSION = "5.7.0"
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "lottie", "lottie.schema.json")
 
+# Moho's `blend_mode` -> Lottie's own layer `bm` enum (lottie/lottie.schema.json
+# "Blend Mode": 0 Normal, 1 Multiply, 2 Screen, 3 Overlay, 4 Darken, 5 Lighten,
+# 6 ColorDodge, 7 ColorBurn, 8 HardLight, 9 SoftLight, 10 Difference,
+# 11 Exclusion, 12 Hue, 13 Saturation, 14 Color, 15 Luminosity, 16 Add,
+# 17 HardMix).  The two enums agree by luck only for 0/1/2/3 (Normal, Multiply,
+# Screen, Overlay) and diverge from 4 on, so every entry has to be mapped by
+# NAME rather than passed through.  Moho 0 (Normal) is absent below because
+# a Normal layer must emit no `bm` at all.  See moho2svg.py's own module
+# docstring, LAYER BLEND MODES, for where the Moho side of this comes from and
+# which entries are confirmed.
+BLEND_MODE_LOTTIE = {
+    1: 1,     # Multiply
+    2: 2,     # Screen
+    3: 3,     # Overlay
+    4: 16,    # Add
+    5: 10,    # Difference
+    6: 12,    # Hue
+    7: 13,    # Saturation
+    8: 14,    # Color
+    9: 15,    # Luminosity
+    10: 9,    # Soft Light
+    11: 6,    # Color Dodge
+    12: 7,    # Color Burn
+    13: 16,   # PSD Linear Dodge (Add)
+}
+
 # Printed per warning key at the end of an export - see the module
 # docstring's "deliberately out of scope" paragraph for the reasoning behind
 # each one.
 WARNING_EXPLANATIONS = {
+    "blend_mode_container": "container layer(s) (a GroupLayer/BoneLayer/"
+                            "SwitchLayer) carrying a non-Normal blend_mode, "
+                            "dropped: this exporter flattens the whole layer "
+                            "tree into one flat Lottie layer list, so there "
+                            "is no element left that stands for the container "
+                            "itself to carry the blend (see _blend_mode_bm)",
+    "blend_mode_unknown": "layer(s) with a blend_mode this exporter has no "
+                          "Lottie equivalent for, composited Normal instead "
+                          "(see BLEND_MODE_LOTTIE)",
     "combo_mode_unknown": "shape(s) with an unrecognised combo_mode (not "
                           "0/1/3) drawn as a plain replace shape instead - "
                           "matches moho2svg.py's own ShapeGroupRenderer."
@@ -578,6 +613,12 @@ class LottieExporter:
                 self.warnings["physics"] += 1
             if layer.timing_offset:
                 self.warnings["timing_offset"] += 1
+            # A blend mode on a CONTAINER has nowhere to land in a flat layer
+            # list - see _blend_mode_bm.  Counted here, with the other
+            # whole-document scans, because _build_layers only ever sees the
+            # drawable layers a container's blend would have applied to.
+            if layer.blend_mode and layer.children:
+                self.warnings["blend_mode_container"] += 1
 
     def _build_layers(self, frames, include_hidden: bool = False) -> list:
         """One Lottie shape layer per Moho mesh layer, in Lottie draw order.
@@ -679,6 +720,7 @@ class LottieExporter:
         accumulators: dict = {}               # lid -> list of per-shape accumulators (mesh only)
         image_accumulators: dict = {}         # lid -> one image accumulator dict (image only)
         mask_data: dict = {}                  # lid -> {"has_mask": bool|None, "per_frame": [...]}
+        alpha_data: dict = {}                 # lid -> one layer_effects.alpha value per active frame
         active_frames: dict = {}              # lid -> frame VALUES it was a "mesh"/"image" event on
         union_band_widths: dict = {}          # lid -> {id(shape): stroke_width_px}
         for frame in frames:
@@ -704,6 +746,7 @@ class LottieExporter:
                         union_band_widths[lid] = self._prepare_union_band_widths(
                             item.layer.mesh, frame)
                     active_frames[lid].append(frame)
+                    alpha_data.setdefault(lid, []).append(item.alpha)
                     self._accumulate_frame(item, frame, accumulators[lid], first_time,
                                            union_band_widths[lid])
                 else:                              # "image" - one iteration PER SEGMENT
@@ -714,6 +757,7 @@ class LottieExporter:
                             image_accumulators[lid] = self._new_image_accumulator(item.layer, seg)
                             active_frames[lid] = []
                         active_frames[lid].append(frame)
+                        alpha_data.setdefault(lid, []).append(item.alpha)
                         self._accumulate_image_frame(item, frame, image_accumulators[lid], first_time)
                         mask_data.setdefault(lid, {"has_mask": False, "per_frame": []})
                     continue          # ImageLayer masking is not implemented - see KNOWN GAPS
@@ -782,6 +826,7 @@ class LottieExporter:
                 continue
             layer_frames = active_frames[lid]
             info = mask_data[lid]
+            first_index = len(collected)
             for start, end in self._windows(layer_frames):
                 window_frames = layer_frames[start:end]
                 # A single-frame preview export (`--frame N`, len(frames) ==
@@ -796,6 +841,9 @@ class LottieExporter:
                 else:
                     ip, op = window_frames[0], window_frames[-1] + 1
 
+                window_start = len(collected)
+                window_alpha = alpha_data.get(lid, [])[start:end]
+
                 if layer.mesh is None:            # ImageLayer - see IMAGE LAYERS
                     window_acc = self._slice_image_accumulator(
                         image_accumulators[lid], start, end)
@@ -803,6 +851,7 @@ class LottieExporter:
                         window_acc, window_frames, ip, op)
                     if image_layer is not None:
                         collected.append(image_layer)
+                    self._stamp_alpha(collected, window_start, window_alpha, window_frames)
                     continue
 
                 window_accs = self._slice_accumulators(accumulators[lid], start, end)
@@ -879,6 +928,15 @@ class LottieExporter:
                             shapes, group_entries, cross_mask, ip, op, name))
                         continue
                     collected.append(self._shape_layer(name, shapes, ip, op, mask_properties))
+                self._stamp_alpha(collected, window_start, window_alpha, window_frames)
+
+            # One Moho layer can become several Lottie layers (a combo_mode
+            # split, or one window per SwitchLayer activation); its blend mode
+            # belongs on every one of them.
+            bm = self._blend_mode_bm(layer)
+            if bm is not None:
+                for produced in collected[first_index:]:
+                    produced["bm"] = bm
         collected.reverse()                  # Moho back-to-front -> Lottie front-to-back
         for index, layer in enumerate(collected, start=1):
             layer["ind"] = index
@@ -944,6 +1002,30 @@ class LottieExporter:
         copy["rotation_per_frame"] = acc["rotation_per_frame"][start:end]
         copy["skew_per_frame"] = acc["skew_per_frame"][start:end]
         return copy
+
+    def _blend_mode_bm(self, layer):
+        """`layer`'s Moho blend mode as a Lottie `bm` value, or None when the
+        layer composites normally (so no `bm` key is written at all).
+
+        NOT exact, and deliberately so.  Moho composites a layer against its
+        own container's accumulated buffer; this exporter flattens the whole
+        tree into one flat Lottie layer list, and Lottie's own `bm` blends a
+        layer against everything beneath it in the composition.  For a
+        blending layer whose container is the document root - which every
+        blending layer in the sample corpus effectively is, once the
+        containers above it stop drawing anything of their own - the two agree.
+        For one buried under a container that also paints, Lottie will pick up
+        backdrop Moho would have kept out.  moho2svg.py has no such limit: it
+        nests real <g> elements and isolates the container (see that file's
+        Exporter._isolation_declaration)."""
+        mode = layer.blend_mode
+        if not mode:
+            return None
+        bm = BLEND_MODE_LOTTIE.get(mode)
+        if bm is None:
+            self.warnings["blend_mode_unknown"] += 1
+            return None
+        return bm
 
     def _shape_layer(self, name: str, shapes: list, ip: float, op: float,
                       mask_properties: list = None) -> dict:
@@ -1408,6 +1490,28 @@ class LottieExporter:
         if all(b == per_frame[0] for b in per_frame[1:]):
             return {"a": 0, "k": per_frame[0]}
         return {"a": 1, "k": self._keyframes(frames, [[b] for b in per_frame])}
+
+    def _stamp_alpha(self, collected: list, start_index: int,
+                      per_frame_alpha: list, window_frames) -> None:
+        """Put a Moho layer's own opacity (`layer_effects.alpha`) on every
+        Lottie layer produced for it in this window, as the transform's "o".
+
+        Lottie's "o" is a PERCENTAGE, and it is exactly the linear blend
+        Moho applies - see moho2svg.py's Layer.effect_alpha for the
+        measurement.  Static when the value never moves, keyframed when it
+        does (11 layers across the corpus animate it), via the same
+        _scalar_property both stroke widths and gradient stops use.
+
+        A CONTAINER's own alpha is deliberately not folded in here: this
+        writer has no Lottie layer for a container at all (see the flat
+        model in this module's docstring), and Moho's own container-alpha
+        behaviour is undecoded anyway - moho2svg.py warns about it and so
+        does the shared tree walk, which is where the warning belongs."""
+        if not per_frame_alpha or all(a >= 1.0 for a in per_frame_alpha):
+            return
+        prop = self._scalar_property([a * 100.0 for a in per_frame_alpha], window_frames)
+        for produced in collected[start_index:]:
+            produced.setdefault("ks", identity_transform())["o"] = prop
 
     def _scalar_property(self, per_frame: list, frames) -> dict:
         """A Lottie scalar property (e.g. stroke width): static when the

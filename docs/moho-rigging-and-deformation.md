@@ -490,12 +490,70 @@ the same for `pos_` and `scale_`.
   whose `pos_control_scale` is `{x: -2.0, y: -2.0}` (a doubled, mirrored
   follow). Delays are `0` everywhere except `scale_control_delay: 8` on one
   bone in `Bandit.mohoproj`.
-- **Meaning**: bone A's angle/position/scale is driven by bone B's, times a
-  scale, optionally delayed by N frames.
-- **Effect of ignoring**: **real, and evaluated at playback time.** The driven
-  bone's own `anim_*` channel does not contain the driven value, so a
-  controlled bone renders unmoved. Small in this sample (13 driven channels in
-  total), but it is a true miss, not a theoretical one.
+- **Meaning — now decoded and applied.** Bone A's angle/position/scale gets
+  bone B's own **departure from its rest (frame 0) value**, times the scale,
+  sampled `delay` frames earlier:
+
+  ```
+  value(A, t) = own_keyed(A, t) + control_scale * (B_local(t - delay) - B_local(0))
+  ```
+
+  The manual supplies the wording (ch. 5.01 "Angle/Position/Scale control
+  bone"; ch. 23.03's Delayed Constraints script: *"if it's 100%, the bone will
+  rotate, translate or scale exactly in the same way the previous bone does
+  it… Frame delay sets with how many frames of delay the bone is going to
+  move"*; ch. 21.12 *"their animation is 'automatic' through the control
+  feature"*), and two independent measurements against Moho's own renders
+  supply the numbers.
+
+  **`Clay_Crocodile.mohoproj`** has one angle constraint (scale 1.0) with a
+  genuinely animated controller. Exporting with and without it and reading the
+  rotation straight out of Moho's `<image transform="… rotate(…)">`
+  attributes:
+
+  | frame | departure | raw value | measured | measured ÷ departure |
+  |---|---|---|---|---|
+  | 1 | −8.77° | −5.13° | 8.48° | 0.967 |
+  | 3 | −20.32° | −16.67° | 21.70° | 1.068 |
+  | 9 | −8.77° | −5.13° | 8.48° | 0.967 |
+  | 24 | −4.64° | −1.00° | 4.43° | 0.954 |
+  | 29 | −15.79° | −12.14° | 15.93° | 1.009 |
+
+  The ratio against the **departure** sits at 1.0 within a few percent; against
+  the raw value it scatters between 1.30 and 4.44. The few percent is the
+  measurement (the images read are flexibly bound, so each picks up a blend).
+
+  Using the controller's **world** angle is ruled out: that document's
+  controller has animated ancestors, and the world departure at frame 1 is
+  −1.15° against a measured 8.48°.
+
+  **`Whale.mohoproj`** carries the corpus' one live *delayed* constraint (bone
+  26 ← bone 25, scale 1.28, delay 4). Fitting the rotation between Moho's
+  with/without exports over frames 30–50:
+
+  | controller sampled at | rms error |
+  |---|---|
+  | `t − delay` (this model) | **0.598°** |
+  | `t` (no delay) | 6.272° |
+  | `t + delay` (opposite sign) | 9.524° |
+
+  That pins the sign — the controlled bone repeats what the controller did
+  `delay` frames *earlier* — and re-confirms the scale and the
+  departure-from-rest reading on a second document.
+
+- **What it changes today: no exported pixel.** The constraint demonstrably
+  moves the bones (on `Gathered-02Wire2.mohoproj` at frame 40 it swings bone
+  51's world angle from −2.53 to −1.79 rad), but in every corpus document the
+  controlled bones reach artwork by a route this exporter does not follow to
+  the end — `Clay_Crocodile` drives `ImageLayer`s, and the Gathered/Snow-girl
+  rigs use `strength = 0` bones whose only influence is per-point binding
+  (`--point-bones`, off by default, and still not moving those points when it
+  is on: a separate, pre-existing gap). `Whale.mohoproj` — the document the
+  delay was measured on — is image-based too, and its `whale_layers.psd` is
+  not present locally, so even there the change is currently invisible in this
+  exporter's own output. The formula and its plumbing into the skeleton are
+  verified; the last hop from bone to artwork is what is missing, and it is
+  missing for reasons that predate this change.
 
 ### 3.4 IK and target bones
 
@@ -1060,7 +1118,8 @@ Confirmed by reading the code (`Bone._build`, `Skeleton.world_matrices`,
 | Smart Bone dials driving actions | implemented |
 | 2-bone Target IK (`target_bone`) + auto-stretch (`scaling_mode`/`max_auto_scaling`) | implemented — see `Skeleton._solve_ik_pair` |
 | Bone `flip_h` / `flip_v` | implemented — see `Skeleton.world_matrices` |
-| Bone constraints, control bones, dynamics, `offset`, `anim_parent` | read into the model, **never applied** |
+| Control bones (`*_control_parent`/`_scale`/`_delay`) | **applied** — see § 3.3 for the decoded formula and its verification |
+| Bone dynamics, `offset`, `anim_parent`, other constraints | read into the model, **never applied** |
 | `binding_mode`, `grandpa_bone`, `flexi_bone_elbow`, `bones_groups` | ignored |
 
 ### 7.1 Audit: which unread fields could still matter

@@ -12,17 +12,17 @@
       "properties": {
         "t": {
           "type": "integer",
-          "description": "Interpolation type. Observed: 0 (208,858+ of ~all entries, overwhelming default), 4, 2, 6, 1. Meaning not decoded. Non-zero values appear almost exclusively on pose/anim_pos/anim_angle/anim_scale/physics_motor_speed."
+          "description": "NOT the interpolation type - that is `im`. Observed 0 on 1,871,969 of 1,873,377 entries, with 2, 3, 4, 5, 6, 256, 259 and 260 in the remainder, almost exclusively on pose/anim_pos/anim_angle/anim_scale/physics_motor_speed. Most likely the keyframe's LABEL COLOUR (manual ch. 16.13 lists a Label among a keyframe's settings and offers eleven colours); still not confirmed. An earlier revision of this schema called this the interpolation type, which is what sent moho2svg.py looking for the easing enum in the wrong field."
         },
-        "im": { "type": "integer", "description": "Not decoded. Observed: 0, 1, 3, 5, 9." },
-        "in": { "type": "integer", "description": "Not decoded. Observed: 0, 1." },
-        "s": { "type": "boolean", "description": "Not decoded. Observed false in every sampled entry." },
-        "h": { "type": "integer", "description": "Not decoded. Observed 0 in every sampled entry." },
-        "v1": { "type": "number", "description": "Not decoded. Commonly 0.1 (an apparently-unused default); also -1, 15." },
-        "v2": { "type": "number", "description": "Not decoded. Commonly 0.5; also -1, 2, -1000000." },
+        "im": { "type": "integer", "description": "The INTERPOLATION METHOD for the segment leaving this keyframe (manual ch. 16.06 names the methods; ch. 16.13's keyframe dialog is what maps them onto this entry's fields). An ENUM, not a bitfield. Decoded by rendering a controlled two-keyframe motion with Moho's own CLI at each value and reading the curve back: 0 = Linear (exact), 1 = Smooth (exact; Moho's default and 88.4% of all keyframes), 3 = Step (exact), 5 = Cycle, 6 = also exactly linear, 9 = Bezier (confirmed by a 1:1 match with the `b` block - 238 of 238 entries carrying one have im=9). 2, 4, 7, 8, 10 and 11 have measured curves that are not yet reproduced. Corpus distribution: 1 (1,656,205), 3 (151,483), 0 (54,456), 5 (3,136), 11 (2,916), 2 (2,582), 6 (1,495), 10 (798), 9 (238), 8 (34), 7 (27), 4 (7)." },
+        "in": { "type": "integer", "description": "Almost certainly the keyframe's ANIMATION INTERVAL (manual ch. 16.07: interpolation is recomputed only every n-th frame, n between 1 and 6). Observed 1 (1,851,737), 0 (19,650), 3 (1,348), 2 (634), 8 (8). Not applied." },
+        "s": { "type": "boolean", "description": "Almost certainly the keyframe's STAGGER checkbox (manual ch. 16.13), which adds a stairstep to whatever interpolation is selected. False in all 1,873,377 corpus entries, so never exercised." },
+        "h": { "type": "integer", "description": "Almost certainly the keyframe's HOLD DURATION in frames (manual ch. 16.13). 0 in all 1,873,377 corpus entries, so never exercised." },
+        "v1": { "type": "number", "description": "A general-purpose slot whose meaning depends on `im`. For im=5 (Cycle) it is the RELATIVE cycle length in frames when >= 0. Otherwise it holds the untouched default 0.1, or a -1 / -1000000 sentinel. See Channel._parse_cycles." },
+        "v2": { "type": "number", "description": "The second general-purpose slot. For im=5 (Cycle) it is the ABSOLUTE frame to resume at, used when v1 < 0. Otherwise the default 0.5, or a -1 / -1000000 sentinel. See Channel._parse_cycles." },
         "b": {
           "type": "array",
-          "description": "Rare (observed on <20 entries total, only alongside t==4). Explicit Bezier-like handles for the timing curve itself, one object per control point.",
+          "description": "Explicit Bezier handles for the timing curve itself, one object per control point. Present on exactly 238 entries, and EVERY one of them has im == 9 - which is what identifies im=9 as Bezier interpolation. Not read by moho2svg.py, so an im=9 keyframe falls back to the generic curve. (An earlier revision said these appear only alongside t==4; the correlation is with `im`, not `t`.)",
           "items": {
             "type": "object",
             "properties": {

@@ -63,19 +63,19 @@
         "bone_enable_arc_solver": { "type": "boolean" },
         "target_bone": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "The Target Bone tool's own target reference." },
 
-        "angle_control_parent": { "type": "integer", "description": "Index into this same bones array (or -1). Observed non-trivial targets in bone-control-focused documents (e.g. ControlBones.animeproj, IndependentAngle.animeproj)." },
-        "angle_control_scale": { "type": "number" },
-        "angle_control_delay": { "type": "integer" },
-        "pos_control_parent": { "type": "integer" },
+        "angle_control_parent": { "type": "integer", "description": "Index into this same bones array of the bone that drives this one's angle, or -1 for none (manual ch. 5.01/23.03, 'Angle control bone'). APPLIED: the controlled bone adds the controller's own departure from its rest (frame 0) value, times angle_control_scale, sampled angle_control_delay frames earlier. Verified against Moho's own renders - see docs/moho-rigging-and-deformation.md section 3.3. Observed non-trivial targets in bone-control-focused documents (e.g. ControlBones.animeproj, IndependentAngle.animeproj)." },
+        "angle_control_scale": { "type": "number", "description": "How much of the controller's movement to follow (manual ch. 23.03: '100% ... exactly the same way ... 200% ... double'). 1.0 = follow exactly; negative mirrors." },
+        "angle_control_delay": { "type": "integer", "description": "Frames of delay: the controlled bone repeats what the controller did this many frames EARLIER. Sign verified on Whale.mohoproj bone 26 (delay 4), the corpus' one live delayed constraint: rms 0.598 deg for t-delay vs 6.272 for t and 9.524 for t+delay." },
+        "pos_control_parent": { "type": "integer", "description": "Same as angle_control_parent, for the bone's translation. Read and applied by the same code path." },
         "pos_control_scale": {
           "type": "object",
-          "description": "Plain (not a channel).",
+          "description": "Plain (not a channel) - a per-axis gain, unlike the scalar used by the angle and scale families.",
           "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
         },
-        "pos_control_delay": { "type": "integer" },
-        "scale_control_parent": { "type": "integer" },
+        "pos_control_delay": { "type": "integer", "description": "As angle_control_delay, for the position family." },
+        "scale_control_parent": { "type": "integer", "description": "Same as angle_control_parent, for the bone's stretch/scale." },
         "scale_control_scale": { "type": "number" },
-        "scale_control_delay": { "type": "integer" },
+        "scale_control_delay": { "type": "integer", "description": "As angle_control_delay, for the scale family." },
 
         "angle_weight": { "type": "number", "description": "Observed -1.0 or 1.0." },
         "pos_weight": { "type": "number" },

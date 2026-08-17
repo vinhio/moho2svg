@@ -390,9 +390,9 @@ This is the important gap list: every field here changes what Moho draws.
 
 | Field | Shape | Observed values | Consequence of ignoring it |
 |---|---|---|---|
-| `layer_effects.alpha` | `Val` channel | `1.0` on 535 layers, **`0.6` on 9 layers** | Layer opacity. **This one is actually exercised by the samples** — nine layers should render at 60% and instead render fully opaque. |
-| `blend_mode` | int | `0` on 528 layers, **`1` on 16 layers** | Layer blend mode. `0` is presumably Normal; `1` is not decoded. 16 layers blend differently in Moho than in the SVG. |
-| `layer_effects.visibility` | `Bool` channel | `true` everywhere | **Animated** show/hide, independent of the static `visible` flag. Would let a layer appear mid-animation. |
+| ~~`layer_effects.alpha`~~ | `Val` channel | non-trivial on **139 leaf layers across 15 files** (11 of them animated) | **No longer in this list — decoded and applied.** The layer's own opacity. MEASURED as a plain linear blend: at 0.5 a layer lands on the exact midpoint of its 1.0 and 0.0 renders (mean error 0.13/255 over its own pixels), so it maps directly onto SVG `opacity` and Lottie's transform `o`. A *container's* own alpha is still **not** applied — three models were measured and the best still scored worse than ignoring it; 5 layers corpus-wide, each warned about. See [§ 6.3a](#63a-layer-opacity). |
+| ~~`blend_mode`~~ | int | `0` on 3,794 layers; `1` on 117, `2` on 49, `3` on 2 | **No longer in this list — decoded and applied.** See [§ 6.6](#66-blend_mode). |
+| ~~`layer_effects.visibility`~~ | `Bool` channel | non-trivial on **190 layers across 14 files** | **No longer in this list — decoded and applied.** The animated show/hide from the General tab's Compositing Effects group (manual ch. 12.02), which the manual states outright is "totally independent of the visibility box displayed in the layer list". A layer draws only when both are true — see `Layer.visible_at`. The earlier "`true` everywhere" reading was a 19-file artefact. |
 | `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | `Val` channels | `0.0` everywhere | Per-layer image effects. All off in the samples. |
 | `layer_outline` | `{on, color, width}` | `on: false` everywhere | An extra outline stroked around the whole layer. |
 | `layer_shadow` | `{on, angle, blur, color, expansion, offset, threshold, noise_amp, noise_scale, clip_to_group}` | `on: false` everywhere | Drop shadow. |
@@ -411,11 +411,52 @@ This is the important gap list: every field here changes what Moho draws.
 | `layer_ordering` | `String` channel | `""` | Animated child reordering (with `animated_layer_order` on `BoneLayer`). Would change draw order per frame. |
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |
 | `layer_ref_*` (`uuid`, `path`, `fileref`, `mod_date`, `same_doc`) | mixed | empty | Linked/referenced external layer. A document using these would be missing artwork here. |
-| `camera_immune`, `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / camera behaviour. |
+| `camera_immune` | bool | `true` on 6 layers in 3 files | **Now applied** — the layer projects through the DEFAULT camera, so it stays put on screen while the camera moves (manual ch. 12.02, "Immune to camera movements"). Inherited by descendants. See [§ 9](moho-animation-and-transform.md#9-camera-animation) of the animation doc. |
+| `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. |
 | `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (648 instances), always at identical defaults | 3D-extrusion rendering settings, entirely inert in every sample because `3d_mode` is `0` everywhere. |
 | `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. |
 | `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `mask_expansion`, `modification_date` | mixed | — | Editor state, or (for `render_only` / `mask_expansion`) undecoded render toggles that are off in every sample. |
 | `metadata`, `script_data` | obj | see [§ 6.4](#64-type-specific-fields) | Editor/script bookkeeping bags, key sets now enumerated. |
+
+### 6.3a Layer opacity
+
+`layer_effects.alpha` sits in the same General-tab Compositing Effects group
+as the animated `visibility` above, and is keyframeable the same way. It was
+silently ignored until it was measured, which left artwork on screen that
+Moho fades out entirely.
+
+**The measurement.** On `SlickObjectTransition.mohoproj`'s "Sun" layer at
+frame 36: setting alpha to 0.5 produces an image whose mean distance from the
+midpoint of the 1.0 and 0.0 renders is **0.13/255** over the layer's own
+pixels. A plain linear blend, with no gamma or premultiplication surprise.
+
+**The clearest case in the corpus.** `Snow-girl-cut14.mohoproj`'s
+`/Layer 11/Layer 2` keys alpha `1 → 0 → 0 → 1` over frames 0..9. Rendered
+alone by Moho it covers **0** pixels at frame 1 and **45,671** at frame 30.
+Before this was applied, that layer drew a white quad at frame 1 — invisible
+against the white card above it, but it also (once masking modes 3/5 were
+implemented) punched a subtract-hole through that card. Applying alpha fixed
+both at once.
+
+**Containers are excluded, deliberately.** Three models for a group's own
+alpha were measured against Moho on a non-masking group
+(`SlickObjectTransition.mohoproj`'s "Frame Mask" with `group_mask` forced to
+0, the group at 0.5, scored over the group's own pixels):
+
+| model | mean \|err\| |
+|---|---|
+| ignore it entirely | **21.6** |
+| flatten the group, then composite at 0.5 | 30.2 |
+| push 0.5 onto every child | 24.0 |
+
+Ignoring it scored best of the three, which means none of them is what Moho
+computes. Guessing would make the render worse, so `moho2svg.py` warns
+instead — 5 layers corpus-wide (4 `GroupLayer`, 1 `SwitchLayer`) against 139
+leaf layers this is exact for.
+
+**Two knock-on rules**, both measured (see [§ 10.3](#103-three-further-rules-each-measured)):
+a layer faded to nothing contributes nothing to a mask, and neither does one
+hidden by either visibility mechanism.
 
 ### 6.4 Type-specific fields
 
@@ -577,6 +618,43 @@ to raster images, not reverse-engineered), plus its own fields:
 
 None of the above is read by `moho2svg.py`. See `schema/layer.schema.json`'s
 `ImageLayer` for the full field list with per-field descriptions.
+
+### 6.6 `blend_mode`
+
+How a layer composites against what is drawn beneath it. Present on every
+layer; `0` (Normal, a plain source-over paint) on 3,794 of the 3,962 layers in
+the 46-file sample. The rest: **`1` on 117 layers, `2` on 49, `3` on 2** —
+all but three of them `MeshLayer`s, the three being `GroupLayer`s.
+
+The manual names the blend modes (12.02 *General Tab*, "Layer blending mode")
+but never numbers them. The numbering below is the order the Moho 14.4
+application binary itself uses when it builds that menu, where the modes'
+localisation keys sit in one contiguous run:
+
+| | | | |
+|---|---|---|---|
+| 0 Normal | 4 Add | 8 Color | 12 Color Burn |
+| 1 Multiply | 5 Difference | 9 Luminosity | 13 PSD Linear Dodge (Add) |
+| 2 Screen | 6 Hue | 10 Soft Light | |
+| 3 Overlay | 7 Saturation | 11 Color Dodge | |
+
+**Confirmed: 1, 2, 3 only** — and only those, because they are the only values
+any sample document uses. The confirmation is a render comparison, not
+inspection: exporting `Snow-girl-cut51.mohoproj` (13 blend-mode layers) with
+these three mapped to CSS `multiply`/`screen`/`overlay` moved the output
+measurably toward Moho's own PNG render of the same frame — mean absolute
+difference 26.82 → 20.20 across the whole canvas, and 443,037 → 383,444 pixels
+differing by more than 20. **Unverified: 4–13**, mapped on the strength of the
+binary's menu order alone.
+
+**Scope of the blend.** Moho renders each container layer into its own buffer
+and composites that buffer into its parent, so a blending layer reaches its own
+container's content and stops there. `moho2svg.py` reproduces this by putting
+`isolation:isolate` on exactly those containers that *directly* hold a blending
+layer. `moho2lottie.py` cannot: it flattens the tree into one flat Lottie layer
+list, so a container's own blend mode has nowhere to land (counted warning
+`blend_mode_container`, 3 layers corpus-wide) and a mesh layer's blend reaches
+everything beneath it in the composition.
 
 ---
 
@@ -839,10 +917,10 @@ Every field observed on a named style:
 | `fill_color`, `line_color` | `Color` channels | — | **yes** |
 | `line_width` | float (not a channel) | 11 distinct values | **yes** |
 | `line_caps` | int | `5,659`×`1` (round), `765`×`0` (butt) across 6,424 style objects (19-file totals) | **yes** — `0` butt, `1` round, `2` square (mapping from `LINE_CAP_NAMES`). The original 5-file sample saw only `1`; **`0` is a 19-file finding** (`IndependentAngle`, `MaximumIKStrethching`, `TargetBone` each have 255 styles with `line_caps: 0`) — confirmed exercised in the broader sample, so a butt-cap style now genuinely differs from what this tool draws if `LINE_CAP_NAMES`' `0` mapping is wrong (unverified against Moho for that value). |
-| `fill_style` | obj | on 256 styles (original sample); 1,196 across the 19-file sample | **yes** — gradient fill ([§ 8.4](#84-gradients)), but see [§ 8.3](#83-style-effect-variants-19-file-finding): `fill_style` is not always a gradient. |
-| `line_style` | obj | on 25 styles (original sample); 116 `SS_Gradient2` + 9 `SS_Soft` + 3 `SS_Shadow` across the 19-file sample | **no** — see below; none of the three variants are read. |
-| `fill_style_id`, `line_style_id` | int | `9` in the large majority; also `12` (`fill_style_id`, 19×), `11` and `2` (`line_style_id`, 3× and 9×) **(the non-9 values are a 19-file finding)** | no — reinforces that these are arbitrary internal reference ids, not a small closed enum |
-| `fill_style2`, `fill_style2_id` | obj, int | **(19-file finding, absent from the original 5-file sample.)** `fill_style2` holds `SS_Texture2` on 12 occurrences (3 files); `fill_style2_id` is constant `10`. A *second* fill-effect slot layered on top of `fill_style`. | no |
+| `fill_style` | obj | 1,812 across the 46-file sample: 1,401 `SS_Gradient2`, 198 `SS_Halo`, 96 `SS_Shaded`, 91 `SS_Soft`, 26 `SS_Crayon` | **partly** — gradient fill ([§ 8.4](#84-gradients)) only; every other variant warns and draws flat. See [§ 8.3](#83-style-effect-variants-46-file-finding): `fill_style` is not always a gradient. |
+| `line_style` | obj | 177 across the 46-file sample: 116 `SS_Gradient2`, 40 `SS_Soft`, 18 `SS_Shaded`, 3 `SS_Shadow` | **partly** — the slot is now read (it used to be ignored outright). `SS_Gradient2` becomes a real paint server on the outline; the rest warn and draw a flat stroke. |
+| `fill_style_id`, `line_style_id`, `fill_style2_id` | int | `0`, `2`, `4`, `9`, `10`, `11`, `12` | n/a — **decoded**: each is simply the effect KIND, agreeing with the sibling effect object's own `type` in all 2,003 instances. Not the "arbitrary internal reference id" earlier revisions assumed. ([§ 8.3](#83-style-effect-variants-46-file-finding)) |
+| `fill_style2` | obj | 14 across the 46-file sample: 12 `SS_Texture2` (3 files), 2 `SS_Soft` (`DarkMan.mohoproj`) | no — a *second* fill-effect slot layered on top of `fill_style`; warns per shape. |
 | `brush_name` | str | 20+ distinct values | **yes** ([§ 8.6](#86-resolving-a-brush_name-to-a-file)) |
 | `brush_jitter` | float (radians) | `0.0`–`6.283185` | **yes** |
 | `brush_spacing` | float (fraction of dab diameter) | `0.0`–`0.7` | **yes** |
@@ -902,37 +980,77 @@ So: **older documents drive everything through the named style list; the
 newer document barely uses it.** A tool that only handled one generation
 would silently produce colourless output on the other.
 
-### 8.3 Style effect variants (19-file finding)
+### 8.3 Style effect variants (46-file finding)
 
 `fill_style`, `fill_style2`, and `line_style` each hold an *effect object*
 with its own `type`. The original 5-file sample only ever saw
 `SS_Gradient2`, which made "these fields mean a gradient" look like a safe
-rule — it is not. The 19-file sample shows **five** distinct effect types,
-and the fill/line variant sets are disjoint except for `SS_Gradient2`:
+rule — it is not. The 46-file sample shows **seven** distinct effect types.
+Two of them (`SS_Halo`, `SS_Shaded`) were missing from this document and from
+`schema/` entirely until the 46-file pass, and the earlier claim that the
+fill and line variant sets are "disjoint except for `SS_Gradient2`" is also
+withdrawn: `SS_Soft` and `SS_Shaded` each occur in both slots.
 
-| Effect `type` | Slot | Occurrences | Files | Fields | Read by `moho2svg.py`? |
-|---|---|---|---|---|---|
-| `SS_Gradient2` | `fill_style` | 1,196 | 17 | `gradient_type`, `gradients[]`, `through_alpha` | **yes** ([§ 8.4](#84-gradients)) |
-| `SS_Gradient2` | `line_style` | 116 | 16 | same as above | no |
-| `SS_Crayon` | `fill_style` | 19 | 1 | `line_width`, `density` (both `Val` channels), `clear_background`, `reduce_randomization`, `rand_seed` | no — falls back to the shape's flat `fill_color` |
-| `SS_Soft` | `line_style` | 9 | 3 | `blur_radius` (`Val` channel), `threshold` (plain bool) | no — falls back to a flat stroke colour |
-| `SS_Shadow` | `line_style` | 3 | 3 | `angle`, `offset`, `blur` (`Val` channels), `color` (`Color` channel), `threshold` (plain bool) | no — a per-shape drop shadow on the stroke, distinct from the layer-level `layer_shadow` in [§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used) |
-| `SS_Texture2` | `fill_style2` | 12 | 3 | `path`, `SS_Texture2FileRef`, `fill_mode`, `through_alpha` | no — an image-texture fill layered on top of `fill_style`; in all 12 sampled occurrences both path fields are empty, so no sampled document actually resolves a texture file |
+Counts below are **effect objects in the file** (a named style's effect is
+counted once, however many shapes inherit it). The "drawn shapes" column
+counts the shapes that actually reach the effect — i.e. that resolve to it
+*and* have the corresponding `has_fill`/`has_outline` set — which is the
+number that matters for how much of the picture is wrong.
 
-A shape carrying `SS_Crayon`, `SS_Soft`, or `SS_Shadow` therefore renders with
-a plain flat fill/stroke here instead of Moho's textured/blurred/shadowed
-effect — an unconfirmed-but-plausible visible difference nothing in the
-original 5-file sample could have surfaced. `SS_Crayon` was also found
-**inline on a shape's own `style` object** (`OffsetBoneTool.animeproj`,
-shape "pant-shades"), disproving an earlier assumption in this document that
-a styled fill effect only ever lives on a document-wide named style. Full
-per-field descriptions: `schema/style.schema.json`'s `Gradient`, `Crayon`,
-`SoftStyle`, `ShadowStyle`, `Texture2`.
+| Effect `type` | `*_style_id` | Slot | Objects | Drawn shapes | Manual | Rendered? |
+|---|---|---|---|---|---|---|
+| `SS_Gradient2` | 9 | `fill_style` | 1,401 | 249 | Gradient Fill (13.02) | **yes** ([§ 8.4](#84-gradients)) |
+| `SS_Gradient2` | 9 | `line_style` | 116 | 6 | — | **yes**, but every one of those 6 is a brush stroke, which the gradient cannot reach — see below |
+| `SS_Halo` | 4 | `fill_style` | 198 | 198 | Halo Fill (13.02) | no — **the largest single appearance gap** |
+| `SS_Shaded` | 0 | `fill_style` / `line_style` | 96 / 18 | 94 / 12 | Shaded Fill (13.02) | no |
+| `SS_Soft` | 2 | `fill_style` / `line_style` / `fill_style2` | 91 / 40 / 2 | 91 / 31 / 2 | Soft Edge Fill (13.02) | no |
+| `SS_Crayon` | 12 | `fill_style` | 26 | 7 | — | no — falls back to the shape's flat `fill_color` |
+| `SS_Texture2` | 10 | `fill_style2` | 12 | 12 | — | no — in all 12 occurrences both path fields are empty, so no sampled document resolves a texture file |
+| `SS_Shadow` | 11 | `line_style` | 3 | 3 | — | no — a per-shape drop shadow on the stroke, distinct from `SS_Shaded` and from the layer-level `layer_shadow` in [§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used) |
+
+**`*_style_id` is decoded.** Each slot has a parallel integer field
+(`fill_style_id`, `line_style_id`, `fill_style2_id`) whose value is simply the
+effect *kind*, per the second column above. It agrees with the effect object's
+own `type` string in **all 2,003 instances across the 46 files, with no
+exceptions**, so it is redundant with `type` rather than the "arbitrary
+internal reference id" earlier revisions of this document called it.
+
+**Where effects live.** Both on named styles and inline on a shape's own
+`style` object — 1,160 vs 652 `fill_style` objects respectively. This was
+already known for `SS_Crayon`; it holds for gradients too (241 of the inline
+ones are `SS_Gradient2`), which retires the old "a gradient only ever lives on
+a named style" rule for good. `line_style` is the exception that still holds:
+all 116 sit on named styles, none inline.
+
+**What is actually rendered now.** `line_style` used to be read by nothing at
+all, so a gradient/soft/shaded outline painted flat with no warning. It is now
+resolved, `SS_Gradient2` becomes a real SVG paint server on the outline, and
+every other variant — in any of the three slots — emits a per-shape stderr
+warning instead of failing silently. The one thing a gradient outline still
+cannot do is style a *brush* stroke, which tints image pixels rather than
+painting with a paint server; that also warns.
+
+**A reference SVG cannot check any of this.** Moho's own SVG export drops the
+blurred/composited effects. Its export of `Snow-girl-cut51.mohoproj` — a
+document with **108 halo-filled shapes and 13 blend-mode layers** — contains
+355 `<path>` elements and 106 `opacity` attributes but **zero
+`filter`/`feGaussianBlur` and zero `mix-blend-mode`**; a halo is a blurred
+coloured rim, which no arrangement of paths and opacity can express. Moho's
+PNG render of the same frame shows both. (This is specific to the
+blurred/composited effects — that same SVG exporter *does* emit gradients in
+general: its export of `WhatIsBone.animeproj` contains 96 of them.) Any future
+work on effects or blend modes has to be validated against a **raster** render,
+e.g. `Moho -r FILE -f PNG -start N -end N -o OUT.png`.
+
+Full per-field descriptions: `schema/style.schema.json`'s `Gradient`, `Crayon`,
+`SoftStyle`, `Halo`, `Shaded`, `ShadowStyle`, `Texture2`.
 
 ### 8.4 Gradients
 
-`fill_style` (and the unused `line_style`) can have this shape — one of the
-five effect variants from [§ 8.3](#83-style-effect-variants-19-file-finding):
+`fill_style` and `line_style` can both have this shape — `SS_Gradient2`, one
+of the seven effect variants from
+[§ 8.3](#83-style-effect-variants-46-file-finding), and the only one either
+exporter renders:
 
 ```jsonc
 {
@@ -1160,32 +1278,128 @@ Bone fields **not** used, grouped by what they would change:
 
 ## 10. Masking
 
-Two *separate* fields are involved:
+Two *separate* fields are involved, and both are ENUMs. Both were decoded
+twice over and in agreement: by the declaration order of `GROUP_MASK_*` and
+`MM_*` in Moho's own scripting header (`Contents/Resources/Support/Pro/Extra
+Files/Lua Interfaces/pkg_moho.lua_pkg`), and **independently by rendering
+every value with Moho itself** (`-r FILE -f PNG`) on
+`SlickObjectTransition.mohoproj` at frame 36.
 
-- `group_mask` on a *container* (`GroupLayer` or `BoneLayer` — the layer type
-  does not matter). Observed across the 19-file sample: `0` (78 containers,
-  no masking), `2` (70 containers, masking active), and `1` (**exactly 2**
-  containers). This tool treats any non-zero value as "masking active", so
-  `1` and `2` behave identically here; whether Moho distinguishes them is not
-  decoded. `MeshLayer`/`TextLayer`/`PatchLayer`/`SwitchLayer` do not carry
-  the field at all.
-- `masking` on each *child* of a masking container:
-  - `2` — this child's geometry defines the mask (Moho's UI: something like
-    "Add to Mask"). It is still drawn normally — being the mask source does
-    not hide it.
-  - `1` — "don't mask this layer" — drawn normally, ignoring the mask.
-  - anything else (typically `0`, Moho's UI default) — clipped to the union of
-    all `masking == 2` siblings in the same container.
+### 10.1 `group_mask` — on the container
 
-Across the 19-file sample, `masking` is `0` on 714 layers, `2` on 93, `1` on
-62, and **`5`/`6` on 7 layers (1× and 6× respectively) — (19-file finding,
-not decoded)**, spread across `ControlBones.animeproj`,
-`OffsetBoneTool.animeproj`, and `SlickObjectTransition.mohoproj`.
-`moho2svg.py` treats any value other than `1`/`2` as "clipped", so `5`/`6`
-currently behave as ordinary clipped children — unconfirmed against real
-Moho output, since no independent export of a document using these values
-is available to compare against. Note that a `masking` value is present on
-children of *non*-masking containers too, where it is inert.
+| value | meaning | corpus (46 files) |
+|---|---|---|
+| `0` | no masking in this group | 304 layers, 42 files |
+| `1` | "Reveal all" — masking on, the mask starts **full** | 5 layers, 4 files |
+| `2` | "Hide all" — masking on, the mask starts **empty** | 301 layers, 34 files |
+
+`MeshLayer`/`TextLayer`/`PatchLayer`/`SwitchLayer` do not carry the field.
+
+Measured with the container's only contributor forced to draw nothing, so
+only the base matters — diffed against the same document with masking
+switched off entirely:
+
+| `group_mask` | child mode | pixels changed | of those, inside the source |
+|---|---|---|---|
+| 1 | 0 (clipped) | 4,868 | 0 |
+| 1 | 2 (add) | 4,868 | 0 |
+| 1 | 3 (subtract) | 91,048 | 85,284 |
+| 2 | 0 (clipped) | 199,667 | 85,284 |
+| 2 | 2 (add) | 114,655 | 272 |
+| 2 | 3 (subtract) | 140,348 | 25,965 |
+
+So `1` leaves everything visible until something subtracts, and `2` hides
+everything until something adds — exactly the header's own
+`// 0=none, 1=all visible, 2=all invisible`.
+
+### 10.2 `masking` — on each child
+
+One value per entry of the manual's own Layer Masking menu (ch. 12.05). The
+manual lists seven; the scripting header names **eight** (it also has
+"subtract, invisibly"), and the corpus uses `0,1,2,4,5,6,7` — every value
+except `3`.
+
+| value | constant | meaning | drawn? |
+|---|---|---|---|
+| `0` | `MM_MASKED` | clipped to the mask **as it stands here** | clipped |
+| `1` | `MM_NOTMASKED` | "don't mask this layer" | yes |
+| `2` | `MM_ADD_MASK` | + add this layer to the mask | yes |
+| `3` | `MM_SUB_MASK` | − subtract it from the mask | yes |
+| `4` | `MM_ADD_MASK_INVIS` | + add, but keep invisible | **no** |
+| `5` | `MM_SUB_MASK_INVIS` | − subtract, keep invisible | **no** |
+| `6` | `MM_CLEAR_ADD_MASK` | + clear the mask, then add this layer | yes |
+| `7` | `MM_CLEAR_ADD_MASK_INVIS` | + clear, add, keep invisible | **no** |
+
+Corpus counts (46 files): `0` on 3,188 layers, `2` on 374, `1` on 365, `4`
+on 14 (6 files), `6` on 13 (9 files), `5` on 6 (3 files), `7` on 2 (2 files).
+
+**How the three groups were separated.** Probing the *topmost* child of a
+masking group — nothing above it can consume its own contribution, so only
+"is it drawn, and clipped?" is observable — split the eight values into
+exactly three behaviours: `{0}` clipped, `{1,2,3,6}` drawn unclipped, and
+`{4,5,7}` not drawn at all. Three invisible values, matching the three
+`*_INVIS` constants.
+
+**How each mask edit was identified.** Probing a *middle* child ("Sky",
+85,284 px, entirely inside the earlier "Frame" contribution), and splitting
+each diff by region:
+
+| mode | diff vs mode 0 | inside Sky | outside Sky | inside Frame−Sky |
+|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 |
+| 1 | 434 | 0 | 434 | 0 |
+| 2 | 434 | 0 | 434 | 0 |
+| 3 | 26,296 | 25,696 | 600 | 166 |
+| 4 | 62,543 | 61,583 | 960 | 526 |
+| 5 | 86,471 | 85,284 | 1,187 | 753 |
+| 6 | 41,933 | 1 | 41,932 | 41,932 |
+| 7 | 104,039 | 61,583 | 42,456 | 42,456 |
+
+Mode `3` changes only pixels *inside* Sky — it removes Sky from the mask; had
+it been clear-then-add, the Frame-only region would have gone dark instead.
+Mode `6` changes only pixels *outside* Sky, all of them in Frame−Sky — the
+mask became Sky alone, discarding Frame's earlier contribution. Mode `5`
+blanks all 85,284 px of Sky: subtract **and** not drawn.
+
+Pairing each visible mode to an invisible one by smallest difference gives
+the perfect matching `(2,4)`, `(3,5)`, `(6,7)` — each pair differing only by
+the probe layer's own artwork:
+
+|  | 4 | 5 | 7 |
+|---|---|---|---|
+| **2** | **62,109** | 86,037 | 104,473 |
+| **3** | 85,976 | **85,811** | 128,174 |
+| **6** | 104,473 | 128,066 | **62,479** |
+
+### 10.3 Three further rules, each measured
+
+- **Every non-zero mode draws unclipped**, including one that contributes to
+  the mask. Checked with the mask deliberately empty when the probe is
+  reached: modes `1`, `2`, `3` and `6` each drew the layer in full (272 px
+  changed inside it, i.e. antialiasing only, against 85,284 for mode `0`).
+- **`masking` is inert when `group_mask == 0`** — even the invisible modes,
+  which do *not* hide the layer then. Setting the probe to `4`, `5` or `7`
+  under `group_mask == 0` changed Moho's render by exactly **0** pixels each
+  time. `moho2svg.py` used to skip those layers unconditionally, which
+  wrongly blanked artwork in `Snow-girl-cut14.mohoproj`.
+- **A layer that does not render contributes nothing to the mask.** Hiding
+  the one mask source through the `visible` flag, or through
+  `layer_effects.visibility`, or fading it out with `layer_effects.alpha`,
+  each produced exactly the same render as having no source at all (199,667
+  changed pixels, versus 114,655 with it showing).
+
+### 10.4 The mask is built incrementally
+
+A `masking == 0` child is clipped against the mask **as it stands when that
+child is drawn**, not against one mask for the whole container. Ten
+containers in the corpus depend on it — the run
+`[2, 0, 6, 0, 0]` shared by `Snow-girl-cut3/6/7/8/12/13/51`, and
+`OffsetBoneTool.animeproj`'s `[1,1,2,2,2,0,6,0,0,6,0,6,0,0,0,0]`. Collapsing
+those to a single mask would clip the earlier masked child with a mask built
+partly out of a layer drawn *after* it. `moho2svg.py` therefore computes one
+mask state per child (`Exporter._mask_plan`) and emits one `<mask>` per
+distinct state, which for the ordinary "sources at the bottom" layout is
+still exactly one per container.
 
 This applies uniformly at every nesting depth, **including the document's own
 top-level layer** — masking is not special-cased away at the root. A
@@ -1347,21 +1561,49 @@ layers, with values `0` (4×), `1`, `2`, `3`, and `7` — so it is not the
 constant `0` an earlier revision of this document reported. Its purpose beyond
 the uuid is still unknown, and this tool ignores it.
 
-**The patch layer's own `transforms`/`parent_bone`/`flexi_bone_subset`/
-`origin` are not used when rendering it**, even though they are present and
-look like they ought to matter. Confirmed empirically: every `PatchLayer`
-found across the reference documents carries a bizarre, seemingly-unrelated
-own transform (e.g. a `0.147` non-uniform Y scale plus an 8.9° rotation on one
-hand's `ayasi-Patch`; a uniform `~0.49` scale on `Leg_L-Patch`/`Leg_R-Patch`
-in another rig), while its *target* consistently has the identity transform
-(`scale: 1`, `translation: 0`). Rendering with the patch's own transform
-reproduces exactly that: a squashed sliver floating away from where the target
-actually renders. The target's transform (and
-`parent_bone`/`flexi_bone_subset`/`origin`) is used instead — i.e. a resolved
-patch layer renders as a duplicate of its target, just at a different
-point in the draw order. This is a **heuristic**, not a confirmed-exact
-reverse-engineering — there is no independent Moho SVG export of a
-`PatchLayer`-using document available to verify pixel-for-pixel against.
+### 12.1 The patch's own transform is a CLIP REGION
+
+The patch layer's own `transforms`/`parent_bone`/`flexi_bone_subset`/`origin`
+are **wrong for its artwork and right for its clip**. Both halves are settled.
+
+*Wrong for the artwork.* Every `PatchLayer` carries a bizarre,
+seemingly-unrelated own transform (a `0.147` non-uniform Y scale on one hand's
+`ayasi-Patch`; a uniform `~0.49` scale on `Leg_L-Patch`/`Leg_R-Patch`), while
+its *target* has the identity transform. Rendering the mesh through the
+patch's own transform reproduces exactly that: a squashed sliver floating away
+from where the target renders. The target's transform (and
+`parent_bone`/`flexi_bone_subset`/`origin`) is used for the artwork instead.
+
+*Right for the clip.* The manual says what the transform is actually for
+(ch. 11.15): creating a patch gives you **"a new CIRCLE in the project
+window … Use the Transform Layer tool to POSITION AND SCALE the patch so that
+the lines are covered."** The patch redraws its target **only inside that
+disc** — which is what lets "part of a layer appear behind a layer, and
+another part of the same layer in front of it".
+
+Three experiments on Moho's own renders of `AddBone.animeproj`, each diffing
+the document rendered with and without the patch:
+
+| experiment | result | what it rules out |
+|---|---|---|
+| scale the patch ×5 | covered region grew from 80 to 1,287 px, x extent unchanged | the transform scaling the artwork |
+| translate the patch away from its target | paints **nothing at all** | the transform moving the artwork |
+| sweep scale 0.25 → 3.0 and solve for the growth | radius = **36 px per unit of scale** at 720p, i.e. **0.1 Moho units**, centred on the patch's own translation | a radius of 1, or a centre elsewhere |
+
+The predicted centre for `Leg_L-Patch` lands **0.4 px** from the measured one.
+
+The disc also follows the patch's **own bone binding**, not the target's:
+`DonkeyAndMan.mohoproj`'s two patches are rigidly bound to bones 8 and 6, and
+only running the patch's own rigging through the deform chain puts the
+computed disc over the region Moho actually repaints (11.8 px from the centre
+of a 16.8 px disc; ignoring the bone puts it 137 px away).
+
+Measured effect of adding the clip, in isolation (mean |difference| against
+Moho's own PNG render of the same frame): **0.702 → 0.682** on
+`AddBone.animeproj` and **3.940 → 3.930** on `DonkeyAndMan.mohoproj`. Small,
+because most of what the clip removes was repainting colours already
+underneath — on `AddBone` it stops 6,081 px being painted, of which only ~400
+were visibly wrong.
 
 **A resolved patch duplicates its target's fill only, never its outline.**
 This part *is* confirmed directly against the Moho app (not just against this
@@ -1412,18 +1654,26 @@ Ranked by how visible the difference should be:
    exists for it. **(19-file finding.)** *(Until the `.get()` defaulting was
    added this was a hard failure to load — `KeyError: 'weight_in'` — not a
    rendering-accuracy gap.)*
-2. `layer_effects.alpha` — 9 layers should be 60% opaque. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
-3. `blend_mode: 1` — 16 layers blend non-normally. ([§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used))
+2. ~~`layer_effects.alpha`~~ — **fixed for leaf layers.** 139 leaf layers
+   across 15 files set a non-1 opacity (11 of them animated); both
+   exporters now apply it, measured as a plain linear blend. A
+   *container's* own alpha remains undecoded and is warned about rather
+   than guessed — 5 layers corpus-wide. ([§ 6.3a](#63a-layer-opacity))
+3. ~~`blend_mode`~~ — **fixed.** 168 layers across 18 files blend
+   non-normally (`1` Multiply / `2` Screen / `3` Overlay); both exporters now
+   apply it. ([§ 6.6](#66-blend_mode))
 4. `ImageLayer` — 15 layers (one document) silently drop their raster
    artwork entirely, since this is a vector-only exporter. **(19-file
    finding.)** ([§ 6.5](#65-imagelayer-19-file-finding))
-5. `style.fill_style` / `.line_style` / `.fill_style2` holding `SS_Crayon`,
-   `SS_Soft`, `SS_Shadow`, or `SS_Texture2` — 43 occurrences total across 6
-   files render as a flat fill/stroke instead of Moho's textured, blurred,
-   shadowed, or textured-fill effect. **(19-file finding, supersedes the
-   original "25 styles stroke with a gradient" item — that count is now 116
-   `SS_Gradient2` occurrences, plus these 43 non-gradient ones.)**
-   ([§ 8.3](#83-style-effect-variants-19-file-finding))
+5. `style.fill_style` / `.line_style` / `.fill_style2` holding any effect
+   other than `SS_Gradient2` — **486 effect objects reaching 450 drawn
+   shapes**, across 21 files, render as a flat fill/stroke instead of Moho's
+   halo, shading, soft edge, texture, shadow or crayon. `SS_Halo` is the
+   single biggest contributor at 198 drawn shapes in 10 files. Each one now
+   warns per shape rather than failing silently. **(46-file finding, which
+   roughly *tenfolds* the earlier 19-file count of 43 — the two effect types
+   it had missed entirely, `SS_Halo` and `SS_Shaded`, turned out to be the
+   two most common after gradients.)** ([§ 8.3](#83-style-effect-variants-46-file-finding))
 6. `extra_sketchy` / `extra_lines: 5` — 2 layers should draw repeated jittered strokes. ([§ 6.4](#64-type-specific-fields))
 7. `channel.interp` — non-linear timing on `pose`/`anim_*`; exact at keyframes, off between them. Only matters for a `--frame N` that is not a keyframe. ([§ 5.3](#53-the-interp-entries))
 8. `bone.scaling_mode: 2` — 242 bones; possibly related to the preserved asymmetric bone scale. ([§ 9](#9-bones-and-skinning))
@@ -1531,7 +1781,7 @@ This is a living reverse-engineering effort, not a specification. Fields whose
 - `SS_Crayon`/`SS_Soft`/`SS_Shadow`/`SS_Texture2` internals — `rand_seed`,
   `clear_background`, `reduce_randomization`, `fill_mode`, and the interplay
   between a shape's `fill_style` and `fill_style2` when both are present.
-  **(19-file finding.)** ([§ 8.3](#83-style-effect-variants-19-file-finding))
+  **(19-file finding.)** ([§ 8.3](#83-style-effect-variants-46-file-finding))
 - The `g_<number>` boolean toggles and `psd_layers` in a layer's own
   `metadata` bag. **(19-file finding.)** ([§ 6.4](#64-type-specific-fields))
 - **Smart Warp** — a whole Moho deformation feature with **no representation

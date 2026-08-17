@@ -66,6 +66,7 @@ someone loads the output in lottie-web:
 |---|---|---|
 | Q1 | Is Lottie's `op` exclusive? `LottieExporter.export` assumes `end_frame + 1` | OPEN |
 | Q2 | Is `Bandit.mohoproj`'s inherited `masking == 2` ordering defect more or less visible in a Lottie player than in SVG? | OPEN |
+| Q3 | Does a player composite layer `bm` the way this writer assumes? A mesh layer's blend mode is emitted (see the post-plan addition below), but Lottie blends against everything beneath the layer in the composition, while Moho stops at the layer's own container. Confirmed equivalent only where the containers above paint nothing — true for every blending layer in the corpus, unverified in general. | OPEN |
 
 (The original Q2 - "does a paint operator apply to the shapes the writer
 intends" - turned out to be resolved BY DESIGN, not by a player: see Task 8's
@@ -1727,3 +1728,104 @@ not a structural defect), with zero frames left above the 3% threshold
 that previously flagged frames 35-41 and 102-114. Without `pyclipper`
 installed, or on a document where this never applies, output is
 byte-identical to before this fix.
+
+---
+
+### Post-plan addition: layer blend modes (`blend_mode` -> Lottie `bm`)
+
+A layer's Moho `blend_mode` is now written as the Lottie layer's own `bm`.
+Previously it was read by neither exporter, so 168 layers across 18 sample
+documents composited Normal when they should not have.
+
+**The mapping is by name, not by value.** Moho's enum and Lottie's agree only
+for 0/1/2/3 (Normal, Multiply, Screen, Overlay) and diverge from 4 on — Moho's
+4 is Add, Lottie's 4 is Darken — so `BLEND_MODE_LOTTIE` translates each entry
+explicitly. Moho's own ordering is not documented in its manual; it was read
+out of the Moho 14.4 binary, where the blend-mode menu's localisation keys sit
+in one contiguous run. Only 1/2/3 appear in any sample document, and only those
+three are confirmed (by rendering, on the SVG side — see
+`moho-project-file-format.md` § 6.6). An unmapped value produces the counted
+warning `blend_mode_unknown` and composites Normal.
+
+**One Moho layer can become several Lottie layers** — a `combo_mode` split, or
+one window per `SwitchLayer` activation — so the blend mode is stamped onto
+every layer produced for it, not just the first.
+
+**Containers are dropped, with a counted warning** (`blend_mode_container`, 3
+layers corpus-wide). A `GroupLayer`/`BoneLayer`/`SwitchLayer` becomes no Lottie
+layer of its own in this writer's flat model, so nothing is left to carry the
+blend. This is also why the mesh-layer case is close-but-not-exact: see Q3 in
+the open-questions table above.
+
+Verified: `--validate` passes on the affected documents; the container warning
+fires on `Snow-girl/Snow-girl-cut1.mohoproj` (its `Layer 5` group is Multiply)
+while the same document's seven blending mesh layers are applied on the SVG
+side. `make check-reference` still passes. Note that `make check-lottie` was
+already failing before this change (88 geometry disagreements on `Bandit`) and
+still fails identically — that is a pre-existing defect, not a regression from
+this work.
+
+---
+
+### Post-plan addition: the document camera, and animated layer visibility
+
+Both of these arrived through `moho2svg.py` and reach this writer for free,
+because it consumes the same `walk_render_tree` and the same `to_px` the SVG
+side does. No code in `moho2lottie.py` changed.
+
+**Camera.** `animated_values.camera_track`/`camera_zoom` are now part of the
+Moho-space-to-pixel projection (see `moho-animation-and-transform.md` § 9 for
+the measured model). Because this writer bakes all geometry into canvas
+pixels anyway, a camera move simply becomes baked vertex motion — which is
+exactly the right representation here, and needs no Lottie camera layer.
+Measured on `DonkeyAndMan.mohoproj` (which animates both channels): the full
+export is **51.9 MB with the real camera vs 52.2 MB with the camera pinned to
+its default**, i.e. baking the camera costs nothing, because every vertex was
+already keyframed per frame.
+
+A `camera_immune` layer projects through the default camera instead, so it
+stays put while the camera moves — same behaviour as the SVG writer.
+
+**Animated visibility.** `layer_effects.visibility` now gates whether a layer
+is walked at all, so a layer Moho has switched off no longer appears in the
+Lottie output either. This interacts well with the existing windowing logic:
+a layer that is invisible for part of the range simply stops being active on
+those frames, which `_windows` already turns into a narrower `ip`/`op` span
+(or several).
+
+Verified: `make check-reference` passes; `--validate` passes on the affected
+documents; `make check-lottie` still fails with exactly the same 88
+pre-existing disagreements as before this change, i.e. nothing new.
+
+### Post-plan addition: layer opacity and the decoded masking enums
+
+**Layer opacity.** `layer_effects.alpha` is now emitted as each produced
+Lottie layer's transform `o` (a percentage), static when the value holds and
+keyframed when it moves, through the same `_scalar_property` stroke widths
+and gradient stops already use. 139 leaf layers across 15 documents set it,
+11 of them animated. See
+[`moho-project-file-format.md` § 6.3a](moho-project-file-format.md#63a-layer-opacity)
+for the measurement — a plain linear blend, so Lottie's own `o` is an exact
+match rather than an approximation.
+
+A *container's* alpha is not folded in, for two independent reasons: this
+writer has no Lottie layer for a container at all (the flat model), and
+Moho's own container-alpha behaviour is undecoded anyway. The shared tree
+walk warns about it, which covers both exporters.
+
+**Masking enums.** The full eight-value `masking` enum and the three-value
+`group_mask` enum are decoded (see
+[`moho-project-file-format.md` § 10](moho-project-file-format.md#10-masking)).
+Two of the three consequences reach this writer for free, because they live
+in `walk_render_tree`: a layer in one of the three "keep invisible" modes is
+no longer emitted, and every non-zero mode is now exempt from clipping
+rather than only modes 1 and 2. The third — building the mask incrementally
+per child, so a subtract or a mid-stack clear is honoured — is **not** in
+this writer yet: it still uses `Exporter._mask_sources`, the flat "union of
+every `masking == 2` child" model. Fifteen containers in the corpus have a
+mask this gets wrong in shape (the artwork is still drawn and still masked,
+so nothing vanishes silently).
+
+Verified: `make check-reference` passes; all 46 documents export; `--validate`
+passes; `make check-lottie` still fails with exactly the same 88 pre-existing
+disagreements, i.e. nothing new.

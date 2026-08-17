@@ -148,9 +148,9 @@
       "type": "object",
       "description": "Document-level channels: camera and a document-wide timeline-markers string. Every sample has exactly one keyframe (frame 0) on all five - i.e. an implicit fixed, unmoved, unzoomed camera in every sampled document. NOT read by moho2svg.py, which therefore renders with an implicit fixed camera regardless - untested against a document that actually moves/zooms the camera.",
       "properties": {
-        "camera_track": { "$ref": "channel.schema.json#/$defs/Vec3Channel", "description": "Camera position. Default observed value {0, 0, 3.732051} (the default camera distance)." },
+        "camera_track": { "$ref": "channel.schema.json#/$defs/Vec3Channel", "description": "Camera position. The default is {0, 0, 3.732051} = {0, 0, 2 + sqrt(3)}, chosen so that (2 + sqrt(3)) * tan(15 degrees) = 1 exactly and the visible half-height is therefore exactly 1 Moho unit. ANIMATED in 12 of the 46 sample documents. Applied by both exporters; see docs/moho-animation-and-transform.md section 9 for the measured projection." },
         "camera_pan_tilt": { "$ref": "channel.schema.json#/$defs/Vec2Channel" },
-        "camera_zoom": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "camera_zoom": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Camera zoom, as a field-of-view divisor: the half vertical FOV is exactly (30 / camera_zoom) degrees, measured against Moho's own renders at zoom 1/2/3/4/6. Default 2 (a 15-degree half-FOV). ANIMATED in 10 of the 46 sample documents. Applied by both exporters." },
         "camera_roll": { "$ref": "channel.schema.json#/$defs/ValChannel" },
         "timeline_markers": { "$ref": "channel.schema.json#/$defs/StringChannel" }
       },

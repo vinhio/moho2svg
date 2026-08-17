@@ -7,9 +7,12 @@ counterpart to `docs/moho-project-file-format.md`, which is the *semantic,
 evidence-based* companion document. Read both; neither replaces the other
 (see [§ 6](#6-what-this-schema-cannot-tell-you)).
 
-Built from, and validated against, all 19 real project files tracked in
-`moho/` (gitignored — see the repository's own `CLAUDE.md`), spanning format
-version **1021** through **1045**.
+Built from, and validated against, all **46** real project files under `moho/`
+(gitignored — see the repository's own `CLAUDE.md`), spanning format version
+**1021** through **1045**. (It was originally built against 19 of them; the
+46-file pass added the `ParticleLayer` and `NoteLayer` types, the `Halo` and
+`Shaded` style effects, and decoded `blend_mode` and `fill_style_id`/
+`line_style_id`/`fill_style2_id`.)
 
 ---
 
@@ -18,10 +21,10 @@ version **1021** through **1045**.
 | File | Defines |
 |---|---|
 | `channel.schema.json` | `Channel` — the single most-repeated structure in the format (500,000+ instances across the sample set): `ValChannel`, `ColorChannel`, `Vec2Channel`, `Vec3Channel`, `BoolChannel`, `StringChannel`, plus `InterpEntry` and `ActionRef` (Smart Bone overrides). |
-| `style.schema.json` | `Style` (a document-wide named style, and — same shape — a shape's own inline style) plus the five styled-fill/stroke effect variants a `fill_style`/`fill_style2`/`line_style` slot can hold: `Gradient` (`SS_Gradient2`), `Crayon` (`SS_Crayon`), `SoftStyle` (`SS_Soft`), `ShadowStyle` (`SS_Shadow`), `Texture2` (`SS_Texture2`). |
+| `style.schema.json` | `Style` (a document-wide named style, and — same shape — a shape's own inline style) plus the **seven** styled-fill/stroke effect variants a `fill_style`/`fill_style2`/`line_style` slot can hold: `Gradient` (`SS_Gradient2`), `Halo` (`SS_Halo`), `Shaded` (`SS_Shaded`), `SoftStyle` (`SS_Soft`), `Crayon` (`SS_Crayon`), `Texture2` (`SS_Texture2`), `ShadowStyle` (`SS_Shadow`). |
 | `mesh.schema.json` | `Mesh`, `MeshPoint`, `Curve`, `CurvePoint`, `Edges`, `Shape`, `PointGroup`. |
 | `skeleton.schema.json` | `Skeleton` and `Bone`. |
-| `layer.schema.json` | `LayerCommon` and `LayerContainer` (the two composition bases), the discriminated union `Layer` = `MeshLayer` \| `BoneLayer` \| `GroupLayer` \| `SwitchLayer` \| `PatchLayer` \| `TextLayer` \| `ImageLayer`, the shared per-layer effect blocks (`LayerEffects`, `LayerShadow`, `LayerShading`, `PerspectiveShadow`, `MotionBlur`, `Physics`, `Transforms`, `LayerOutline`, `LayerColor`, `FileRef`, `PlainRGBA`), and `Mesh3DOptions`, `LayerMetadata`, `ScriptData`, `ActionRegistryEntry`. |
+| `layer.schema.json` | `LayerCommon` and `LayerContainer` (the two composition bases), the discriminated union `Layer` = `MeshLayer` \| `BoneLayer` \| `GroupLayer` \| `SwitchLayer` \| `PatchLayer` \| `TextLayer` \| `ImageLayer` \| `ParticleLayer` \| `NoteLayer`, the shared per-layer effect blocks (`LayerEffects`, `LayerShadow`, `LayerShading`, `PerspectiveShadow`, `MotionBlur`, `Physics`, `Transforms`, `LayerOutline`, `LayerColor`, `FileRef`, `PlainRGBA`), and `Mesh3DOptions`, `LayerMetadata`, `ScriptData`, `ActionRegistryEntry`. |
 | `project.schema.json` | The **root** document schema — `$ref`s all of the above — plus `ProjectData`, `AnimatedValues`, `DocumentViewState`, `DocumentMetadata`, `PlainVec2`/`PlainVec3`. Validate a whole `.mohoproj`/`.animeproj` file against **this** file. |
 
 Each file's own `$defs` are self-contained; cross-file references use plain

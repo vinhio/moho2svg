@@ -80,7 +80,48 @@ bottom edge, regardless of the pixel resolution.  So:
     pixel_x = moho_x * (height / 2) + width / 2
     pixel_y = height / 2 - moho_y * (height / 2)        (y is flipped)
 
-This is implemented once, in Exporter._to_pixels.
+That is the DEFAULT-CAMERA form of the mapping.  The general one goes through
+the document camera - see the next section - and collapses to exactly the two
+lines above whenever the camera is where Moho puts it.  Implemented once, in
+CameraView.to_pixel, reached via Exporter._to_pixel.
+
+--------------------------------------------------------------------------------
+CAMERA
+--------------------------------------------------------------------------------
+`doc.animated_values` carries the document camera: `camera_track` (Vec3
+position), `camera_zoom` (Val), plus `camera_roll` and `camera_pan_tilt`.
+It is a real perspective camera, and for a point on the z = 0 plane it
+reduces to a plain 2D scale-and-translate:
+
+    half_fov = (pi / 6) / camera_zoom            # 30 degrees at zoom 1
+    scale    = (height_px / 2) / (camera_z * tan(half_fov))
+    pixel_x  = (moho_x - camera_x) * scale + width_px / 2
+    pixel_y  = height_px / 2 - (moho_y - camera_y) * scale
+
+The `(30 / zoom)` degrees relation and the pure-translation nature of the pan
+were both MEASURED against Moho's own renders rather than assumed - see
+CameraView's own docstring for the experiment and its residuals (within
+0.017% at every setting tested).
+
+Moho's default camera is z = 2 + sqrt(3) with zoom 2, and
+(2 + sqrt(3)) * tan(15 degrees) = 1 exactly, so the default scale is exactly
+height/2 and the whole camera vanishes from the arithmetic.  That identity is
+why this file ignored the camera for so long without anyone noticing: a
+document only diverges once someone actually animates it.  12 of the 46
+sample documents animate `camera_track` and 10 animate `camera_zoom`; on
+`Snow-girl-cut51.mohoproj` at frame 100 (zoom 2 -> 13.5) ignoring it put 91%
+of the canvas' pixels more than 20 levels away from Moho's own render.
+
+A layer with `camera_immune` set (manual ch. 12.02, "Immune to camera
+movements" - for backgrounds, titles, logos) is projected through the DEFAULT
+camera instead, and the flag is inherited by its descendants.  `--local`
+likewise ignores the camera, since it means "the mesh's own raw coordinates
+at canvas scale".
+
+NOT modelled: per-layer parallax (a layer translated in z should divide by
+`camera_z - layer_z`), `camera_roll` and `camera_pan_tilt`.  The last two are
+never non-default anywhere in the corpus; the first matters for 6 documents,
+2 of which also animate the camera.  See CameraView for the numbers.
 
 --------------------------------------------------------------------------------
 BEZIER CURVES: WHAT MOHO STORES VS. WHAT SVG NEEDS
@@ -491,16 +532,64 @@ Two *separate* fields are involved - reading only one of them (an earlier,
 wrong, version of this rule) gets several real documents backwards:
 
     group_mask   on a *container* (GroupLayer OR BoneLayer - the layer type
-                 does not matter).  0/falsy = "this container does not mask its
-                 children at all"; non-zero = masking is active.
-    masking      on each *child* of a masking container:
-                    2  this child's geometry defines the mask (it is still
-                       drawn normally, i.e. being the mask source does not hide
-                       it)
-                    1  "don't mask this layer" - drawn normally, ignoring the
-                       mask
-                    anything else (typically 0) - clipped to the union of all
-                       masking==2 siblings
+                 does not matter).  0 = "this container does not mask its
+                 children at all"; 1 = masking on, the mask starts FULL
+                 ("Reveal all"); 2 = masking on, the mask starts EMPTY
+                 ("Hide all", by far the common case).
+    masking      on each *child* of a masking container - an eight-value
+                 enum, one per entry of the manual's own Layer Masking menu
+                 (ch. 12.05).  See the MASK_* constants; in draw order each
+                 child either consumes the mask or edits it:
+                    0  clipped to the mask as it stands right now
+                    1  "don't mask this layer" - drawn, mask untouched
+                    2  + add this layer to the mask; drawn
+                    3  - subtract this layer from the mask; drawn
+                    4  + add to the mask, but do NOT draw the layer
+                    5  - subtract from the mask, and do NOT draw it
+                    6  + CLEAR the mask, then add this layer; drawn
+                    7  + clear, then add, and do NOT draw it
+
+HOW THE ENUM WAS DECODED.  Twice over, in agreement.  First, the declaration
+order of GROUP_MASK_*/MM_* in Moho's own scripting header (Contents/
+Resources/Support/Pro/Extra Files/Lua Interfaces/pkg_moho.lua_pkg), which
+names eight modes where the manual's bulleted list shows only seven (it
+omits "subtract, invisibly").  Second, and independently, by rendering every
+value with Moho itself on SlickObjectTransition.mohoproj at frame 36:
+
+  - Probing the TOPMOST child (nothing above it can consume its mask
+    contribution) split the eight values into exactly three behaviours:
+    {0} clipped, {1,2,3,6} drawn unclipped, {4,5,7} not drawn at all -
+    three invisible modes, matching the three *_INVIS constants exactly.
+  - Probing a MIDDLE child ("Sky", 85,284 px, entirely inside the earlier
+    "Frame" contribution) separated the rest by WHERE each one changed the
+    frame: mode 3 changed only pixels inside Sky (it removes Sky from the
+    mask); mode 6 changed only pixels outside it, all in Frame-minus-Sky
+    (the mask became Sky alone, discarding Frame); mode 5 blanked all of
+    Sky (subtract AND not drawn).
+  - Pairing visible modes to invisible ones by minimum difference gives the
+    perfect matching (2,4), (3,5), (6,7) - each pair differing only by the
+    probe layer's own artwork.
+
+Three further rules, each measured the same way rather than assumed:
+
+  - EVERY non-zero mode draws UNCLIPPED, including a mode that contributes
+    to the mask.  Checked with the mask deliberately empty at the moment the
+    probe is reached: modes 1, 2, 3 and 6 all drew the layer in full, and
+    only mode 0 clipped it away.
+  - `masking` is completely INERT when the container's group_mask is 0 -
+    even the "keep invisible" modes, which do NOT hide the layer then.
+    Setting the probe to 4, 5 or 7 under group_mask == 0 changed Moho's own
+    render by exactly 0 pixels each time.  See Exporter._container_masks.
+  - A layer that does not RENDER contributes nothing to the mask.  Hiding
+    the one mask source via the `visible` flag, or via layer_effects.
+    visibility, or fading it out with layer_effects.alpha, each produced
+    exactly the same render as having no source at all.
+
+THE MASK IS BUILT INCREMENTALLY, not once per container: a mode-0 child is
+clipped against the mask as it stands WHEN THAT CHILD IS DRAWN.  Ten
+containers in this repository's own samples depend on it (a masked child
+below a later "clear"), so Exporter._mask_plan returns one state per child
+rather than one mask per container.
 
 A masking==2 child does not always carry its own mesh: a GroupLayer can be
 masking==2 purely to act as a masking container (e.g. "BellyTexture" in the
@@ -681,23 +770,33 @@ move.  Document._resolve_patch_layers finds the target (by uuid, across the
 whole document, after the whole tree is built) and copies its `mesh` onto the
 PatchLayer.
 
-The PatchLayer's OWN transform/parent_bone/flexi_bone_subset/origin are
-deliberately NOT used, even though they exist in the raw JSON and look like
-they ought to matter - confirmed wrong empirically: every PatchLayer found
-across this tool's reference documents carries some bizarre, unrelated-looking
-own transform (a 0.147x non-uniform Y squash plus an 8.9 degree rotation on
-"ayasi-Patch"; a uniform ~0.49x scale on "Leg_L-Patch"/"Leg_R-Patch" in the
-AddBone rig), while its *target* consistently has the identity transform
-(scale 1, translation 0).  Rendering with the patch's own transform (this
-tool's first attempt) reproduced exactly that: a squashed sliver floating
-away from where the target actually renders, visibly wrong compared to the
-target's own rendered position.  Copying the target's transform/parent_bone/
-flexi_bone_subset/origin onto the patch instead - so it renders as a
-duplicate of the target, just at a different point in the draw order - fixed
-that.  This is a HEURISTIC, not a confirmed-exact reverse-engineering: there
-is no independent Moho SVG export of a document using PatchLayer available to
-verify pixel-for-pixel (Moho's own SVG exporter's behaviour for PatchLayer is
-itself unconfirmed here) - see KNOWN GAPS.  A patch whose target never
+The PatchLayer's OWN transform/parent_bone/flexi_bone_subset/origin are used
+for its CLIP REGION, and must NOT be used for its ARTWORK.  Both halves of
+that were established the hard way.
+
+The artwork half came first: every PatchLayer carries some bizarre,
+unrelated-looking own transform (a 0.147x non-uniform Y squash on
+"ayasi-Patch"; a uniform ~0.49x scale on AddBone's "Leg_L-Patch") while its
+*target* has the identity transform.  Rendering the mesh through the patch's
+own transform - this tool's first attempt - produced exactly what that
+implies: a squashed sliver floating away from where the target renders.  The
+target's transform/parent_bone/flexi_bone_subset/origin are copied onto the
+patch instead, which puts the artwork where it belongs.
+
+What that left unexplained is why the patch carries a transform at all.  The
+manual answers it (ch. 11.15): creating a patch gives you "a new CIRCLE in
+the project window ... Use the Transform Layer tool to POSITION AND SCALE the
+patch so that the lines are covered."  The transform is not a transform of
+artwork - it places a DISC, and the patch redraws its target only inside it.
+That is what makes a patch able to "let part of a layer appear behind a layer,
+and another part of the same layer in front of it": the disc is the part that
+comes forward.
+
+MEASURED against Moho's own renders, not inferred - see
+Exporter._patch_clip_path for the three experiments, the 0.1-Moho-unit radius
+they pin down, and the confirmation that the disc follows the patch's own
+BONE binding rather than the target's.  So the two readings of the same
+fields coexist: wrong for the mesh, right for the clip.  A patch whose target never
 resolves (missing/dangling uuid, or the target itself never gets a mesh) is
 left exactly as before this feature existed: `mesh = None`, drawing nothing.
 
@@ -721,14 +820,150 @@ wherever it is rendered independently elsewhere in the tree.
 --------------------------------------------------------------------------------
 GRADIENTS
 --------------------------------------------------------------------------------
-A gradient lives on a *named style* (StyleTable), never inline on a shape; a
-shape opts in by leaving `define_fill_color` false and inheriting a style whose
-fill_style.type == "SS_Gradient2".  gradient_type 0 is linear, 1 is radial;
-GradientBuilder places both in objectBoundingBox-style percentages centred on
-the shape and sized/rotated by the shape's own effect_scale/effect_rotation.
-This placement is approximate - it reproduces the correct colours and general
-orientation but has not been matched pixel-for-pixel against Moho's own
-(differently-parameterised) gradient placement.
+A gradient is a SHAPE EFFECT (see the next section) whose type is
+"SS_Gradient2".  It can sit either on a *named style* (StyleTable) or inline on
+the shape's own style - both occur, and neither is rare: across the 46 sample
+documents there are 1160 named-style vs 652 inline `fill_style` values, of
+which 241 inline ones are gradients.  (An earlier version of this note claimed
+gradients were named-style-only; that was wrong.  It went unnoticed because
+ResolvedStyle.resolve starts `out` as a copy of the shape's own style, so the
+inline case already worked - only the *explanation* was wrong.)  Inheriting the
+named style's gradient additionally requires the shape to leave
+`define_fill_color` false, so that it is not overriding that slot itself.
+
+gradient_type 0 is linear, 1 is radial; GradientBuilder places both in
+objectBoundingBox-style percentages centred on the shape and sized/rotated by
+the shape's own effect_scale/effect_rotation.  This placement is approximate -
+it reproduces the correct colours and general orientation but has not been
+matched pixel-for-pixel against Moho's own (differently-parameterised) gradient
+placement.
+
+Gradient OUTLINES (`line_style`, as opposed to the fill's `fill_style`) go
+through the same builder and become a paint server on the outline element:
+`stroke` for a uniform-width outline, `fill` for a tapered one (which is filled
+geometry, not a stroke - see TAPERED STROKES).  Unlike fills, every one of the
+116 gradient outlines in the sample corpus sits on a named style; none is
+inline.  Two caveats, both reported rather than hidden:
+  - A gradient outline on a BRUSH stroke is not applied.  A brush stroke tints
+    real image pixels instead of painting with `stroke`/`fill`, so there is no
+    paint server for a gradient to attach to.  This is not a corner case: all
+    6 drawn gradient outlines in the sample corpus are brush strokes, so this
+    warning is what the corpus actually exercises, and the gradient path below
+    is what it does NOT.
+  - Consequently the gradient-outline path has no natural test in the corpus.
+    It was exercised by hand, on a copy of WhatIsBone.animeproj with the brush
+    stripped off its "iris" style, rendered both by this tool and by Moho's own
+    CLI: the 4 affected outlines do pick up their gradient, and the result
+    moves toward Moho's render (mean |diff| 26.41 -> 26.04 over the 257 pixels
+    that changed) without reproducing it.  That residual is the same
+    gradient-placement approximation described above, so this is best read as
+    "structurally right, placement as approximate as every other gradient here".
+
+--------------------------------------------------------------------------------
+SHAPE EFFECTS (fill_style / fill_style2 / line_style)
+--------------------------------------------------------------------------------
+A shape can carry up to three effects, in three separate slots: `fill_style`
+and `fill_style2` over its fill, and `line_style` over its outline.  Each slot
+also has a parallel `<slot>_id` integer naming the effect KIND, which agrees
+with the effect object's own `type` string in all 2003 instances across the
+sample corpus, with no exceptions:
+
+    0 SS_Shaded     "Shaded" fill effect       (manual ch. 13.02)
+    2 SS_Soft       "Soft edge" effect
+    4 SS_Halo       "Halo" fill effect         (manual ch. 13.02)
+    9 SS_Gradient2  gradient                   (the only one rendered here)
+   10 SS_Texture2   texture
+   11 SS_Shadow     drop shadow
+   12 SS_Crayon     crayon/pencil texture
+
+Only SS_Gradient2 is rendered.  Every other effect, in any of the three slots,
+emits a per-shape stderr warning and then draws the plain colour underneath.
+
+A REFERENCE SVG CANNOT VALIDATE THIS.  Moho's own SVG export drops the blurred
+effects too: its export of Snow-girl-cut51.mohoproj, a document with 108
+halo-filled shapes, contains 355 <path> elements and 106 opacity attributes but
+ZERO `filter`/`feGaussianBlur` elements - and a halo is a blurred coloured rim,
+which no combination of paths and opacity can express.  The same export also
+carries zero `mix-blend-mode` despite the document's 13 blend-mode layers.
+Moho's PNG render of that same frame shows both.  (This is specifically about
+the blurred/composited effects; Moho's SVG export does emit gradients in
+general - its export of WhatIsBone.animeproj contains 96 of them.)  So effects
+and blend modes are raster-render territory: use `Moho -r FILE -f PNG` to check
+them, not a reference SVG.
+
+By drawn-shape count across the corpus, what is being skipped is: SS_Halo 198,
+SS_Shaded 94+12, SS_Soft 91+31+2, SS_Texture2 12, SS_Crayon 7, SS_Shadow 3.
+
+--------------------------------------------------------------------------------
+LAYER OPACITY
+--------------------------------------------------------------------------------
+`layer_effects.alpha` is a layer's own opacity, keyframeable, sitting in the
+same General-tab Compositing Effects group as the animated `visibility` this
+file already honours.  139 LEAF layers across 15 of the sample documents set
+it to something other than 1 (11 of them animate it); it was silently
+ignored until now, which left artwork on screen that Moho has faded out
+entirely - the clearest case being Snow-girl-cut14's "/Layer 11/Layer 2",
+whose alpha keys 1 -> 0 -> 0 -> 1 over frames 0..9 and which Moho renders as
+zero pixels at frame 1 against 45,671 at frame 30.
+
+MEASURED, against Moho's own renders: on SlickObjectTransition.mohoproj's
+"Sun", rendering at 0.5 lands on the exact midpoint of the 1.0 and 0.0
+renders (mean error 0.13/255 over the layer's own pixels).  So it is a plain
+linear blend and maps directly onto SVG `opacity` on the layer's own <g>
+(and onto Lottie's transform "o", as a percentage).
+
+A CONTAINER's own alpha is NOT applied - see Layer.alpha_at for the three
+models that were measured and why the best of them still scores worse than
+ignoring it.  5 layers in the corpus are affected, and each one warns.
+
+Two consequences beyond the drawing itself, both measured (see MASKING): a
+layer faded to nothing contributes nothing to a mask, and neither does one
+hidden by either visibility mechanism.
+
+--------------------------------------------------------------------------------
+LAYER BLEND MODES
+--------------------------------------------------------------------------------
+A layer's `blend_mode` says how it composites against what is drawn beneath it.
+0 is Normal (plain source-over) and is by far the common case: 3794 of the 3962
+layers in the sample corpus.  The rest are 1 (117 layers), 2 (49) and 3 (2) -
+all but 3 of them MeshLayers, the 3 being GroupLayers.
+
+THE ENUM.  Moho's manual names the modes but never numbers them.  The order
+comes from the Moho 14.4 binary itself, where the blend-mode menu's own
+localisation keys sit in one contiguous run, in menu order:
+
+    0 Normal        4 Add           8 Color        12 Color Burn
+    1 Multiply      5 Difference    9 Luminosity   13 PSD Linear Dodge (Add)
+    2 Screen        6 Hue          10 Soft Light
+    3 Overlay       7 Saturation   11 Color Dodge
+
+CONFIRMED: 1, 2 and 3 - and only those, because they are the only values any
+sample document uses.  Verified end-to-end rather than by inspection: rendering
+Snow-girl-cut51.mohoproj (13 blend-mode layers) with these three mapped to CSS
+`multiply`/`screen`/`overlay` moved this exporter's output measurably toward
+Moho's own PNG render of the same frame - mean |diff| 26.82 -> 20.20 over the
+whole canvas, and 443037 -> 383444 pixels differing by more than 20.  UNVERIFIED:
+4-13.  They are mapped on the strength of the binary's ordering alone; no sample
+document exercises any of them, and an attempt to establish them by rendering a
+document with each value in turn was inconclusive (the layer available to edit
+covered too few, mostly antialiased, pixels to separate the formulas).  An
+unrecognised value warns once and draws Normal rather than guessing.
+
+ISOLATION.  Moho renders each container layer into its own buffer and then
+composites that buffer into its parent, so a blending layer reaches its own
+container's content and no further.  CSS `mix-blend-mode` instead reaches the
+nearest stacking context, so the container - not the blending layer - is the
+element that has to become one.  Exporter._isolation_declaration therefore puts
+`isolation:isolate` on exactly those containers that DIRECTLY hold a blending
+layer; a container whose blending layer is nested deeper needs nothing, because
+that deeper container isolates it by the same rule.  A blend mode also forces a
+wrapping <g> even under --flat, since it is meaningless without one.
+
+moho2lottie.py cannot match this: it flattens the whole tree into one flat
+Lottie layer list, so a container's own blend mode has nowhere to land (counted
+warning "blend_mode_container", 3 layers corpus-wide) and a mesh layer's blend
+reaches everything beneath it in the composition rather than stopping at its
+container.  See that file's own _blend_mode_bm.
 
 --------------------------------------------------------------------------------
 IMAGE LAYERS
@@ -950,11 +1185,40 @@ KNOWN GAPS
     (see MASKING) - the exclusion-band fix only handles a uniform stroke
     width; no reference confirms the right geometry for the other two.
   - Gradient centre/radius placement is approximate (see GRADIENTS).
+  - Every shape effect other than SS_Gradient2 is unrendered - halo, shaded,
+    soft, texture, shadow and crayon all draw as the plain colour underneath
+    (see SHAPE EFFECTS).  Each one warns, so the gap is visible rather than
+    silent, but SS_Halo alone covers 198 drawn shapes across 10 sample
+    documents, so this is the largest remaining APPEARANCE gap in this file.
+    Note that a reference SVG cannot be used to close it: Moho's own SVG
+    export drops shape effects too, so any work here has to be validated
+    against a raster render.
+  - A gradient OUTLINE on a brush stroke is not applied, and the plain
+    gradient-outline path that does exist has no test in the sample corpus
+    (see GRADIENTS for both, and for the by-hand check that stands in for one).
+  - Layer blend modes 4-13 are mapped from the Moho binary's own menu order
+    but never verified against a render, because no sample document uses any
+    of them (see LAYER BLEND MODES).
+  - The camera ignores per-layer parallax, `camera_roll` and
+    `camera_pan_tilt` (see CAMERA).  Parallax is the one of the three with
+    any evidence behind it: 6 documents place a layer at a non-zero z, and 2
+    of those also animate the camera.
   - The flexible-binding weight falloff is unvalidated for overlapping-influence
     cases (see BONE DEFORMATION).
-  - Channel._segment's monotone-cubic curve is a stand-in for Moho's own
-    undecoded easing (no explicit Bezier handle exists for the vast majority
-    of channels - see § 3.5 of moho-animation-and-transform.md).  Usually
+  - Easing is now MOSTLY DECODED, not inferred: `interp[].im` is the
+    interpolation method (see the INTERP_* table), and the four values that
+    cover 99.4% of the corpus' keyframes - Linear, Smooth, Step and Cycle -
+    are each reproduced from a measured curve rather than a guess.  What
+    remains: the other seven methods (0.4% of keyframes, none of them
+    reproduced, all falling back to the older inferred cubic); `im = 9`
+    (Bezier) which would need its `b` handle block read; and the
+    second-order rule Moho applies to a very lopsided pair of slopes, which
+    leaves Smooth ~0.005 Moho units out on 2 of the 6 measured layouts (see
+    Channel._smooth).
+    The note below is kept because it is the measurement that made the old
+    curve's cost concrete, and the same measurement has not been repeated
+    against the new one.  ORIGINAL NOTE: a stand-in for Moho's own undecoded
+    easing.  Usually
     sub-pixel.  Quantified as NOT always sub-pixel on `SketchBone.mohoproj`'s
     `B23.anim_angle` (bone 22, cat_boy skeleton): a 178->216.4->130->159.8deg
     swing reversing direction twice in 14 frames produces up to 50.91px of
@@ -967,15 +1231,16 @@ KNOWN GAPS
     4 sampled frames; the 120-frame comparison against
     moho/track/SketchBone/foot/ that corrected it is the reason to trust
     this entry over a quick visual check next time too).
-  - PatchLayer (see PATCH LAYERS) reuses its target's mesh AND transform - the
-    heuristic part is specifically ignoring the patch's own transform/
-    parent_bone/flexi_bone_subset/origin, which is confirmed necessary (using
-    them renders a wrongly-positioned sliver) but not confirmed as the
-    complete picture - there is no independent Moho SVG export of a
-    PatchLayer-using document to verify pixel-for-pixel against.  (Fill-only,
-    no-outline duplication IS confirmed directly against the Moho app - see
-    PATCH LAYERS - so this remaining gap is narrower than it used to be:
-    transform/position only, not appearance.)
+  - PatchLayer is no longer a heuristic: the patch's own transform places a
+    clip disc of measured radius, and its own bone binding moves that disc
+    (see PATCH LAYERS and Exporter._patch_clip_path).  What is still unproven
+    is the disc's exact EDGE - the radius was solved from how far the covered
+    region grows with the patch's scale, which fixes it to about a pixel, and
+    an anti-aliased or feathered edge would not show up in that measurement.
+    Its effect on the two documents that could be measured is small in
+    isolation: mean |diff| against Moho's own render 0.702 -> 0.682 on
+    AddBone.animeproj and 3.940 -> 3.930 on DonkeyAndMan.mohoproj, because
+    most of what the clip removes was repainting colours already underneath.
   - ImageLayer (see IMAGE LAYERS): position/size is confirmed for a layer
     that only needs ancestor transforms. A `parent_bone == -3` layer whose
     true pose requires ARTICULATION (bending, not just translating) now
@@ -1371,6 +1636,67 @@ def _channel_ever_true(raw: Any) -> bool:
     return any(any(action.pose.val or []) for action in channel.actions)
 
 
+# `interp[i].im` - the interpolation METHOD for the segment leaving keyframe i.
+#
+# DECODED, by two independent routes that agree on all twelve values.
+#
+# ROUTE 1 - MEASUREMENT.  A single layer was given a two-keyframe translation,
+# `im` was set to each candidate in turn, and Moho's own CLI rendered the whole
+# frame range so the layer's per-frame centroid traced the interpolation curve
+# directly.
+#
+# ROUTE 2 - MOHO'S OWN SCRIPTING HEADER.  `Contents/Resources/Support/Pro/Extra
+# Files/Lua Interfaces/pkg_moho.lua_pkg` declares twelve `INTERP_*` constants.
+# Read in declaration order they are exactly the twelve `im` values the corpus
+# contains, and each one matches what route 1 measured:
+#
+#    im  constant            measured curve                        corpus
+#     0  INTERP_LINEAR       exactly linear                        54,456
+#     1  INTERP_SMOOTH       Moho's default; see Channel._smooth 1,656,205
+#     2  INTERP_EASE         a stronger S-curve than SMOOTH         2,582
+#     3  INTERP_STEP         exactly step: holds, then jumps      151,483
+#     4  INTERP_NOISY        non-monotone, overshoots ~7%               7
+#     5  INTERP_CYCLE        the cycle marker (see _parse_cycles)   3,136
+#     6  INTERP_POSE         exactly linear                         1,495
+#     7  INTERP_EASE_IN      S-curve weighted to the start             27
+#     8  INTERP_EASE_OUT     S-curve weighted to the end               34
+#     9  INTERP_BEZIER       needs its own `b` handles                238
+#    10  INTERP_BOUNCE       oscillates about the path                798
+#    11  INTERP_ELASTIC      overshoots ~27%, then settles          2,916
+#
+# Three further cross-checks, all from the same header's own comments:
+#   - "INTERP_CYCLE - val1 = relative starting frame ... val2 = absolute
+#     starting frame, use -1 to ignore this field" is exactly what
+#     _parse_cycles had already derived from rendered output alone.
+#   - "INTERP_NOISY - val1 = noise amplitude, val2 = noise scale.  good
+#     values: 0.1, 0.5" explains the (v1, v2) = (0.1, 0.5) pair that sits on
+#     601,344 entries: it is the noise default, written whatever the mode.
+#   - "INTERP_POSE - val1 = index to the pose" explains im=6's own v1 = 0.0,
+#     and is why those 1,495 entries are pose references rather than the
+#     cycles an earlier `im & 4` test took them for (see _parse_cycles).
+#   - im=9 is independently confirmed as Bezier by a 1:1 match with the `b`
+#     block: 238 of 238 entries carrying one have im=9.
+#
+# ACTED ON HERE: 0, 1, 3, 5 and 6 - the ones whose curve is reproduced
+# exactly - covering 99.4% of the corpus' 1,873,377 entries.  The remaining
+# seven methods keep the older inferred curve; see _segment.
+INTERP_LINEAR = 0
+INTERP_SMOOTH = 1          # Moho's default, and 88.4% of all keyframes
+INTERP_EASE = 2
+INTERP_STEP = 3
+INTERP_NOISY = 4
+INTERP_CYCLE = 5
+INTERP_POSE = 6            # a pose reference; its own segment measures linear
+INTERP_EASE_IN = 7
+INTERP_EASE_OUT = 8
+INTERP_BEZIER = 9          # needs the `b` handle block; not implemented
+INTERP_BOUNCE = 10
+INTERP_ELASTIC = 11
+
+# The methods whose exact curve is known, so `_segment` can dispatch on them.
+INTERP_EXACT = {INTERP_LINEAR, INTERP_SMOOTH, INTERP_STEP, INTERP_POSE}
+
+
 @dataclass(frozen=True)
 class CycleSpec:
     """One "cycle" setting read off a channel's `interp` list.
@@ -1414,16 +1740,27 @@ class Channel:
     depends on context the way it does here.
     """
 
-    __slots__ = ("when", "val", "actions", "cycles")
+    __slots__ = ("when", "val", "actions", "cycles", "modes")
 
     _cache: dict[int, "Channel"] = {}
 
     def __init__(self, when: list[float], val: list[Any], actions: list[ActionRef],
-                 cycles: Sequence[CycleSpec] = ()):
+                 cycles: Sequence[CycleSpec] = (),
+                 modes: Sequence[int] = ()):
         self.when = when
         self.val = val
         self.actions = actions
         self.cycles = tuple(cycles)
+        # `interp[i].im` per keyframe - the interpolation METHOD for the
+        # segment LEAVING keyframe i.  See INTERPOLATION_* and _segment.
+        self.modes = tuple(modes)
+
+    def mode(self, i: int) -> int:
+        """The interpolation method leaving keyframe `i`, defaulting to
+        Moho's own default (Smooth) when the file does not say."""
+        if 0 <= i < len(self.modes):
+            return self.modes[i]
+        return INTERP_SMOOTH
 
     @staticmethod
     def reset_cache() -> None:
@@ -1465,8 +1802,13 @@ class Channel:
             actions = [ActionRef(a.get("name"),
                                  Channel.of(a.get("pose")).without_cycles())
                        for a in (raw.get("actions") or [])]
+            interp = raw.get("interp")
+            modes = tuple(e.get("im", INTERP_SMOOTH) if isinstance(e, dict)
+                          else INTERP_SMOOTH
+                          for e in (interp or ()))
             channel = Channel(raw["when"], raw["val"], actions,
-                              Channel._parse_cycles(raw["when"], raw.get("interp")))
+                              Channel._parse_cycles(raw["when"], interp),
+                              modes)
             Channel._cache[key] = channel
             return channel
         return Channel([0], [raw], [])
@@ -1476,13 +1818,34 @@ class Channel:
         """Read the cycle markers out of a channel's `interp` list.
 
         Moho stores the setting on the keyframe it belongs to, using two
-        general-purpose slots (`v1`, `v2`) whose meaning depends on a flag
-        bit in `im`:
+        general-purpose slots (`v1`, `v2`) whose meaning depends on `im`:
 
-        - `im & 4` marks "this keyframe carries a cycle setting".  Without
-          the bit the slots hold the untouched default `(0.1, 0.5)` or the
-          worked-on-but-not-cycling `(-1, -1)`, so the bit has to be checked
-          first.
+        - `im == 5` marks "this keyframe cycles".  Otherwise the slots hold
+          the untouched default `(0.1, 0.5)` or the worked-on-but-not-cycling
+          `(-1, -1)`, so `im` has to be checked first.
+
+          CORRECTED: this test used to read `im & 4`, i.e. it treated `im` as
+          a bitfield and accepted 4, 5, 6 and 7 alike.  `im` is an ENUM (see
+          INTERP_LINEAR and friends), and the difference is not academic -
+          over the 46-document corpus the bitmask produced 4,539 cycle specs
+          where only 3,040 are real:
+
+              im=5 -> 3,040 accepted    the genuine ones, including the
+                                        Bandit marker validated against
+                                        Moho's own render
+              im=6 -> 1,495 accepted    v1 = 0.0, so `resume` landed on the
+                                        marker frame itself: a zero-length
+                                        cycle
+              im=4 ->     4 accepted    v1 = 0.5, i.e. a half-frame cycle
+              im=7 ->    27 rejected    by the guards below, harmlessly
+
+          Two independent measurements settle it.  Rendering the same
+          two-keyframe motion with `im` set to 5 and to 6 in turn, with
+          IDENTICAL v1/v2, gives a held value for 5 (a degenerate cycle) and
+          a perfectly linear ramp for 6 - so 6 is an interpolation method,
+          not a cycle.  Repeating that for `im = 6` with the exact
+          parameters it carries in the corpus (v1 = 0.0, v2 = -1.0) is still
+          exactly linear, rms 0.0000 against a straight line.
         - `v1 >= 0` means the setting was entered as a RELATIVE frame count,
           and the channel resumes at `when[i] - v1`.
         - otherwise `v2 >= 0` means it was entered as an ABSOLUTE frame, and
@@ -1540,7 +1903,7 @@ class Channel:
             return ()
         specs = []
         for i, entry in enumerate(interp[:len(when)]):
-            if not isinstance(entry, dict) or not (entry.get("im", 0) & 4):
+            if not isinstance(entry, dict) or entry.get("im", 0) != INTERP_CYCLE:
                 continue
             v1, v2 = entry.get("v1", -1.0), entry.get("v2", -1.0)
             if v1 >= 0:
@@ -1582,7 +1945,7 @@ class Channel:
         return Channel(self.when, self.val,
                        [ActionRef(a.name, a.pose.without_cycles())
                         for a in self.actions],
-                       ())
+                       (), self.modes)     # the METHOD survives; only the cycle goes
 
     def action_pose(self, name: str) -> Optional["Channel"]:
         for a in self.actions:
@@ -1701,6 +2064,94 @@ class Channel:
                 return val[i + 1] if frame == when[i + 1] else a
         return val[-1]
 
+    def _smooth(self, i: int, get: Callable[[int], float], a: float, b: float,
+                 t: float, span: float) -> float:
+        """Moho's "Smooth" (`im == 1`), which is 88.4% of every keyframe in
+        the corpus - a DECODED curve, not an inferred one.
+
+        It is a cubic Hermite spline whose tangent at each keyframe is the
+        centred difference in TIME across its two neighbours (Catmull-Rom),
+        with three qualifications, each of them measured:
+
+        1. The tangent is ZERO at the channel's first and last keyframes.
+        2. The tangent is ZERO where either adjacent segment is FLAT, which
+           is what keeps a held value held instead of bulging out of it.
+        3. There is NO monotone clamp otherwise.  A sign change between the
+           two adjacent slopes does NOT flatten the tangent - Moho lets the
+           curve overshoot there.
+
+        MEASURED, by giving one layer a translation with the keyframe layout
+        below, rendering the whole range with Moho's own CLI, and reading the
+        per-frame centroid back as the curve.  Mean |error| in Moho units
+        (2 units span the canvas height, so 1 unit = 360 px at 720p):
+
+            keyframes / values          Catmull-Rom  THIS   +3x limit
+            1,9,25   -0.6,-0.3,+0.6      0.000013  0.000013  0.000013
+            1,13,25  -0.6,+0.6,-0.6      0.000010  0.000010  0.000010
+            1,9,25   -0.6,-0.6,+0.6      0.053008  0.000008  0.000008
+            1,17,25  -0.6,+0.6,+0.6      0.052992  0.000008  0.000008
+            1,9,25   -0.6,-0.55,+0.6     0.006567  0.006567  0.026559
+            1,7,15,25 -0.6,.1,-.2,+0.6   0.004265  0.004265  0.012502
+            ---------------------------  --------  --------  --------
+            total                        0.116855  0.010871  0.030863
+
+        Rows 3 and 4 are what qualification 2 buys; row 6 is what rules out
+        flattening on a sign change (doing so costs 0.0125 there); rows 5
+        and 6 are what rule out every clamp variant tried - a 3x, 2x or 1x
+        limit on the smaller adjacent slope, and Fritsch-Carlson's weighted
+        harmonic mean, all scored WORSE overall.
+
+        Rows 5 and 6 are also the two this does not reproduce exactly
+        (~0.005 units, under 2 px at 720p). Whatever second-order rule Moho
+        applies to a very lopsided pair of slopes is still undecoded; no
+        candidate tried explains it, and every clamp that might have made it
+        worse elsewhere.
+
+        WHAT THIS REPLACED, and what it cost.  The previous curve was an
+        inferred monotone cubic, picked as the best of four candidates by
+        arm-mask IoU on one rig (see _segment).  Re-scored against the same
+        reference frames `make check-reference` uses:
+
+            Bandit (103 frames)   Muzzle max dx   4.80 -> 0.79
+                                  Belly  max dx   3.65 -> 0.91
+            SketchBone (12)       mean dx/dy fell for 5 of 7 groups
+            BoneDynamics (29)     mean dy fell for all 4 groups; several
+                                  MAXIMA rose, which moved that document's
+                                  fence - see CHECKS in
+                                  tools/check_reference_frames.py
+
+        A REJECTED VARIANT, recorded because it looked better and is wrong.
+        Adding "also flatten the tangent where the two adjacent slopes change
+        SIGN" scores better on SketchBone's reference frames than this does
+        (summed mean error 17.00 px vs 19.85 px, against the old curve's
+        23.94 px).  It is nonetheless not what Moho computes: solving the
+        Hermite segment directly out of the measured row-6 render gives a
+        tangent of 0.0277/frame at its second interior keyframe, against
+        Catmull-Rom's predicted 0.02778 and the flattened variant's 0.  A
+        whole-rig centroid comparison runs through bone skinning and
+        everything else, so it can be improved by a curve that happens to
+        cancel an unrelated error; a direct measurement of the curve cannot.
+        The direct measurement wins.
+        """
+        when = self.when
+        n = len(when)
+
+        def tangent(j: int) -> float:
+            if j <= 0 or j >= n - 1:
+                return 0.0          # qualification 1: flat at the ends
+            left = (get(j) - get(j - 1)) / (when[j] - when[j - 1])
+            right = (get(j + 1) - get(j)) / (when[j + 1] - when[j])
+            if left == 0.0 or right == 0.0:
+                return 0.0          # qualification 2: flat beside a hold
+            return (get(j + 1) - get(j - 1)) / (when[j + 1] - when[j - 1])
+
+        m0 = tangent(i) * span
+        m1 = tangent(i + 1) * span
+        t2 = t * t
+        t3 = t2 * t
+        return ((2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * m0
+                + (-2 * t3 + 3 * t2) * b + (t3 - t2) * m1)
+
     def _segment(self, i: int, key: Optional[str], t: float) -> float:
         """One numeric component of the segment leaving keyframe `i`,
         evaluated at normalised position `t`, as a MONOTONE cubic.
@@ -1739,6 +2190,21 @@ class Channel:
         delta = b - a
         if delta == 0:
             return a
+
+        mode = self.mode(i)
+        if mode in (INTERP_LINEAR, INTERP_POSE):
+            return a + delta * t
+        if mode == INTERP_STEP:
+            # Holds the outgoing value for the whole segment and jumps only
+            # on arrival - measured exactly, and it is what a switch-like
+            # channel needs (8.1% of all keyframes are Step).
+            return b if t >= 1.0 else a
+        if mode == INTERP_SMOOTH:
+            return self._smooth(i, get, a, b, t, span)
+        # Anything else keeps the older inferred curve below.  That is 0.4%
+        # of the corpus' keyframes, spread over the seven methods whose exact
+        # shape was measured but not reproduced (see the INTERP_* table).
+
         # Catmull-Rom tangents, expressed over this segment's own duration.
         prev_t = when[i - 1] if i > 0 else when[i] - span
         prev_v = get(i - 1) if i > 0 else a
@@ -1927,6 +2393,60 @@ class Color:
 
 LINE_CAP_NAMES = {0: "butt", 1: "round", 2: "square"}
 
+# ---- masking enums -------------------------------------------------------
+#
+# A container's `group_mask` (manual ch. 12.05, "Masking Tab"), and each
+# child's own `masking`.  Both are ENUMS, decoded twice over and in
+# agreement: by the declaration order of GROUP_MASK_*/MM_* in Moho's own
+# scripting header ("Contents/Resources/Support/Pro/Extra Files/Lua
+# Interfaces/pkg_moho.lua_pkg"), and INDEPENDENTLY by rendering every value
+# with Moho itself - see the module docstring's MASKING section for the
+# measurement tables.
+GROUP_MASK_NONE = 0        # no masking in this group
+GROUP_MASK_REVEAL_ALL = 1  # masking on, base mask FULL (sub-layers start visible)
+GROUP_MASK_HIDE_ALL = 2    # masking on, base mask EMPTY (the common case)
+
+MASK_MASKED = 0            # "Mask this layer" - clip against the mask so far
+MASK_NOT_MASKED = 1        # "Don't mask this layer"
+MASK_ADD = 2               # "+ Add to mask"
+MASK_SUB = 3               # "- Subtract from mask"
+MASK_ADD_INVIS = 4         # "+ Add to mask, but keep invisible"
+MASK_SUB_INVIS = 5         # "- Subtract from mask", kept invisible
+MASK_CLEAR_ADD = 6         # "+ Clear the mask, then add this layer to it"
+MASK_CLEAR_ADD_INVIS = 7   # ditto, kept invisible
+
+# The layer is NOT drawn at all (its only job is to shape the mask).
+MASK_INVISIBLE = frozenset({MASK_ADD_INVIS, MASK_SUB_INVIS, MASK_CLEAR_ADD_INVIS})
+# The layer's own silhouette enters the mask, positively or negatively.
+MASK_ADDS = frozenset({MASK_ADD, MASK_ADD_INVIS, MASK_CLEAR_ADD, MASK_CLEAR_ADD_INVIS})
+MASK_SUBTRACTS = frozenset({MASK_SUB, MASK_SUB_INVIS})
+MASK_CONTRIBUTES = MASK_ADDS | MASK_SUBTRACTS
+# The layer first RESETS the mask to empty, discarding every earlier
+# contribution, then adds itself.
+MASK_CLEARS = frozenset({MASK_CLEAR_ADD, MASK_CLEAR_ADD_INVIS})
+# Every mode except MASK_MASKED draws unclipped (measured - see MASKING).
+MASK_EXEMPT = frozenset({MASK_NOT_MASKED}) | MASK_CONTRIBUTES
+
+# A layer's `blend_mode`, as a CSS `mix-blend-mode` keyword.  Mode 0 (Normal)
+# is deliberately absent: it is a plain source-over paint and must emit no
+# property at all.  See the module docstring's LAYER BLEND MODES section for
+# where this enum comes from and exactly which entries are confirmed.
+BLEND_MODE_CSS = {
+    1: "multiply",
+    2: "screen",
+    3: "overlay",
+    4: "plus-lighter",     # Moho "Add"
+    5: "difference",
+    6: "hue",
+    7: "saturation",
+    8: "color",
+    9: "luminosity",
+    10: "soft-light",
+    11: "color-dodge",
+    12: "color-burn",
+    13: "plus-lighter",    # Moho "PSD Linear Dodge (Add)"
+}
+
 
 @dataclass
 class ResolvedStyle:
@@ -1944,6 +2464,8 @@ class ResolvedStyle:
     line_width: Any
     line_caps: int
     fill_style: Optional[dict]      # gradient spec, or None for a flat fill
+    fill_style2: Optional[dict]     # a SECOND effect over the same fill, if any
+    line_style: Optional[dict]      # the same, for the OUTLINE - see resolve
     brush_name: Optional[str]       # texture brush stamp name, or None for a plain stroke
     brush_jitter: float             # random rotation spread (radians) per dab
     brush_spacing: float            # dab spacing, as a fraction of the dab's own diameter
@@ -1976,9 +2498,26 @@ class ResolvedStyle:
                                       ("define_line_width", "line_width")):
                 if named.get(flag) and not own.get(flag):
                     out[field_name] = named[field_name]
-            # The gradient itself lives only on the named style, never inline.
+            # A shape effect can sit either on the named style or inline on
+            # the shape.  The inline one needs nothing here: `out` starts as a
+            # copy of the shape's own style, so it is already in place.  This
+            # only handles inheriting the named style's, and only when the
+            # shape does not define its own colour for that slot - fill_style
+            # follows the fill colour's own define_fill_color flag, line_style
+            # the outline's define_line_col, since each effect styles that
+            # slot.  Which of the two placements actually occurs differs
+            # sharply by slot, across the sample corpus:
+            #   fill_style   1160 named / 652 inline - both paths matter
+            #   line_style    116 named /   0 inline - named only
+            #   fill_style2     0 named /  14 inline - INLINE ONLY, so the
+            #     fill_style2 line below is untested: it is here for symmetry
+            #     with the other two, not because a document exercises it.
             if isinstance(named.get("fill_style"), dict) and not own.get("define_fill_color"):
                 out["fill_style"] = named["fill_style"]
+            if isinstance(named.get("fill_style2"), dict) and not own.get("define_fill_color"):
+                out["fill_style2"] = named["fill_style2"]
+            if isinstance(named.get("line_style"), dict) and not own.get("define_line_col"):
+                out["line_style"] = named["line_style"]
             if not own.get("define_line_width") and "line_caps" in named:
                 out["line_caps"] = named["line_caps"]
             # Brush texture parameters live only on named styles, never
@@ -1996,6 +2535,8 @@ class ResolvedStyle:
             line_width=out.get("line_width"),
             line_caps=out.get("line_caps", 1),
             fill_style=out.get("fill_style") if isinstance(out.get("fill_style"), dict) else None,
+            fill_style2=out.get("fill_style2") if isinstance(out.get("fill_style2"), dict) else None,
+            line_style=out.get("line_style") if isinstance(out.get("line_style"), dict) else None,
             brush_name=out.get("brush_name") or None,
             brush_jitter=out.get("brush_jitter") or 0.0,
             brush_spacing=out.get("brush_spacing") or 0.0,
@@ -2143,6 +2684,19 @@ class Bone:
     spring_force: float
     damping_force: float
     torque_force: float
+    # Moho's "Angle/Position/Scale control bone" (manual ch. 5.01, and the
+    # Scripts > Bone > Delayed Constraints script at ch. 23.03): another bone
+    # drives this one's angle/position/scale.  -1 = no controller.  See
+    # Skeleton._control_offsets.
+    angle_control_parent: int
+    angle_control_scale: float
+    angle_control_delay: float
+    pos_control_parent: int
+    pos_control_scale: Any              # {x, y}
+    pos_control_delay: float
+    scale_control_parent: int
+    scale_control_scale: float
+    scale_control_delay: float
 
     def dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
         """Whether this bone's ANGLE dynamics is switched on at `frame`.
@@ -2283,6 +2837,15 @@ class Bone:
             spring_force=raw.get("spring_force", 2.0),
             damping_force=raw.get("damping_force", 1.0),
             torque_force=raw.get("torque_force", 2.0),
+            angle_control_parent=raw.get("angle_control_parent", -1),
+            angle_control_scale=raw.get("angle_control_scale", 1.0),
+            angle_control_delay=raw.get("angle_control_delay", 0) or 0,
+            pos_control_parent=raw.get("pos_control_parent", -1),
+            pos_control_scale=raw.get("pos_control_scale") or {"x": 1.0, "y": 1.0},
+            pos_control_delay=raw.get("pos_control_delay", 0) or 0,
+            scale_control_parent=raw.get("scale_control_parent", -1),
+            scale_control_scale=raw.get("scale_control_scale", 1.0),
+            scale_control_delay=raw.get("scale_control_delay", 0) or 0,
         )
 
 
@@ -2553,6 +3116,127 @@ class Skeleton:
         return self._world_matrices(frame, exporter,
                                      self.dynamic_angles(frame, exporter))
 
+    def _control_offset(self, index: int, family: str, frame: float,
+                         exporter: "Exporter", _seen: tuple = ()) -> Any:
+        """What a bone's "control bone" adds to its own angle/position/scale
+        at `frame`, or None when the bone has no controller for `family`
+        (one of "angle", "pos", "scale").
+
+        THE RULE.  Moho's Bone Constraints panel (manual ch. 5.01) offers an
+        "Angle/Position/Scale control bone", and the Scripts > Bone > Delayed
+        Constraints script (ch. 23.03) documents its two parameters:
+        "Constraints Percent is the value in which a bone will follow the
+        movement of the previous one.  For example, if it's 100%, the bone
+        will rotate, translate or scale exactly in the same way the previous
+        bone does it.  If the value is 200%, then it will move at double" and
+        "Frame delay sets with how many frames of delay the bone is going to
+        move ... This value can also be negative".  Manual ch. 21.12 adds that
+        such a bone is normally not keyed by the animator at all, because "their
+        animation is 'automatic' through the control feature".
+
+        So the controlled value is its own keyed value PLUS the controller's
+        own DEPARTURE FROM ITS REST POSE, times the scale:
+
+            offset = control_scale * (controller(frame - delay) - controller(0))
+
+        MEASURED, not assumed.  `Clay_Crocodile.mohoproj` has exactly one such
+        constraint (bone 19 `B25`, angle, controlled by bone 5 `B7`, scale
+        1.0) and its controller is genuinely animated.  Exporting the document
+        from Moho's own CLI twice - once as authored, once with
+        `angle_control_parent` set to -1 - and reading the rotation straight
+        out of the `<image transform="... rotate(...)">` attributes Moho
+        writes gives the constraint's contribution directly:
+
+            frame   controller   departure   raw value   measured   measured
+                                  from rest               rotation  / departure
+              1       -0.0895      -8.77 deg  -5.13 deg    8.48 deg     0.967
+              3       -0.2910     -20.32      -16.67      21.70         1.068
+              5       -0.0895      -8.77       -5.13       8.47         0.966
+              7       -0.2910     -20.32      -16.67      21.76         1.071
+              9       -0.0895      -8.77       -5.13       8.48         0.967
+             21       -0.0895      -8.77       -5.13       8.47         0.966
+             24       -0.0174      -4.64       -1.00       4.43         0.954
+             29       -0.2119     -15.79      -12.14      15.93         1.009
+
+        The ratio against the DEPARTURE sits at 1.0 within a few percent at
+        every frame; against the raw value it scatters between 1.30 and 4.44.
+        The few percent is the measurement, not the model: the images being
+        measured are flexibly bound, so each picks up a blend of its bones
+        rather than the controlled bone's rotation alone.
+
+        RULED OUT: using the controller's WORLD angle instead of its own local
+        one.  In `Clay_Crocodile.mohoproj` the controller's ancestors are
+        themselves animated, so the two differ; the world departure at frame 1
+        is -1.15 deg against a measured 8.48 deg, while the local departure is
+        -8.77 deg.
+
+        THE DELAY IS VERIFIED TOO, on the corpus' one live delayed constraint:
+        `Whale.mohoproj`'s bone 26 `B27` follows bone 25 `B26` with scale 1.28
+        and delay 4, its own angle is constant, and both bones carry real
+        strength, so the artwork actually moves.  Fitting the rotation between
+        Moho's own with/without exports over frames 30-50:
+
+            sampling the controller at   rms error
+            t - delay  (this)              0.598 deg
+            t          (no delay)          6.272 deg
+            t + delay  (opposite sign)     9.524 deg
+
+        which pins the sign - the controlled bone repeats what the controller
+        did `delay` frames EARLIER - and confirms the 1.28 scale factor and the
+        departure-from-rest reading a second time, on a different document from
+        the one they were derived on.  (The 0.598 deg residual is mostly the
+        crude interpolation used to resample the controller channel for the
+        comparison, not the model.)
+
+        Two other bones in the corpus carry a non-zero delay
+        (`Bandit.mohoproj` bone 1, `Whale.mohoproj` bone 41) but have no
+        controller, so those delays are inert.
+
+        THIS CURRENTLY CHANGES NO EXPORTED PIXEL, which is worth knowing before
+        trusting it.  It demonstrably moves the BONES - on
+        `Gathered-02Wire2.mohoproj` at frame 40 it swings bone 51's world angle
+        from -2.53 to -1.79 rad - but in every corpus document the controlled
+        bones reach artwork by a route this exporter does not follow to the
+        end: `Clay_Crocodile` and `Whale` drive ImageLayers (and `Whale`'s own
+        PSD is not present locally), while the Gathered/Snow-girl rigs use
+        bones with `strength = 0` whose only influence is per-point binding
+        (`--point-bones`, off by default, and still not moving those points
+        when it is on - a separate, pre-existing gap in that path).  So the
+        formula is verified, the plumbing into the skeleton is verified, and
+        the last hop is not.
+        """
+        bone = self.bones[index]
+        parent = getattr(bone, f"{family}_control_parent", -1)
+        if parent is None or parent < 0 or parent >= len(self.bones) or parent == index:
+            return None
+        if index in _seen:                # a control cycle - refuse to recurse
+            return None
+        controller = self.bones[parent]
+        channel = {"angle": controller.anim_angle,
+                   "pos": controller.anim_pos,
+                   "scale": controller.anim_scale}[family]
+        delay = float(getattr(bone, f"{family}_control_delay", 0) or 0)
+        now = exporter.eval(channel, frame - delay)
+        rest = exporter.eval(channel, 0.0)
+        # The controller may itself be controlled; its own offset has to be
+        # part of what it "moved by" before this scale is applied.
+        upstream = self._control_offset(parent, family, frame, exporter,
+                                         _seen + (index,))
+        gain = getattr(bone, f"{family}_control_scale", 1.0)
+        if family == "pos":
+            gx = float((gain or {}).get("x", 1.0))
+            gy = float((gain or {}).get("y", 1.0))
+            dx = float(now.get("x", 0.0)) - float(rest.get("x", 0.0))
+            dy = float(now.get("y", 0.0)) - float(rest.get("y", 0.0))
+            if upstream is not None:
+                dx += upstream[0]
+                dy += upstream[1]
+            return (gx * dx, gy * dy)
+        delta = float(now) - float(rest)
+        if upstream is not None:
+            delta += upstream
+        return float(gain if gain is not None else 1.0) * delta
+
     def _world_matrices(self, frame: float, exporter: "Exporter",
                          dynamic: dict[int, float]) -> list[Mat2D]:
         """world_matrices' body, with the simulated angles passed in rather
@@ -2600,6 +3284,14 @@ class Skeleton:
             bone = self.bones[i]
             pos = Vec2.of(exporter.eval(bone.anim_pos, frame))
             scale = exporter.eval(bone.anim_scale, frame)
+            # A "control bone" adds its own departure from rest on top of
+            # whatever this bone is keyed to - see _control_offset.
+            pos_offset = self._control_offset(i, "pos", frame, exporter)
+            if pos_offset is not None:
+                pos = Vec2(pos.x + pos_offset[0], pos.y + pos_offset[1])
+            scale_offset = self._control_offset(i, "scale", frame, exporter)
+            if scale_offset is not None:
+                scale += scale_offset
             parent = bone.parent
             parent_matrix = out[parent] if parent >= 0 else None
             solved = self._solve_ik_pair(i, ik_pairs, out, pos, scale, parent_matrix, frame, exporter)
@@ -2609,6 +3301,9 @@ class Skeleton:
                 orient[bone2_index] = bone2_orient
                 continue
             angle = dynamic.get(i, exporter.eval(bone.anim_angle, frame))
+            angle_offset = self._control_offset(i, "angle", frame, exporter)
+            if angle_offset is not None:
+                angle += angle_offset
             c, s = math.cos(angle), math.sin(angle)
             # flip_h/flip_v negate one column each, exactly as
             # Layer.local_matrix does for a layer's own flips - column 1 is
@@ -3457,6 +4152,11 @@ class Layer:
         # for a PatchLayer whose target never resolves to real geometry.
         self.is_container = is_container
         self.transform = Transform(raw["transforms"])
+        # Set on a PatchLayer only, by Document._resolve_patch_layers: a
+        # standalone Layer holding the patch's OWN transform and bone binding,
+        # which is what places its clip region.  None on every other layer.
+        # See the module docstring's PATCH LAYERS section.
+        self.patch_clip: Optional["Layer"] = None
 
     @property
     def name(self) -> str:
@@ -3497,6 +4197,78 @@ class Layer:
         return self._raw.get("visible", True)
 
     @property
+    def effect_visibility(self) -> Any:
+        """`layer_effects.visibility` - the ANIMATED show/hide from the
+        General tab's Compositing Effects group, as a raw Bool channel (or
+        None when absent).
+
+        The manual is explicit that this is a different notion of visibility
+        from the `visible` flag above (ch. 12.02: "this checkbox is totally
+        independent of the visibility box displayed in the layer list: these
+        are two separate notions of visibility, and don't affect each other
+        at all").  The list one is an editing convenience; this one is what
+        the RENDER honours, and it is keyframeable - the manual's own example
+        is blinking a lightbulb on and off.  A layer draws only when both are
+        true; see Layer.visible_at."""
+        return (self._raw.get("layer_effects") or {}).get("visibility")
+
+    def visible_at(self, frame: float, exporter: "Exporter") -> bool:
+        """Whether this layer draws at `frame` - both notions of visibility
+        together.  190 layers across 14 of the sample documents animate the
+        second one, so ignoring it leaves artwork on screen that Moho has
+        faded out or switched off."""
+        if not self.visible:
+            return False
+        channel = self.effect_visibility
+        if channel is None:
+            return True
+        return bool(exporter.eval(channel, frame))
+
+    @property
+    def effect_alpha(self) -> Any:
+        """`layer_effects.alpha` - the layer's own OPACITY, from the same
+        General-tab Compositing Effects group as `effect_visibility`, as a
+        raw Val channel (or None when absent).  Keyframeable, and 139 leaf
+        layers across 15 of this repository's sample documents set it to
+        something other than 1.
+
+        MEASURED against Moho's own renders, on `SlickObjectTransition.
+        mohoproj`'s "Sun" layer: rendering it at 0.5 lands on the exact
+        midpoint between the 1.0 and 0.0 renders (mean error 0.13/255 over
+        the layer's own pixels), so this is a plain linear blend of the
+        layer against what is behind it, with no gamma or premultiplication
+        surprise.  See Layer.alpha_at for the one part that is NOT settled
+        (a *container's* alpha)."""
+        return (self._raw.get("layer_effects") or {}).get("alpha")
+
+    def alpha_at(self, frame: float, exporter: "Exporter") -> float:
+        """This layer's own opacity at `frame`, in 0..1 (1.0 when unset).
+
+        CONTAINERS ARE DELIBERATELY NOT INCLUDED by the callers - see
+        walk_render_tree, which warns instead.  Three candidate models for a
+        group's own alpha were measured against Moho on a non-masking group
+        (`SlickObjectTransition.mohoproj`'s "Frame Mask" with its group_mask
+        forced to 0, the group at 0.5, over the group's own pixels):
+
+            ignore it entirely                 mean |err|  21.6
+            flatten the group, then composite  mean |err|  30.2
+            push 0.5 onto every child          mean |err|  24.0
+
+        Ignoring it scored BEST of the three, which means none of them is
+        what Moho computes - a group's alpha does something this tool has
+        not decoded, and guessing would make the render worse, not better.
+        Only 5 layers in the whole corpus are affected (4 GroupLayer, 1
+        SwitchLayer) against 139 leaf layers that this IS exact for."""
+        channel = self.effect_alpha
+        if channel is None:
+            return 1.0
+        try:
+            value = float(exporter.eval(channel, frame))
+        except (TypeError, ValueError):
+            return 1.0
+        return 0.0 if value < 0.0 else (1.0 if value > 1.0 else value)
+
+    @property
     def edit_only(self) -> bool:
         """Layers Moho keeps for editing convenience but never renders (e.g. a
         SwitchLayer alternative kept as reference).  Confirmed against a real
@@ -3507,16 +4279,37 @@ class Layer:
     @property
     def masking(self) -> int:
         """This layer's role within its parent's mask (if the parent is
-        masking at all - see Layer.group_mask and the module docstring's
-        MASKING section): 2 = mask source, 1 = exempt from masking, else
-        clipped."""
+        masking at all - see Layer.group_mask).  An eight-value ENUM, one
+        per entry of the manual's own "Layer Masking" menu (ch. 12.05) -
+        the MASK_* constants near the top of this file, and the module
+        docstring's MASKING section for how each value was measured."""
         return self._raw.get("masking", 0)
 
     @property
     def group_mask(self) -> int:
-        """Non-zero if this layer (as a *container*) masks its children at
-        all.  See the module docstring's MASKING section."""
+        """Whether this layer (as a *container*) masks its children, and what
+        the mask STARTS as: GROUP_MASK_NONE (0) = no masking here at all,
+        GROUP_MASK_REVEAL_ALL (1) = masking on with a FULL base mask (every
+        child visible until something subtracts), GROUP_MASK_HIDE_ALL (2) =
+        masking on with an EMPTY base mask (the common case).  Measured -
+        see the module docstring's MASKING section."""
         return self._raw.get("group_mask") or 0
+
+    @property
+    def camera_immune(self) -> bool:
+        """Manual ch. 12.02, "Immune to camera movements": this layer ignores
+        the document camera and stays put on screen while the camera moves -
+        meant for backgrounds, titles and logos.  Inherited by descendants:
+        see walk_render_tree, which ORs it down the tree."""
+        return bool(self._raw.get("camera_immune"))
+
+    @property
+    def blend_mode(self) -> int:
+        """How this layer composites against what is drawn beneath it inside
+        its own parent container - 0 (Normal) is a plain source-over paint.
+        See the module docstring's LAYER BLEND MODES section for the enum and
+        what is confirmed about it."""
+        return self._raw.get("blend_mode") or 0
 
     @property
     def parent_bone(self) -> int:
@@ -3798,12 +4591,19 @@ class Document:
 
     def __init__(self, width: float, height: float, layers: list[Layer],
                  styles: StyleTable, format_version: Any,
-                 fps: float = 24.0, start_frame: int = 0, end_frame: int = 0):
+                 fps: float = 24.0, start_frame: int = 0, end_frame: int = 0,
+                 animated_values: Optional[dict] = None):
         self.width = width
         self.height = height
         self.layers = layers            # top-level (root) layers
         self.styles = styles
         self.format_version = format_version
+        # doc.animated_values, raw - the document-wide camera channels
+        # (camera_track/_zoom/_roll/_pan_tilt) plus timeline_markers.  Kept
+        # raw for the same reason every other channel is: evaluating one
+        # needs a frame.  See Document.camera_at and the module docstring's
+        # CAMERA section.
+        self._animated_values = animated_values or {}
         self.fps = fps                  # project_data.fps - playback rate
         # project_data.start_frame/end_frame: the document's own render
         # range, in absolute frame numbers, BOTH ENDS INCLUSIVE on the Moho
@@ -3829,7 +4629,8 @@ class Document:
         doc = cls(pd["width"], pd["height"], layers, styles, raw.get("version"),
                   fps=pd.get("fps", 24.0),
                   start_frame=pd.get("start_frame", 0),
-                  end_frame=pd.get("end_frame", 0))
+                  end_frame=pd.get("end_frame", 0),
+                  animated_values=raw.get("animated_values"))
         doc._resolve_patch_layers()
         return doc
 
@@ -3881,6 +4682,15 @@ class Document:
                 if layer.mesh is None:
                     target = by_uuid.get(layer.target_layer_uuid)
                     if target is not None and target.mesh is not None:
+                        # The patch's OWN rigging is not junk to be discarded -
+                        # it positions the patch's clip region.  Snapshot it as
+                        # a standalone Layer BEFORE the target's rigging is
+                        # copied over the top, so build_deform_chain can be run
+                        # against it later exactly as against any other layer.
+                        # See Layer.patch_clip and Exporter._patch_clip_path.
+                        layer.patch_clip = Layer(
+                            dict(layer._raw), layer.kind, layer.type_name,
+                            [], None, None, False)
                         layer.mesh = target.mesh
                         layer.transform = target.transform
                         layer._raw["parent_bone"] = target._raw.get("parent_bone", -1)
@@ -3908,6 +4718,13 @@ class Document:
             if layer.name == name:
                 return parents, layer
         return None
+
+    def camera_channel(self, name: str) -> Optional[Channel]:
+        """One of `animated_values`' camera channels as a Channel, or None
+        when the document does not carry it.  Names: camera_track (Vec3),
+        camera_zoom (Val), camera_roll (Val), camera_pan_tilt (Vec2)."""
+        raw = self._animated_values.get(name)
+        return Channel.of(raw) if raw is not None else None
 
 
 # ============================================================================
@@ -5031,9 +5848,33 @@ class RenderItem:
     depth: int
     exempt: bool = False
     mask_sources: Sequence[tuple[str, float]] = ()
+    # The mask THIS item is clipped against, as one Exporter._mask_plan entry
+    # (see that method for why it is per item and not per container): an
+    # ordered ("add"|"sub", path, exclude_width) run over a base that is
+    # either empty or, for GROUP_MASK_REVEAL_ALL, full.  Empty and
+    # `mask_base_full=False` means "not clipped" for an `exempt` item and
+    # "clipped away entirely" for one that is not - the distinction is
+    # `exempt`, exactly as it is in Moho.  Note this is a DIFFERENT field
+    # from `mask_sources` above, which is what an "enter" container
+    # contributes to ITS OWN children in the older flat model.
+    mask_ops: Sequence[tuple[str, str, float]] = ()
+    mask_base_full: bool = False
+    # True when this item's own container masks it at all.  Needed because an
+    # empty `mask_ops` over an empty base is a REAL mask that hides
+    # everything (GROUP_MASK_HIDE_ALL with no sources yet), which is not the
+    # same as "this container does no masking".
+    masked: bool = False
+    # This layer's own opacity at this frame, from layer_effects.alpha - see
+    # Layer.alpha_at.  Always 1.0 for an "enter" (container) item, whose own
+    # alpha is warned about rather than applied.
+    alpha: float = 1.0
     geometries: Optional[list] = None
     to_px: Optional[Callable[["Vec2"], "Vec2"]] = None
     deform_chain: Optional[list] = None  # "image" events only - see IMAGE LAYERS
+    # True when this layer, or any container above it, sets camera_immune -
+    # already folded down the tree by walk_render_tree, so a consumer never
+    # has to re-walk the ancestors to find out.
+    camera_immune: bool = False
 
 
 @dataclass(frozen=True)
@@ -5075,6 +5916,125 @@ class ImageSegment:
     corners: Optional[tuple[Vec2, Vec2, Vec2]]  # (top_left, top_right, bottom_left), local space
     suffix: str
     png: Optional[tuple[bytes, int, int]] = None
+
+
+# Moho's default camera, from `animated_values` (present in every sample
+# document): position (0, 0, 2 + sqrt(3)) with zoom 2.  Those two numbers are
+# not arbitrary - see CameraView.
+# A PatchLayer's clip disc, in Moho units, before its own scale is applied.
+# Measured at exactly 36 px per unit of scale on a 720-tall canvas - see
+# Exporter._patch_clip_path for the experiment.
+PATCH_CLIP_RADIUS = 0.1
+
+DEFAULT_CAMERA_Z = 3.732051         # 2 + sqrt(3), to the precision Moho writes
+DEFAULT_CAMERA_ZOOM = 2.0
+# Half of the vertical field of view at zoom 1, in radians (i.e. 30 degrees).
+CAMERA_HALF_FOV_AT_ZOOM_1 = math.pi / 6.0
+
+
+@dataclass(frozen=True)
+class CameraView:
+    """The document camera, resolved at one frame, as a plain 2D
+    scale-and-translate from Moho space to pixels.
+
+    THE MODEL, and how it was measured.  Moho's camera is a real perspective
+    camera: `camera_track` is its position (x, y, z) and `camera_zoom` sets
+    its field of view.  Projecting a point on the z = 0 plane gives
+
+        half_fov  = (pi / 6) / zoom          # 30 degrees at zoom 1
+        scale     = (height_px / 2) / (camera_z * tan(half_fov))
+        pixel_x   = (moho_x - camera_x) * scale + width_px / 2
+        pixel_y   = height_px / 2 - (moho_y - camera_y) * scale
+
+    Measured, not guessed: one small layer of Snow-girl-cut51.mohoproj was
+    rendered by Moho's own CLI at 7 (zoom, camera_z) combinations, each at
+    three pan values, and `scale` was read off the centroid displacement
+    between pan values (which is immune to the antialiasing bias that
+    measuring a blob's area suffers from).  Two results:
+
+      - Pan is a PURE TRANSLATION.  The scale implied by a 0.25-unit pan and
+        by a 0.5-unit pan agreed to 5 significant figures at every setting,
+        which rules out a look-at camera that would rotate as it pans.
+      - Solving the equation above for half_fov at each measured scale gives
+        30.000, 15.000, 10.000, 7.500 and 5.000 degrees at zoom 1, 2, 3, 4
+        and 6 - i.e. exactly (30 / zoom) degrees.  Predicted vs measured
+        scale is then within 0.017% at every one of the 7 combinations,
+        including the two that varied camera_z instead of zoom.
+
+    WHY THE DEFAULT LOOKS LIKE NO CAMERA AT ALL.  At the default
+    (z = 2 + sqrt(3), zoom = 2) the divisor is
+    (2 + sqrt(3)) * tan(15 degrees) = (2 + sqrt(3))(2 - sqrt(3)) = 1 exactly,
+    so `scale` is exactly height_px / 2 and the mapping collapses to the one
+    this file used before the camera existed.  That identity is why ignoring
+    the camera was invisible for so long: every document sits at the default
+    until someone animates it.
+
+    NOT MODELLED: per-layer parallax.  A layer translated in z should divide
+    by (camera_z - layer_z) rather than camera_z, which would make the camera
+    a per-layer transform instead of a global one.  4556 of the sample
+    corpus's 4590 layer-translation keyframes are at z = 0, where the two are
+    identical; 6 documents contain a non-zero layer z, of which 2
+    (Gathered-01Intro2, Snow-girl-cut2) also animate the camera.  Also not
+    modelled: `camera_roll` and `camera_pan_tilt`, neither of which is ever
+    non-default anywhere in the corpus.
+    """
+    scale: float          # pixels per Moho unit
+    cam_x: float
+    cam_y: float
+    width: float
+    height: float
+
+    @staticmethod
+    def _scale_for(height_px: float, camera_z: float, zoom: float) -> float:
+        half_fov = CAMERA_HALF_FOV_AT_ZOOM_1 / zoom
+        denom = camera_z * math.tan(half_fov)
+        if abs(denom) < 1e-9:            # a degenerate camera would divide by ~0
+            denom = 1.0
+        return (height_px / 2.0) / denom
+
+    @classmethod
+    def default(cls, document: "Document") -> "CameraView":
+        """The camera Moho starts every document with - the identity mapping
+        described above.  Used for `camera_immune` layers."""
+        return cls(document.height / 2.0, 0.0, 0.0, document.width, document.height)
+
+    @classmethod
+    def at(cls, document: "Document", frame: float) -> "CameraView":
+        track = document.camera_channel("camera_track")
+        zoom_channel = document.camera_channel("camera_zoom")
+        cam_x = cam_y = 0.0
+        camera_z = DEFAULT_CAMERA_Z
+        # No Smart Bone context: the camera lives on the document, not inside
+        # any layer, so no dial can override it.
+        if track is not None:
+            pos = track.eval(frame, ())
+            if isinstance(pos, dict):
+                cam_x = float(pos.get("x", 0.0))
+                cam_y = float(pos.get("y", 0.0))
+                camera_z = float(pos.get("z", DEFAULT_CAMERA_Z))
+        zoom = DEFAULT_CAMERA_ZOOM
+        if zoom_channel is not None:
+            value = zoom_channel.eval(frame, ())
+            if isinstance(value, (int, float)) and value:
+                zoom = float(value)
+        # A camera left at Moho's default is the identity mapping BY
+        # CONSTRUCTION (see the class docstring), so say so exactly rather
+        # than computing it.  Moho writes the default z as the 7-digit
+        # 3.732051 rather than 2 + sqrt(3), which would otherwise make the
+        # computed scale differ from height/2 in the 8th significant figure -
+        # harmless in itself, but it would perturb every coordinate in every
+        # exported file for the ~34 sample documents that never touch the
+        # camera, for no benefit.
+        if (abs(cam_x) < 1e-9 and abs(cam_y) < 1e-9
+                and abs(camera_z - DEFAULT_CAMERA_Z) < 1e-6
+                and abs(zoom - DEFAULT_CAMERA_ZOOM) < 1e-9):
+            return cls.default(document)
+        return cls(cls._scale_for(document.height, camera_z, zoom),
+                   cam_x, cam_y, document.width, document.height)
+
+    def to_pixel(self, p: Vec2) -> Vec2:
+        return Vec2((p.x - self.cam_x) * self.scale + self.width / 2.0,
+                    self.height / 2.0 - (p.y - self.cam_y) * self.scale)
 
 
 # ============================================================================
@@ -5121,6 +6081,9 @@ class Exporter:
         self._image_segment_cache: dict[int, list["ImageSegment"]] = {}  # id(layer) -> see _image_layer_segments
         self._warned_unsupported_layers: set[int] = set()  # id(layer) -> see walk_render_tree
         self._warned_smart_warp_layers: set[int] = set()   # id(layer) -> see walk_render_tree
+        self._warned_container_alpha: set[int] = set()     # id(layer) -> see Layer.alpha_at
+        self._warned_blend_modes: set[int] = set()         # blend_mode -> see _blend_declaration
+        self._camera_cache: dict[float, CameraView] = {}   # frame -> see _camera
 
     # -- channel evaluation --------------------------------------------------
 
@@ -5311,20 +6274,41 @@ class Exporter:
         widened.update(j for j, b in enumerate(bones) if b.parent == index)
         return tuple(sorted(widened))
 
-    def _to_pixel(self, p: Vec2) -> Vec2:
-        """Moho-space -> pixel-space: 2 units span the canvas height, and y is
-        flipped (Moho's +y is up; SVG's is down).  See the module docstring's
-        COORDINATES section."""
-        s = self.document.height / 2.0
-        return Vec2(p.x * s + self.document.width / 2.0, self.document.height / 2.0 - p.y * s)
+    def _camera(self, frame: float) -> "CameraView":
+        """This document's camera at `frame`, cached per frame.
 
-    def _plain_pixel_mapper(self, matrix: Mat2D) -> Callable[[Vec2], Vec2]:
+        Building it evaluates two channels, and every point of every layer
+        needs the result, so it is worth not redoing per point."""
+        view = self._camera_cache.get(frame)
+        if view is None:
+            view = CameraView.at(self.document, frame)
+            self._camera_cache[frame] = view
+        return view
+
+    def _to_pixel(self, p: Vec2, frame: float = 0.0, camera: bool = True) -> Vec2:
+        """Moho-space -> pixel-space.
+
+        With the DEFAULT camera this is exactly the mapping this file has
+        always used - 2 units span the canvas height, y flipped (Moho's +y is
+        up, SVG's is down) - because Moho's default camera is placed to make
+        the visible half-height exactly 1 Moho unit.  See the module
+        docstring's COORDINATES and CAMERA sections.
+
+        `camera=False` renders as if the camera were at its default, which is
+        what a `camera_immune` layer wants (manual ch. 12.02, "Immune to
+        camera movements")."""
+        view = self._camera(frame) if camera else CameraView.default(self.document)
+        return view.to_pixel(p)
+
+    def _plain_pixel_mapper(self, matrix: Mat2D, frame: float = 0.0,
+                             camera: bool = True) -> Callable[[Vec2], Vec2]:
         """A point-mapper that applies one fixed matrix and no bone
         deformation at all - used for --local exports."""
-        return lambda p: self._to_pixel(matrix.apply(p))
+        return lambda p: self._to_pixel(matrix.apply(p), frame, camera)
 
     def _deformed_pixel_mapper(self, chain: list[DeformStep], frame: float,
-                                point_bone: int = -2) -> Callable[[Vec2], Vec2]:
+                                point_bone: int = -2,
+                                camera: bool = True) -> Callable[[Vec2], Vec2]:
         """A point-mapper that walks a full DeformChain (ordinary transforms
         plus bone skinning) before projecting to pixel space.
 
@@ -5343,9 +6327,11 @@ class Exporter:
         here instead, forcing a RIGID bind to that one bone regardless of
         the innermost SkinStep's own (flexible) subset."""
         deform = self._deformed_point_mapper(chain, frame)
-        return lambda p: self._to_pixel(deform(p, point_bone))
+        view = self._camera(frame) if camera else CameraView.default(self.document)
+        return lambda p: view.to_pixel(deform(p, point_bone))
 
-    def _geometry_and_mapper(self, mesh: Mesh, chain: list[DeformStep], frame: float):
+    def _geometry_and_mapper(self, mesh: Mesh, chain: list[DeformStep], frame: float,
+                              camera: bool = True):
         """(geometries, to_px) for one mesh, picking the geometry order that
         mesh needs.
 
@@ -5461,10 +6447,15 @@ class Exporter:
         it cannot be a point index).
         """
         if mesh.has_point_bones and self.settings.point_bone_binding:
+            # Points are already deformed here, so all that is left is the
+            # projection - but it still has to be THIS frame's camera, so it
+            # is a closure rather than the bare _to_pixel method.
+            view = self._camera(frame) if camera else CameraView.default(self.document)
             return (self._curve_geometries(mesh, frame,
                                             self._deformed_point_mapper(chain, frame)),
-                     self._to_pixel)
-        return self._curve_geometries(mesh, frame), self._deformed_pixel_mapper(chain, frame)
+                     view.to_pixel)
+        return (self._curve_geometries(mesh, frame),
+                self._deformed_pixel_mapper(chain, frame, camera=camera))
 
     def _deformed_point_mapper(self, chain: list[DeformStep],
                                 frame: float) -> Callable[[Vec2, int], Vec2]:
@@ -6126,7 +7117,7 @@ class Exporter:
 
     def _render_image_layer(self, ancestors: Sequence[Layer], layer: Layer,
                              chain: list["DeformStep"], frame: float,
-                             indent: str) -> tuple[str, list[Vec2]]:
+                             indent: str, camera: bool = True) -> tuple[str, list[Vec2]]:
         """One ImageLayer's own PSD crop as one or more SVG `<image>`
         elements, positioned by running its own 4 corners - in ITS OWN
         local Moho-space, exactly like a MeshLayer's own points (see
@@ -6146,14 +7137,16 @@ class Exporter:
         elements = []
         all_pts: list[Vec2] = []
         for segment in segments:
-            el, pts = self._render_image_segment(layer, chain, frame, indent, segment)
+            el, pts = self._render_image_segment(layer, chain, frame, indent, segment,
+                                                  camera=camera)
             if el:
                 elements.append(el)
             all_pts.extend(pts)
         return "\n".join(elements), all_pts
 
     def _render_image_segment(self, layer: Layer, chain: list["DeformStep"], frame: float,
-                              indent: str, segment: "ImageSegment") -> tuple[str, list[Vec2]]:
+                              indent: str, segment: "ImageSegment",
+                              camera: bool = True) -> tuple[str, list[Vec2]]:
         """One ImageSegment (see _image_layer_segments) as a single SVG
         `<image>`.
 
@@ -6179,7 +7172,7 @@ class Exporter:
         if png is None:
             return "", []
         data, src_w, src_h = png
-        to_px = self._deformed_pixel_mapper(chain, frame, -2)
+        to_px = self._deformed_pixel_mapper(chain, frame, -2, camera=camera)
         if segment.corners is not None:
             local_top_left, local_top_right, local_bottom_left = segment.corners
         else:
@@ -6437,6 +7430,95 @@ class Exporter:
                 paths += self._mask_source_shapes(child, chain_through_container, frame)
         return paths
 
+    def _container_masks(self, container: Optional[Layer]) -> bool:
+        """Whether `container` masks its children at all - its own
+        `group_mask`, or `--mask-container` naming it explicitly.
+
+        WHY THIS IS A SEPARATE PREDICATE.  A child's own `masking` value is
+        completely INERT when its container does not mask: measured, and it
+        holds even for the three "keep invisible" modes, which do NOT hide
+        the layer in that case.  Confirmed on SlickObjectTransition.mohoproj
+        with its group's `group_mask` forced to GROUP_MASK_NONE - setting the
+        "Sky" child to 4, 5 or 7 in turn changed Moho's own render by exactly
+        0 pixels each time, against a 0 baseline.  This tool used to skip
+        those layers unconditionally, which wrongly blanked artwork in
+        documents that carry a leftover masking value inside a group whose
+        masking is switched off (Snow-girl-cut14 among this repository's own
+        samples)."""
+        if container is None:
+            return False
+        return bool(container.group_mask
+                    or container.name in self.settings.forced_mask_containers)
+
+    def _mask_plan(self, container: Optional[Layer],
+                    chain_through_container: Sequence[Layer],
+                    frame: float) -> dict[int, tuple[bool, tuple]]:
+        """The mask each MASK_MASKED child of `container` is actually clipped
+        against, keyed by `id(child)`.
+
+        WHY THIS IS PER CHILD AND NOT PER CONTAINER.  Moho builds the mask
+        INCREMENTALLY as it draws the container's children back-to-front:
+        each child may add its own silhouette to the mask, subtract it, or
+        CLEAR the mask outright and start over (see the MASK_* enums and the
+        module docstring's MASKING section).  A child set to MASK_MASKED is
+        clipped against the mask AS IT STANDS WHEN THAT CHILD IS DRAWN - not
+        against some single mask for the whole container.  The distinction is
+        not academic: ten containers across this repository's own samples
+        have a masked child sitting BELOW a later MASK_CLEAR_ADD, e.g. the
+        `[MASK_ADD, MASK_MASKED, MASK_CLEAR_ADD, MASK_MASKED, MASK_MASKED]`
+        run that Snow-girl-cut3/6/7/8/12/13/51 all share.  Collapsing that to
+        one mask would clip the first masked child with a mask built partly
+        out of a layer drawn AFTER it.
+
+        Each value is `(base_is_full, ops)`, where `ops` is an ordered tuple
+        of `(kind, path_d, exclude_width)` with `kind` in {"add", "sub"} -
+        painted in exactly this order by `_mask_element`, so a later
+        subtraction correctly beats an earlier addition and vice versa.
+        `base_is_full` comes from the container's own `group_mask`
+        (GROUP_MASK_REVEAL_ALL) and is reset to False by any MASK_CLEARS
+        child, which discards everything accumulated so far.
+
+        Returns an EMPTY dict when the container does no masking, so a caller
+        can treat "not in the plan" and "no mask" identically.  A masked
+        child whose mask happens to be empty is present with `((), False)` -
+        and that DOES clip everything away, which is what GROUP_MASK_HIDE_ALL
+        with no sources means.
+
+        The Smart Bone context rules are `_mask_sources`' - see its docstring;
+        `_mask_source_shapes` sets and clears the context per source itself.
+        """
+        if not self._container_masks(container):
+            return {}
+        base_full = container.group_mask == GROUP_MASK_REVEAL_ALL
+        plan: dict[int, tuple[bool, tuple]] = {}
+        ops: list[tuple[str, str, float]] = []
+        for child in container.children:
+            mode = child.masking
+            if mode not in MASK_EXEMPT:            # MASK_MASKED, or anything unknown
+                plan[id(child)] = (base_full, tuple(ops))
+                continue
+            if mode in MASK_CLEARS:
+                base_full = False
+                ops = []
+            if mode in MASK_CONTRIBUTES:
+                # A layer contributes its own RENDERED alpha to the mask, so
+                # one that draws nothing shapes nothing.  MEASURED both ways
+                # on SlickObjectTransition.mohoproj, with "Sky" as the only
+                # mask source: hiding it via the `visible` flag OR via
+                # layer_effects.visibility each produced exactly the same
+                # render as having no source at all (199,667 changed pixels
+                # against 114,655 with it showing).  The alpha gate is the
+                # same rule for a layer faded to nothing - measured on
+                # Snow-girl-cut14 (see Layer.alpha_at).  A container's own
+                # alpha is not decoded, hence not applied here either.
+                if (child.visible_at(frame, self) and not child.edit_only
+                        and (child.is_container or child.alpha_at(frame, self) > 0.0)):
+                    kind = "sub" if mode in MASK_SUBTRACTS else "add"
+                    ops = ops + [(kind, d, w) for d, w in
+                                  self._mask_source_shapes(child, chain_through_container,
+                                                            frame)]
+        return plan
+
     def _mask_source_shapes_bezier(self, layer: Layer, ancestors: Sequence[Layer], frame: float
                                     ) -> list[tuple[list[dict], float, Optional[list[tuple[dict, bool]]]]]:
         """Bezier counterpart of _mask_source_shapes(), for a Lottie writer -
@@ -6511,24 +7593,155 @@ class Exporter:
                 paths += self._mask_source_shapes_bezier(child, chain_through_container, frame)
         return paths
 
-    def _mask_element(self, paths: Sequence[tuple[str, float]], mask_id: str,
-                       indent: str) -> str:
-        """Build a <mask> from `_mask_source_shapes`' (path, exclude_width)
-        pairs: each source shape's fill is painted white (included), then -
-        painted AFTER, so it wins wherever it overlaps - each shape that
-        carries a nonzero exclude_width gets its own stroke, that width wide,
-        painted BLACK on top.  That carves the source's own stroke band back
-        OUT of the mask, so whatever this mask clips can never paint over it -
-        the source's own stroke stays visible, without changing paint order
-        at all.  See the module docstring's MASKING section."""
-        fills = "".join(f'<path d="{d}" fill="white" fill-rule="nonzero"/>' for d, _ in paths)
-        exclusions = "".join(
-            f'<path d="{d}" fill="none" stroke="black" stroke-width="{w:.3f}"/>'
-            for d, w in paths if w > 0)
-        bbox_paths = [d for d, _ in paths]
-        x0, y0, w, h = parse_path_bbox(bbox_paths, self.settings.mask_padding)
+    def _mask_element(self, ops: Sequence[tuple[str, str, float]], mask_id: str,
+                       indent: str, base_full: bool = False) -> str:
+        """Build a <mask> from one `_mask_plan` entry: an ordered run of
+        ("add"|"sub", path, exclude_width) ops over a base that is either
+        empty (GROUP_MASK_HIDE_ALL, the usual case) or FULL
+        (GROUP_MASK_REVEAL_ALL, `base_full`).
+
+        Each op is painted IN ORDER - an "add" white, a "sub" black - so a
+        later op always wins where they overlap, which is exactly Moho's own
+        incremental accumulation.  A full base is a white rectangle painted
+        first, sized to the whole document canvas (plus the mask padding),
+        since with nothing subtracted such a mask must not clip anything.
+
+        Then, painted last so they win over every fill, each op carrying a
+        nonzero exclude_width gets its own stroke, that width wide, in BLACK.
+        That carves a mask source's own stroke band back OUT of the mask, so
+        whatever this mask clips can never paint over it - the source's own
+        stroke stays visible, without changing paint order at all.  See the
+        module docstring's MASKING section."""
+        pad = self.settings.mask_padding
+        parts = []
+        if base_full:
+            parts.append(f'<rect x="{-pad:.1f}" y="{-pad:.1f}" '
+                         f'width="{self.document.width + 2 * pad:.1f}" '
+                         f'height="{self.document.height + 2 * pad:.1f}" fill="white"/>')
+        parts += [f'<path d="{d}" fill="{"black" if kind == "sub" else "white"}" '
+                  f'fill-rule="nonzero"/>' for kind, d, _w in ops]
+        parts += [f'<path d="{d}" fill="none" stroke="black" stroke-width="{w:.3f}"/>'
+                  for _kind, d, w in ops if w > 0]
+        boxes = [parse_path_bbox([d for _k, d, _w in ops], pad)] if ops else []
+        if base_full:
+            boxes.append((-pad, -pad, self.document.width + 2 * pad,
+                           self.document.height + 2 * pad))
+        if not boxes:
+            # An empty mask over an empty base - GROUP_MASK_HIDE_ALL with
+            # nothing added yet.  That hides whatever it clips, which is
+            # exactly right, and a zero-size <mask> region expresses it.
+            return (f'{indent}<mask id="{mask_id}" maskUnits="userSpaceOnUse" '
+                    f'x="0" y="0" width="0" height="0"></mask>')
+        x0 = min(b[0] for b in boxes)
+        y0 = min(b[1] for b in boxes)
+        x1 = max(b[0] + b[2] for b in boxes)
+        y1 = max(b[1] + b[3] for b in boxes)
         return (f'{indent}<mask id="{mask_id}" maskUnits="userSpaceOnUse" x="{x0:.1f}" '
-                f'y="{y0:.1f}" width="{w:.1f}" height="{h:.1f}">{fills}{exclusions}</mask>')
+                f'y="{y0:.1f}" width="{x1 - x0:.1f}" height="{y1 - y0:.1f}">'
+                f'{"".join(parts)}</mask>')
+
+    def _patch_clip_path(self, ancestors: Sequence["Layer"], layer: "Layer",
+                          frame: float, camera: bool = True) -> Optional[str]:
+        """The SVG path of a PatchLayer's own clip region, or None.
+
+        WHAT A PATCH IS.  The manual (ch. 11.15) describes creating one as:
+        "You'll see a new CIRCLE in the project window.  The circle is the
+        patch ... Use the Transform Layer tool to POSITION AND SCALE the patch
+        so that the lines are covered."  So a patch redraws its target's
+        artwork at the patch's own point in the draw order, CLIPPED to a small
+        disc - which is what lets "part of a layer appear behind a layer, and
+        another part of the same layer in front of it".
+
+        MEASURED, against Moho's own renders.  Three experiments on
+        `AddBone.animeproj`, each rendering the document with and without the
+        patch and diffing:
+
+        - Scaling the patch up 5x made it cover MORE of the seam (80 -> 1287
+          changed pixels) while the covered region's x extent stayed put.  The
+          artwork did not grow; the region did.
+        - Translating the patch away from its target made it paint NOTHING at
+          all, which a transform of the artwork could not do.
+        - Sweeping the scale over 0.25 .. 3.0 and solving for the region's
+          growth gives a radius of exactly 36 px per unit of scale at 720p,
+          i.e. 0.1 Moho units, centred on the patch's own translation.  The
+          predicted centre for `Leg_L-Patch` lands 0.4 px from the measured
+          one.
+
+        The clip also follows the patch's OWN bone binding, not the target's:
+        `DonkeyAndMan.mohoproj`'s two patches are rigidly bound to bones 8 and
+        6, and only running the patch's own rigging through the deform chain
+        puts the computed disc over the region Moho actually repaints (11.8 px
+        from the centre of a 16.8 px disc; ignoring the bone puts it 137 px
+        away, well outside).
+
+        This is why `Document._resolve_patch_layers` keeps `patch_clip`: the
+        patch's own transform/parent_bone are wrong for its ARTWORK (using
+        them renders a squashed sliver - see that method) and right for its
+        CLIP.  Both readings of the field are needed, for different things.
+        """
+        clip_layer = layer.patch_clip
+        if clip_layer is None:
+            return None
+        chain = build_deform_chain(ancestors, clip_layer, frame, self)
+        to_px = self._deformed_pixel_mapper(chain, frame, camera=camera)
+        # A closed cubic approximation of the unit circle, scaled to the
+        # measured 0.1-unit radius, sampled THROUGH the deform chain so bone
+        # deformation bends the disc exactly as it bends artwork.
+        r = PATCH_CLIP_RADIUS
+        steps = 32
+        pts = [to_px(Vec2(r * math.cos(2 * math.pi * i / steps),
+                          r * math.sin(2 * math.pi * i / steps)))
+               for i in range(steps)]
+        d = f"M {pts[0].x:.3f} {pts[0].y:.3f} " + " ".join(
+            f"L {p.x:.3f} {p.y:.3f}" for p in pts[1:]) + " Z"
+        return d
+
+    def _blend_declaration(self, layer: "Layer") -> str:
+        """`layer`'s own blend mode as a bare CSS declaration
+        (`mix-blend-mode:multiply`), or "" for an ordinary (Normal) layer.
+
+        An unknown enum value warns once and then draws Normal, rather than
+        guessing at a keyword - see the module docstring's LAYER BLEND MODES
+        section."""
+        mode = layer.blend_mode
+        if not mode:
+            return ""
+        css = BLEND_MODE_CSS.get(mode)
+        if css is None:
+            if mode not in self._warned_blend_modes:
+                self._warned_blend_modes.add(mode)
+                sys.stderr.write(f"  ! layer {layer.name}: unknown blend_mode "
+                                 f"{mode}, drawing it Normal\n")
+            return ""
+        return f"mix-blend-mode:{css}"
+
+    @staticmethod
+    def _isolation_declaration(layer: "Layer") -> str:
+        """`isolation:isolate` for a container that directly holds a blending
+        layer, else "".
+
+        This has to sit on the CONTAINER, not on the blending layer itself:
+        CSS `mix-blend-mode` composites an element against the backdrop of its
+        nearest stacking context, so it is the parent that has to become one.
+        Moho renders each container into its own buffer before compositing
+        that buffer into ITS parent, so a blending layer must never reach past
+        its own container - hence isolating exactly the containers that hold
+        one.  A container whose blending layer is nested deeper needs nothing:
+        that deeper container isolates it by the same rule."""
+        if any(child.blend_mode for child in (layer.children or ())):
+            return "isolation:isolate"
+        return ""
+
+    def _compositing_style(self, layer: "Layer", container: bool = False) -> str:
+        """The whole ` style="..."` attribute for `layer`'s own <g>: its blend
+        mode, plus - for a container - the isolation its blending children
+        need.  Returns "" when neither applies, so an ordinary layer's markup
+        stays byte-for-byte what it was before blend modes existed."""
+        parts = [self._blend_declaration(layer)]
+        if container:
+            parts.append(self._isolation_declaration(layer))
+        parts = [p for p in parts if p]
+        return f' style="{";".join(parts)}"' if parts else ""
 
     # -- shape rendering / SVG assembly --------------------------------------
 
@@ -6582,13 +7795,18 @@ class Exporter:
         coordinates straight to canvas scale - the CLI's --local.
         """
         if local:
+            # --local means "the mesh's own raw coordinates at canvas scale",
+            # so the document camera is deliberately not applied: framing is
+            # exactly what it was before the camera existed.
             geometries = None
-            to_px = self._plain_pixel_mapper(IDENTITY_MATRIX)
+            to_px = self._plain_pixel_mapper(IDENTITY_MATRIX, frame, camera=False)
         else:
             self._active_actions = self._active_actions_along(ancestors, frame)
             self._layer_scale = self._full_chain_matrix(ancestors, layer, frame).uniform_scale() or 1.0
             chain = build_deform_chain(ancestors, layer, frame, self)
-            geometries, to_px = self._geometry_and_mapper(layer.mesh, chain, frame)
+            immune = layer.camera_immune or any(a.camera_immune for a in ancestors)
+            geometries, to_px = self._geometry_and_mapper(layer.mesh, chain, frame,
+                                                          camera=not immune)
 
         body, pixel_points = self._render_mesh(layer.mesh, to_px, frame, indent="    ",
                                                suppress_outline=layer.kind is LayerKind.PATCH,
@@ -6599,12 +7817,13 @@ class Exporter:
         name = svg_escape(layer.name)
         head: list[str] = []
         clip = ""
-        if not local and layer.masking not in (1, 2):
+        if not local and layer.masking not in MASK_EXEMPT:
             container = ancestors[-1] if ancestors else None
-            sources = self._mask_sources(container, ancestors, frame)
-            if sources:
+            base_full, ops = self._mask_plan(container, ancestors, frame).get(
+                id(layer), (False, ()))
+            if ops or base_full:
                 mask_id = f"mask_{self._next_def_id()}"
-                head.append(self._mask_element(sources, mask_id, "  "))
+                head.append(self._mask_element(ops, mask_id, "  ", base_full=base_full))
                 clip = f' mask="url(#{mask_id})"'
         inner = head + [f'  <g id="{name}" data-moho-mask="{layer.masking}"{clip}>'] \
                 + body + ["  </g>"]
@@ -6658,40 +7877,106 @@ class Exporter:
             member_clip, a presentation choice only this function makes.
             """
             pad = "  " * (pad_depth + 1)
-            clip = ""
-            if enter_item.mask_sources:
-                mask_id = f"mask_{self._next_def_id()}"
-                inner.append(self._mask_element(enter_item.mask_sources, mask_id, pad))
-                clip = f' mask="url(#{mask_id})"'
+            # One <mask> per DISTINCT mask state within this scope, built on
+            # demand and shared by every child that resolves to the same
+            # state.  The common "sources at the bottom, masked layers above"
+            # layout therefore still emits exactly one <mask> per container,
+            # byte-for-byte as before; a container that clears its mask
+            # part-way through emits one per epoch instead.  See
+            # Exporter._mask_plan.
+            # The <mask> elements themselves are collected here and spliced
+            # back in at the TOP of this scope when it finishes, which is
+            # where the single-mask-per-container version always put them -
+            # so a document that does not use the incremental modes still
+            # exports byte-for-byte identically.
+            masks: dict[tuple, str] = {}
+            mask_slot = len(inner)
+            mask_defs: list[str] = []
 
+            def clip_for(item: RenderItem) -> str:
+                # the mask source itself, and anything exempt, draws unclipped
+                if item.exempt:
+                    return ""
+                if not item.mask_ops and not item.mask_base_full:
+                    # Not in any mask plan at all (no masking here) vs. an
+                    # empty mask over an empty base (which hides the layer).
+                    # `mask_ops` cannot tell those apart, so ask the plan the
+                    # only way this scope can: a masked item always carries
+                    # its container's decision, and an unmasked one never
+                    # does - which `_mask_plan` encodes by simply not listing
+                    # unmasked containers' children at all.
+                    if not item.masked:
+                        return ""
+                key = (item.mask_base_full, tuple(item.mask_ops))
+                mask_id = masks.get(key)
+                if mask_id is None:
+                    mask_id = f"mask_{self._next_def_id()}"
+                    masks[key] = mask_id
+                    mask_defs.append(self._mask_element(item.mask_ops, mask_id, pad,
+                                                        base_full=item.mask_base_full))
+                return f' mask="url(#{mask_id})"'
+
+            try:
+                render_children(it, pad, pad_depth, clip_for)
+            finally:
+                inner[mask_slot:mask_slot] = mask_defs
+
+        def render_children(it, pad: str, pad_depth: int, clip_for) -> None:
             for item in it:
                 if item.event == "exit":
                     return
-                # the mask source itself, and anything exempt, draws unclipped
-                member_clip = "" if item.exempt else clip
+                member_clip = clip_for(item)
+                # The layer's own opacity (layer_effects.alpha) - like a
+                # blend mode, it only means anything on an element that
+                # wraps the layer, so it forces a <g> under --flat too.
+                alpha_attr = (f' opacity="{item.alpha:.4f}"'
+                              if item.alpha < 1.0 else "")
                 name = svg_escape(item.layer.name)
+                # A non-Normal blend mode (and the isolation a container owes
+                # its blending children) has to survive --flat: both only mean
+                # anything on an element that actually wraps the layer, so
+                # either one forces a <g> where one would otherwise be skipped.
+                blend = self._compositing_style(
+                    item.layer, container=item.event == "enter")
 
                 if item.event == "mesh":
                     body, pts = self._render_mesh(
                         item.layer.mesh, item.to_px, frame, pad + "  ",
                         suppress_outline=item.layer.kind is LayerKind.PATCH)
                     pixel_points.extend(pts)
+                    # A PatchLayer redraws its target's fill only inside its
+                    # own small disc - see _patch_clip_path.  The disc forces
+                    # a wrapping <g> the way a blend mode does, since a clip
+                    # is meaningless without one.
+                    patch_clip = ""
+                    if item.layer.patch_clip is not None:
+                        d = self._patch_clip_path(item.ancestors, item.layer, frame,
+                                                   camera=not item.camera_immune)
+                        if d:
+                            clip_id = f"patch_{self._next_def_id()}"
+                            inner.append(f'{pad}<clipPath id="{clip_id}">'
+                                         f'<path d="{d}"/></clipPath>')
+                            patch_clip = f' clip-path="url(#{clip_id})"'
                     if body:
-                        if nested_groups or member_clip:
+                        if (nested_groups or member_clip or blend or patch_clip
+                                or alpha_attr):
                             inner.append(f'{pad}<g id="{name}" '
-                                         f'data-moho-mask="{item.layer.masking}"{member_clip}>')
+                                         f'data-moho-mask="{item.layer.masking}"'
+                                         f'{member_clip}{alpha_attr}{blend}{patch_clip}>')
                             inner.extend(body)
                             inner.append(f"{pad}</g>")
                         else:
                             inner.extend(body)
                 elif item.event == "image":
                     el, pts = self._render_image_layer(
-                        item.ancestors, item.layer, item.deform_chain, frame, pad + "  ")
+                        item.ancestors, item.layer, item.deform_chain, frame, pad + "  ",
+                        camera=not item.camera_immune)
                     pixel_points.extend(pts)
                     if el:
-                        if nested_groups or member_clip:
+                        if nested_groups or member_clip or blend or alpha_attr:
                             inner.append(f'{pad}<g id="{name}" '
-                                         f'data-moho-mask="{item.layer.masking}"{member_clip}>')
+                                         f'data-moho-mask="{item.layer.masking}"'
+                                         f'{member_clip}{alpha_attr}{blend}>')
                             inner.append(el)
                             inner.append(f"{pad}</g>")
                         else:
@@ -6701,9 +7986,10 @@ class Exporter:
                     # no mesh_layer to synthesise a child from) - its own
                     # children may be an empty list, which still draws an
                     # empty <g>, matching Moho.
-                    if nested_groups or member_clip:
+                    if nested_groups or member_clip or blend:
                         inner.append(f'{pad}<g id="{name}" '
-                                     f'data-moho-type="{item.layer.type_name}"{member_clip}>')
+                                     f'data-moho-type="{item.layer.type_name}"'
+                                     f'{member_clip}{blend}>')
                         render_scope(item, pad_depth + 1)
                         inner.append(f"{pad}</g>")
                     else:
@@ -6740,24 +8026,71 @@ def walk_render_tree(exporter: "Exporter", frame: float,
 
     def walk(layers: Sequence[Layer], container: Optional[Layer],
              ancestors: tuple[Layer, ...], world: Mat2D,
-             exempt: bool) -> Iterator[RenderItem]:
+             exempt: bool, immune: bool = False,
+             enter_base_full: bool = False,
+             enter_ops: tuple = (), enter_masked: bool = False) -> Iterator[RenderItem]:
         mask_sources = exporter._mask_sources(container, ancestors, frame)
+        # The incremental, per-child form of the same thing - see
+        # Exporter._mask_plan for why one mask per container is not enough.
+        # Both are computed here, at the exact point the pre-extraction code
+        # computed the flat one, because both depend on exporter.
+        # _active_actions being empty right now (see _mask_sources).
+        mask_plan = exporter._mask_plan(container, ancestors, frame)
+        container_masks = exporter._container_masks(container)
         yield RenderItem("enter", container, ancestors, len(ancestors),
-                          exempt=exempt, mask_sources=mask_sources)
+                          exempt=exempt, mask_sources=mask_sources,
+                          mask_base_full=enter_base_full, mask_ops=enter_ops,
+                          masked=enter_masked, camera_immune=immune)
 
         active_child: Optional[Layer] = None
         if container is not None and container.kind is LayerKind.SWITCH:
             active_child = container.switch_active_child(frame, exporter)
 
         for layer in layers:
-            if not layer.visible and not include_hidden:
+            if not layer.visible_at(frame, exporter) and not include_hidden:
                 continue
             if layer.edit_only and not include_hidden:
                 continue
             if active_child is not None and layer is not active_child:
                 continue                  # switch layer: only its active child draws
+            alpha = 1.0 if layer.is_container else layer.alpha_at(frame, exporter)
+            if (layer.is_container and layer.effect_alpha is not None
+                    and layer.alpha_at(frame, exporter) != 1.0
+                    and id(layer) not in exporter._warned_container_alpha):
+                # A CONTAINER's own layer_effects.alpha - not decoded; see
+                # Layer.alpha_at for the three models that were measured and
+                # why the best of them still loses to ignoring it.  Warned
+                # rather than guessed, once per layer.
+                exporter._warned_container_alpha.add(id(layer))
+                sys.stderr.write(f"  ! layer {layer.name!r}: container opacity "
+                                 f"(layer_effects.alpha = "
+                                 f"{layer.alpha_at(frame, exporter):.3f}) is not applied - "
+                                 f"see Layer.alpha_at\n")
+            if alpha <= 0.0 and not include_hidden:
+                # Fully transparent: Moho renders nothing for it, and it
+                # contributes nothing to any mask either (already handled in
+                # Exporter._mask_plan).  Confirmed on Snow-girl-cut14's
+                # "/Layer 11/Layer 2", whose alpha keys 1 -> 0 -> 0 -> 1 over
+                # frames 0..9: Moho draws zero pixels for it at frame 1 and
+                # 45,671 at frame 30.
+                continue
+            if (container_masks and layer.masking in MASK_INVISIBLE
+                    and not include_hidden):
+                # "+ Add to mask, but keep invisible" and its two siblings:
+                # the layer shapes the mask (already folded into `mask_plan`
+                # above) and is NOT drawn.  Measured against Moho's own
+                # renders - see the module docstring's MASKING section.  Only
+                # when the container actually masks: otherwise the value is
+                # inert and the layer draws normally, also measured (see
+                # Exporter._container_masks).
+                continue
             world_here = world.compose(layer.local_matrix(frame, exporter))
-            child_exempt = layer.masking in (1, 2)
+            # Every masking mode EXCEPT MASK_MASKED draws unclipped - also
+            # measured, not assumed (a mask source is not clipped by the mask
+            # that precedes it).
+            child_exempt = layer.masking in MASK_EXEMPT
+            child_masked = id(layer) in mask_plan
+            child_base_full, child_ops = mask_plan.get(id(layer), (False, ()))
 
             if layer.mesh is not None:
                 if ((layer.distortion_layer_uuid or layer.squashable_deformer)
@@ -6783,9 +8116,14 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 exporter._active_actions = exporter._active_actions_along(ancestors, frame)
                 exporter._layer_scale = world_here.uniform_scale() or 1.0
                 chain = build_deform_chain(ancestors, layer, frame, exporter)
-                geometries, to_px = exporter._geometry_and_mapper(layer.mesh, chain, frame)
+                child_immune = immune or layer.camera_immune
+                geometries, to_px = exporter._geometry_and_mapper(
+                    layer.mesh, chain, frame, camera=not child_immune)
                 yield RenderItem("mesh", layer, ancestors, len(ancestors),
-                                  exempt=child_exempt, geometries=geometries, to_px=to_px)
+                                  exempt=child_exempt, geometries=geometries, to_px=to_px,
+                                  mask_base_full=child_base_full, mask_ops=child_ops,
+                                  masked=child_masked, alpha=alpha,
+                                  camera_immune=child_immune)
                 exporter._active_actions = []
             elif layer.kind is LayerKind.IMAGE:
                 # A raster PSD crop, not a mesh - same deform chain a mesh
@@ -6797,7 +8135,10 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                 # Exporter._render_image_layer.
                 chain = build_deform_chain(ancestors, layer, frame, exporter)
                 yield RenderItem("image", layer, ancestors, len(ancestors),
-                                  exempt=child_exempt, deform_chain=chain)
+                                  exempt=child_exempt, deform_chain=chain,
+                                  mask_base_full=child_base_full, mask_ops=child_ops,
+                                  masked=child_masked, alpha=alpha,
+                                  camera_immune=immune or layer.camera_immune)
             elif layer.is_container:
                 # A GroupLayer/BoneLayer/SwitchLayer (or a TextLayer with no
                 # mesh_layer to synthesise a child from) - recurse into its
@@ -6819,7 +8160,9 @@ def walk_render_tree(exporter: "Exporter", frame: float,
                                      f"entr(y/ies) - looks like Vitruvian Bones, which is "
                                      f"not implemented; this bone layer poses without it\n")
                 yield from walk(layer.children, layer, ancestors + (layer,),
-                                 world_here, child_exempt)
+                                 world_here, child_exempt,
+                                 immune or layer.camera_immune,
+                                 child_base_full, child_ops, child_masked)
             elif layer.kind is LayerKind.OTHER and id(layer) not in exporter._warned_unsupported_layers:
                 # A layer kind this tool has never implemented at all -
                 # ParticleLayer, AudioLayer, NoteLayer and Mesh3DLayer
@@ -6874,6 +8217,12 @@ class _GroupMember:
     brush_dabs: list = field(default_factory=list)
     brush_ref: Optional[RegisteredBrush] = None      # mask/filter path (Pillow unavailable)
     brush_name: Optional[str] = None                  # pre-tinted path (Pillow available)
+    # What the outline actually paints with: normally `line_hex`, but a
+    # `url(#...)` reference when the shape's line_style is a gradient - see
+    # ShapeGroupRenderer._render_shape.  The two are kept apart because the
+    # brush-stamp paths tint real pixels and so need a plain colour, which a
+    # paint-server reference cannot give them.
+    line_paint: str = ""
 
 
 class ShapeGroupRenderer:
@@ -6955,6 +8304,12 @@ class ShapeGroupRenderer:
             else:
                 sys.stderr.write(f"  ! shape {name}: fill effect "
                                  f"{style.fill_style.get('type')} not supported\n")
+        # fill_style2 is a SECOND effect layered over the fill (SS_Texture2 /
+        # SS_Soft observed).  Nothing here draws it, so say so rather than
+        # dropping it silently, exactly like the fill_style branch above.
+        if shape.has_fill and isinstance(style.fill_style2, dict):
+            sys.stderr.write(f"  ! shape {name}: second fill effect "
+                             f"{style.fill_style2.get('type')} not supported\n")
 
         widths = self._point_widths(shape.edges)
         tapered = (max(widths) - min(widths) > 1e-6) if widths else False
@@ -6989,6 +8344,34 @@ class ShapeGroupRenderer:
         # ShapeGroupRenderer.suppress_outline for why the target's own
         # outline must not be redrawn here.
         outline_enabled = shape.has_outline and not self.suppress_outline
+
+        # The outline's own effect, mirroring the fill's above.  A gradient
+        # becomes a real SVG paint server on the stroke; anything else warns,
+        # because before this existed line_style was not read at all and a
+        # gradient/soft/shaded outline silently painted flat.
+        line_paint = line_hex
+        if outline_enabled and isinstance(style.line_style, dict):
+            if style.line_style.get("type") == "SS_Gradient2":
+                # A brush stroke tints real image pixels rather than painting
+                # with a `stroke`, so it has no paint server to point at - a
+                # gradient cannot reach it, and saying so beats appearing to
+                # apply one.  (Checked before the brush asset is resolved
+                # below, so this tests the style, not the resolved asset.)
+                if style.brush_name:
+                    sys.stderr.write(f"  ! shape {name}: gradient outline on a "
+                                     f"brush stroke not supported, drawn flat\n")
+                else:
+                    gradient_def, gradient_ref = exp._build_gradient(
+                        style.line_style, f"lgrad_{exp._next_def_id()}", frame,
+                        scale=exp.eval(shape.effect_scale, frame),
+                        rotation=exp.eval(shape.effect_rotation, frame), indent=self.indent)
+                    if gradient_def:
+                        self.defs.append(gradient_def)
+                        line_paint = gradient_ref
+            else:
+                sys.stderr.write(f"  ! shape {name}: outline effect "
+                                 f"{style.line_style.get('type')} not supported\n")
+
         if outline_enabled and style.brush_name and style.brush_tint:
             brush_asset = exp._get_brush_asset(style.brush_name)
             if brush_asset is not None:
@@ -7050,7 +8433,7 @@ class ShapeGroupRenderer:
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
                                         line_hex, line_alpha, cap, stroke_path, taper_path,
-                                        brush_dabs, brush_ref, brush_asset_name))
+                                        brush_dabs, brush_ref, brush_asset_name, line_paint))
         for edge in shape.edges:
             seg = self.geometries[edge.curve].segments[edge.segment]
             self.pixel_points += [self.to_px(seg.p0), self.to_px(seg.c1),
@@ -7136,17 +8519,20 @@ class ShapeGroupRenderer:
             if member.taper_path:
                 op = ("" if style_source.line_alpha >= 1
                       else f' fill-opacity="{style_source.line_alpha:.3f}"')
+                # A tapered outline is filled geometry, so the gradient goes on
+                # `fill` here and on `stroke` in the uniform-width case below -
+                # the same paint server either way.
                 self.body.append(
                     f'{self.indent}<path id="{member.name}_line" d="{member.taper_path}" '
-                    f'fill="{style_source.line_hex}"{op} fill-rule="evenodd" '
-                    f'stroke="none"{clip}/>')
+                    f'fill="{style_source.line_paint or style_source.line_hex}"{op} '
+                    f'fill-rule="evenodd" stroke="none"{clip}/>')
                 continue
 
             op = ("" if style_source.line_alpha >= 1
                   else f' stroke-opacity="{style_source.line_alpha:.3f}"')
             self.body.append(
                 f'{self.indent}<path id="{member.name}_line" d="{member.stroke_path}" '
-                f'fill="none" stroke="{style_source.line_hex}" '
+                f'fill="none" stroke="{style_source.line_paint or style_source.line_hex}" '
                 f'stroke-width="{style_source.stroke_width_px:.3f}"{op} '
                 f'stroke-linecap="{style_source.line_cap}" stroke-linejoin="round"{clip}/>')
         self._group.clear()

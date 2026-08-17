@@ -16,10 +16,10 @@
 
     "LayerEffects": {
       "type": "object",
-      "description": "Per-layer image effects. Every sample has these at their default/off values; NOT applied by moho2svg.py.",
+      "description": "Per-layer image effects. All of them EXCEPT `visibility` are at their default/off values in every sample and are not applied; `visibility` is genuinely used (190 layers across 14 files) and IS applied - see its own description.",
       "properties": {
-        "alpha": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Layer opacity. Observed 1.0 in the overwhelming majority of layers, but 0.6 on a real minority (~9 layers in one document) - ignoring this is a confirmed, currently-visible output difference, not just a theoretical gap." },
-        "visibility": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "ANIMATED show/hide, independent of the static `visible` flag." },
+        "alpha": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "The layer's own OPACITY, keyframeable, from the General tab's Compositing Effects group. MEASURED as a plain linear blend: rendering a layer at 0.5 lands on the exact midpoint of its 1.0 and 0.0 renders (mean error 0.13/255). 139 LEAF layers across 15 of the 46 sample files set it to something other than 1, and 11 of those animate it; APPLIED by both exporters (SVG `opacity`, Lottie transform `o`). A CONTAINER's own alpha is NOT applied - three candidate models were measured and the best still scored worse than ignoring it, so moho2svg.py warns instead (5 layers corpus-wide). A layer faded to 0 also contributes nothing to a mask." },
+        "visibility": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "ANIMATED show/hide, and - the manual is explicit about this (ch. 12.02) - \"totally independent of the visibility box displayed in the layer list\": the list flag is an editing convenience, this one is what the render honours. A layer draws only when BOTH are true. Non-trivial on 190 layers across 14 of the 46 sample files; APPLIED by both exporters via Layer.visible_at. (An earlier revision of this schema recorded it as \"true everywhere\", which was a 19-file artefact.)" },
         "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
         "noise": { "$ref": "channel.schema.json#/$defs/ValChannel" },
         "pixelation": { "$ref": "channel.schema.json#/$defs/ValChannel" },
@@ -192,7 +192,8 @@
         },
         "masking": {
           "type": "integer",
-          "description": "This layer's role within its parent's mask, when the parent container has group_mask active: 2 = mask source (still drawn normally - being the mask source does not hide it, and confirmed to paint on TOP of whatever it masks, achieved in moho2svg.py via mask-geometry exclusion of the source's own stroke rather than z-order). 1 = exempt (\"don't mask this layer\" - drawn normally, ignoring the mask). Anything else (typically 0) = clipped to the union of all masking==2 siblings. Values 5 and 6 have also been observed in real files (a handful of layers) - not decoded, and moho2svg.py treats any value other than 1 or 2 as \"clipped\", so 5/6 currently behave as ordinary clipped children. See docs/moho-project-file-format.md §10."
+          "enum": [0, 1, 2, 3, 4, 5, 6, 7],
+          "description": "This layer's role within its parent's mask, when the parent container has group_mask active. An eight-value ENUM, one per entry of the manual's own Layer Masking menu (ch. 12.05), decoded twice over and in agreement - by the declaration order of MM_* in Moho's own scripting header, and independently by rendering every value with Moho itself (see docs/moho-project-file-format.md section 10 for the measurement tables). 0 = clipped to the mask AS IT STANDS at this point in the draw order; 1 = \"don't mask this layer\"; 2 = add this layer to the mask; 3 = subtract it; 4 = add it but keep the layer invisible; 5 = subtract it, keeping the layer invisible; 6 = clear the mask, then add this layer; 7 = clear, add, and keep it invisible. Every non-zero mode DRAWS UNCLIPPED (measured). The whole field is INERT when the container's group_mask is 0 - even the invisible modes do not hide the layer then (also measured). APPLIED in full by moho2svg.py via Exporter._mask_plan, which builds the mask incrementally rather than once per container."
         },
         "transforms": { "$ref": "#/$defs/Transforms" },
         "actions": { "type": "array", "items": { "$ref": "#/$defs/ActionRegistryEntry" } },
@@ -206,11 +207,11 @@
         "motion_blur": { "$ref": "#/$defs/MotionBlur" },
         "physics": { "$ref": "#/$defs/Physics" },
 
-        "blend_mode": { "type": "integer", "description": "0 (large majority) = normal. 1 observed on a real minority of layers - meaning not decoded, and NOT applied by moho2svg.py (a confirmed, currently-visible output difference where sampled)." },
+        "blend_mode": { "type": "integer", "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "description": "How this layer composites against what is drawn beneath it: 0 = Normal, 1 = Multiply, 2 = Screen, 3 = Overlay, 4 = Add, 5 = Difference, 6 = Hue, 7 = Saturation, 8 = Color, 9 = Luminosity, 10 = Soft Light, 11 = Color Dodge, 12 = Color Burn, 13 = PSD Linear Dodge (Add). The manual names these modes but never numbers them; the ordering is the one the Moho 14.4 binary itself uses when it builds that menu. Distribution across the sample set: 0 on 3794 layers, 1 on 117, 2 on 49, 3 on 2 - so 1/2/3 are the only values with any evidence behind them, and they are confirmed by rendering (see moho2svg.py's own LAYER BLEND MODES section); 4-13 are NOT verified. Both exporters now apply this: moho2svg.py as a CSS mix-blend-mode plus isolation on the containing group, moho2lottie.py as a layer `bm` (which cannot reproduce the per-container isolation, since it flattens the tree)." },
         "quality_flags": { "type": "integer", "description": "A bit field of per-layer render toggles. Not decoded. Observed values include 4092, 4094, 45052, 45054, 2044." },
         "label_col": { "type": "integer", "description": "Editor tab colour." },
         "random_num": { "type": "integer" },
-        "camera_immune": { "type": "boolean" },
+        "camera_immune": { "type": "boolean", "description": "Manual ch. 12.02, \"Immune to camera movements\": this layer ignores the document camera and stays put on screen while the camera moves - meant for backgrounds, titles and logos. True on 6 layers across 3 files. APPLIED by both exporters (the layer projects through the default camera instead), and inherited by descendants." },
         "dof_immune": { "type": "boolean" },
         "face_camera": { "type": "boolean" },
         "face_camera_mode": { "type": "integer", "description": "Observed constant 2 in every sample." },
@@ -272,7 +273,7 @@
       "type": "object",
       "description": "Fields shared by every layer type that HOLDS other layers (BoneLayer, GroupLayer, SwitchLayer). Kept separate from LayerCommon because a leaf layer (MeshLayer, ImageLayer, PatchLayer, TextLayer) never carries them. Note `depth_sort`/`distance_sort`/`layer_ordering`/`animated_layer_order` were observed on BoneLayer and GroupLayer only, never on SwitchLayer - they are declared here as optional rather than duplicated per type.\n\nDELIBERATELY NOT HERE: the `layers` array itself. Reaching the recursive `$ref: Layer` through this extra `$ref` hop - inside an allOf, inside the recursive Layer oneOf - costs about 11x in wall-clock validation time (measured: SketchBone.animeproj 16.6s -> 182.8s) for exactly the same semantics. Each of the three container types therefore declares `layers` in its own branch. Do not \"tidy\" it in here.",
       "properties": {
-        "group_mask": { "type": "integer", "description": "Non-zero if this layer, as a mask CONTAINER, masks its children at all (see LayerCommon.masking on the children). 0/absent = falsy. Observed values: 0, 2, and (once) 1." },
+        "group_mask": { "type": "integer", "enum": [0, 1, 2], "description": "Whether this layer, as a mask CONTAINER, masks its children, and what the mask STARTS as (see LayerCommon.masking on the children). 0 = no masking in this group; 1 = \"Reveal all\", the mask starts FULL so every child is visible until something subtracts; 2 = \"Hide all\", the mask starts EMPTY (the common case). Measured against Moho's own renders and agreeing with the GROUP_MASK_* comment in Moho's own scripting header (\"0=none, 1=all visible, 2=all invisible\"). Observed: 0 in 42 files, 2 in 34, 1 in 4."},
         "expanded": { "type": "boolean", "description": "Editor UI state (tree expanded/collapsed)." },
         "depth_sort": { "type": "boolean", "description": "Sort children by depth instead of list order. Observed false everywhere; NOT implemented by moho2svg.py, which always uses list order." },
         "distance_sort": { "type": "boolean", "description": "Observed false everywhere; not implemented by moho2svg.py." },
@@ -538,8 +539,72 @@
       ]
     },
 
+    "ParticleLayer": {
+      "description": "A container that animates its own sub-layers so they spray outward from its origin - water, fire, bubbles (manual ch. 11.11, and the Particles tab at 12.11). Rare but real: 2 instances, both nested inside Gathered-01Intro2/Gathered-02Wire2.mohoproj. Not rendered by either exporter, which emit an unsupported-layer warning. Property descriptions below quote the manual's own dialog labels.",
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        { "$ref": "#/$defs/LayerContainer" },
+        {
+          "type": "object",
+          "required": ["type", "layers"],
+          "properties": {
+            "type": { "const": "ParticleLayer" },
+            "layers": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Layer" },
+              "description": "The sub-layers used as the particles themselves. Declared here rather than in LayerContainer for the same performance reason GroupLayer gives."
+            },
+            "num_particles": { "type": "integer", "description": "\"Particle Count\" - how many particles are visible at once." },
+            "preview_particles": { "type": "integer", "description": "\"Preview particles\" - the smaller count drawn in the working view only." },
+            "particle_lifetime": { "type": "integer", "description": "\"Lifetime (frames)\" before a particle is recycled back to the source. Zero means they never recycle." },
+            "particle_activation": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "\"On at start\", and animatable: switching it off mid-animation stops NEW particles without killing the ones already alive." },
+            "source_shape": {
+              "type": "object",
+              "description": "\"Source width\" / \"Source height\" / \"Source depth\" as x/y/z - a plain vector, not a channel. A non-zero z puts some particles nearer the camera than others. Spelled out here rather than $ref'd to project.schema.json's PlainVec3, to keep this file free of a reference back to the file that references it.",
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "z": { "type": "number" }
+              },
+              "additionalProperties": true
+            },
+            "use_base_as_source": { "type": "boolean", "description": "\"Use Base Layer as Source\" - emit from the bottommost sub-layer's shape instead of the source box." },
+            "velocity": { "type": "number", "description": "\"Velocity\" - starting speed. The manual calibrates it: 2 crosses the screen vertically in one second." },
+            "velocity_spread": { "type": "number", "description": "\"Velocity spread\" - random variation around `velocity`." },
+            "start_dir": { "type": "number", "description": "\"Direction\" to spray in, in RADIANS (observed 1.570796 = straight up)." },
+            "start_spread": { "type": "number", "description": "\"Spread\" - how wide the spray is, in radians (the manual quotes its maximum as 360 degrees = all directions)." },
+            "accel_angle": { "type": "number", "description": "\"Acceleration\" direction, in radians (observed 4.712389 = straight down, i.e. gravity)." },
+            "accel_rate": { "type": "number", "description": "\"Rate\" of acceleration along `accel_angle`." },
+            "damping": { "type": "number", "description": "\"Damping\" - air resistance / backwards acceleration." },
+            "start_full": { "type": "boolean", "description": "\"Full speed start\" - begin already running rather than ramping up." },
+            "orient_particles": { "type": "boolean", "description": "\"Orient particles\" - rotate each to face its direction of travel." },
+            "free_floating": { "type": "boolean", "description": "\"Free-floating\". When FALSE the particles are tied to the layer and move with it." },
+            "evenly_spaced": { "type": "boolean", "description": "\"Evenly spaced\" - release particles at even time increments." },
+            "random_start_time": { "type": "boolean", "description": "\"Randomize playback\" - each particle starts its sub-layer animation at a random time instead of frame 0." },
+            "seed": { "type": "integer", "description": "RNG seed for the whole simulation. Not named in the manual; needed for a reproducible result." },
+            "expanded": { "type": "boolean", "description": "Layers-window UI state only." }
+          }
+        }
+      ]
+    },
+
+    "NoteLayer": {
+      "description": "A comment pinned into the layer tree (manual ch. 11.12). Draws nothing in a render. 1 instance in the sample set. Not rendered by either exporter, which emit an unsupported-layer warning - correctly, since there is nothing to draw.",
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "NoteLayer" },
+            "text": { "type": "string", "description": "The note's own text." }
+          }
+        }
+      ]
+    },
+
     "Layer": {
-      "description": "Any layer node, discriminated by its `type` field.",
+      "description": "Any layer node, discriminated by its `type` field. Covers every type the 46-file sample set contains. The format defines one more, AudioLayer (appendix F.02), which no sample document uses and which is therefore deliberately absent rather than guessed at.",
       "oneOf": [
         { "$ref": "#/$defs/MeshLayer" },
         { "$ref": "#/$defs/BoneLayer" },
@@ -547,7 +612,9 @@
         { "$ref": "#/$defs/SwitchLayer" },
         { "$ref": "#/$defs/PatchLayer" },
         { "$ref": "#/$defs/TextLayer" },
-        { "$ref": "#/$defs/ImageLayer" }
+        { "$ref": "#/$defs/ImageLayer" },
+        { "$ref": "#/$defs/ParticleLayer" },
+        { "$ref": "#/$defs/NoteLayer" }
       ]
     }
   }

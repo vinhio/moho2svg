@@ -81,6 +81,8 @@ Non-goals are listed in [§ 2.2](#22-out-of-scope-for-v1).
 | Brush textures | Explicitly excluded. Lottie has no textured stroke; the only mapping is a raster image asset, which is the most expensive part of `moho2svg.py`. |
 | `ImageLayer` | 15 layers in one document. `moho2svg.py` already drops them because it is a vector-only exporter. Adding them means a raster asset pipeline, the same work that brush textures were excluded for. |
 | Smart Warp | Not decoded anywhere in this repository, and no sample document uses it. |
+| Shape effects other than `SS_Gradient2` (`SS_Halo`, `SS_Shaded`, `SS_Soft`, `SS_Crayon`, `SS_Texture2`, `SS_Shadow`) | `moho2svg.py` does not render them either, so this is inherited rather than a divergence. It is not a small gap — `SS_Halo` alone covers 198 drawn shapes across 10 documents — but closing it means blur/compositing work in both writers at once. Both exporters warn per shape. See `moho-project-file-format.md` § 8.3. |
+| A **container's** `blend_mode` | Representable in principle, but not in this writer's flat layer model: a `GroupLayer`/`BoneLayer`/`SwitchLayer` becomes no Lottie layer of its own, so there is no element left to carry the blend. 3 layers corpus-wide. Counted warning `blend_mode_container`. A **mesh/image** layer's blend mode *is* applied, as the layer's own `bm` — see § 5.2. |
 | `interp` easing | `moho2svg.py` itself ignores it (monotone-cubic interpolation instead of Moho's own undecoded curve). v1 inherits that behaviour rather than diverging from the renderer it is verified against. Cycle markers used to be listed here too; they are now decoded and applied by `Channel` itself, so both exporters cycle - see `moho-animation-and-transform.md` § 3.4. |
 | Rigid-body physics (`physics.enabled` with `physics.static == false`, discriminated by a bone actually subscribing via `wind_dynamics` - `Layer.physics_dynamic`) | `moho2svg.py` already ignores physics, on the stated assumption that "none of them affect a flat vector export of a single frame" - true for a single frame, but not for an animated Lottie export. **v1's original motivating case turned out to be a false positive**: `Bandit.mohoproj`'s top-level `BoneLayer` was first flagged because its keyframed channels alone (ending by frame 41-90) didn't seem to account for the screen-spanning motion Moho's own render shows across frames 25-127 - but that gap was Moho's own cycle marker ACCUMULATING (see `Channel._cycle_value`), not physics; once read correctly the channels track Moho's render to within 0.73 px, and nothing in the tracked 19-document corpus trips this warning any more. `DarkMan.mohoproj` (outside that corpus, user-supplied) is the first real case: `wind_dynamics = true` on all 91 of its bones, with real secondary motion in Moho App that plain playback doesn't reproduce. Neither module runs a real physics simulation - an affected bone's channel is still played back exactly as keyed, just without Moho's own damping, which can show as MORE oscillation/larger swings on a fast-alternating channel, not a frozen pose. v1's counted warning stands; an opt-in `--wind-dynamics` flag was later added as an experimental attempt at simulating the spring-damper (reusing `--bone-dynamics`' own model) but is confirmed NOT to reproduce the observed damping - see `moho2svg.py`'s `Skeleton.dynamic_angles` WIND EVIDENCE section. |
 
@@ -253,6 +255,22 @@ still looks like the right artwork, just with the wrong things in front. It
 gets its own named step in the writer and its own check in
 [§ 8.2](#82-the-geometry-equivalence-check).
 
+**Blend modes.** A layer whose Moho `blend_mode` is non-zero gets a Lottie
+`bm`. The two enums are *not* the same list — they happen to agree on 1/2/3
+(Multiply/Screen/Overlay) and diverge everywhere after that, so the mapping is
+by name, via `BLEND_MODE_LOTTIE`, never a pass-through. One Moho layer can
+become several Lottie layers (a `combo_mode` split, or one window per
+`SwitchLayer` activation); the blend mode goes on every one of them.
+
+This is close but not exact, and the inexactness is structural. Moho
+composites a layer against its own container's buffer and stops there; this
+writer flattens the tree, and Lottie's `bm` blends against everything beneath
+the layer in the composition. The two agree for a blending layer whose
+containers paint nothing of their own — which is every blending layer in the
+sample corpus — and diverge under a container that also paints. `moho2svg.py`
+has no such limit, because it emits real nested `<g>` elements and can isolate
+the container. See `moho-project-file-format.md` § 6.6.
+
 ### 5.3 Shapes
 
 Each Moho shape becomes one group (`"ty": "gr"`) in the layer's `shapes` list,
@@ -305,9 +323,22 @@ breaks it, rather than emitting a file that a player will render as garbage.
 ### 6.1 Masking
 
 Moho expresses masking with two fields: a container's `group_mask`, and each
-child's own `masking`. `moho2svg.py` resolves them in
-`Exporter._mask_sources`, which returns the paths that make up the mask, and
-treats `masking in (1, 2)` as exempt (drawn unclipped).
+child's own `masking`. Both are ENUMs — see
+[`moho-project-file-format.md` § 10](moho-project-file-format.md#10-masking)
+for the decoded values and the renders they were measured against.
+
+**What this writer shares with the SVG exporter, and what it does not.**
+The *visibility* half is shared, because it lives in `walk_render_tree`: a
+layer in one of the three "keep invisible" modes is not emitted at all, and
+neither is one faded out by `layer_effects.alpha` — and every non-zero mode
+is exempt from clipping. The *geometry* half is not: this writer still calls
+`Exporter._mask_sources`, the older flat "union of every `masking == 2`
+child" model, rather than the incremental per-child `Exporter._mask_plan`
+the SVG writer now uses. So a Lottie export of a container that subtracts
+from its mask, or clears it part-way down, gets a mask built only from that
+container's plain `masking == 2` children. Fifteen containers in the corpus
+are affected. Not a silent gap in the invisible-layer sense — the artwork is
+still drawn and still masked — but the mask shape can be wrong there.
 
 Lottie offers two mechanisms. v1 uses the simpler one:
 

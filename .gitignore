@@ -21,3 +21,6 @@ out/
 
 # Scratch analysis notes
 tmp/
+
+# Moho14 reference frames - tracked under `moho/`
+docs/moho14/
