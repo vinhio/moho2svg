@@ -98,6 +98,22 @@ LottieExporter._split_boolean_groups/_split_into_chunks):
     _combo_mode_union_mask_properties); the exclusion band that avoids a
     notch right at the seam is built once per qualifying shape in
     _accumulate_frame/_prepare_union_band_widths.
+  - combo_mode==2 (subtract): the member draws NOTHING of its own; its
+    fill region erases whatever is drawn BELOW it in the group (fill AND
+    stroke) via masksProperties mode "s" entries (_subtract_group_entries)
+    - the Lottie counterpart of ShapeGroupRenderer._erasers_after's
+    per-member erase mask in moho2svg.py.  Decoded from a direct
+    observation in Moho App (2026-08-17): the subtractor becomes invisible
+    and the overlap with the shape(s) below is punched out; order-dependence
+    was CONFIRMED the same way - a member drawn AFTER the subtractor is
+    untouched.  Since one Lottie layer's masksProperties cannot mask part
+    of that layer differently from another part, _split_boolean_groups
+    cuts each boolean group into SEGMENTS at every subtract member, and
+    each segment only receives mask entries from the subtractor(s) that
+    come AFTER it - see that method's own docstring.  Still UNVERIFIED, as
+    no corpus document carries combo_mode 2: whether real Moho's cut is
+    exact at the fill edge, the one open question this shares with
+    moho2svg.py's own approximation.
 
 The one remaining approximation is on the CROSS-layer masking side, not
 combo_mode: Exporter._mask_source_shapes_bezier's own exclusion band
@@ -190,7 +206,7 @@ WARNING_EXPLANATIONS = {
                           "Lottie equivalent for, composited Normal instead "
                           "(see BLEND_MODE_LOTTIE)",
     "combo_mode_unknown": "shape(s) with an unrecognised combo_mode (not "
-                          "0/1/3) drawn as a plain replace shape instead - "
+                          "0/1/2/3) drawn as a plain replace shape instead - "
                           "matches moho2svg.py's own ShapeGroupRenderer."
                           "_render_shape fallback",
     "brush": "shape(s) with a textured brush outline drawn as a plain "
@@ -1030,12 +1046,23 @@ class LottieExporter:
                 multi = len(chunks) > 1
                 for chunk_index, chunk in enumerate(chunks):
                     kind = chunk["kind"]
+                    # combo_mode==2 (subtract) members erase from whatever
+                    # this chunk draws - appended LAST so Lottie's
+                    # sequential mask evaluation subtracts them from the
+                    # region all the earlier entries built up (see
+                    # _subtract_group_entries).
+                    subtract_entries = []
+                    if chunk.get("subtract"):
+                        subtract_entries = self._subtract_group_entries(
+                            layer, chunk["subtract"], window_frames)
                     if kind == "union_exclude":
                         member = chunk["member"]
                         name0 = member["name"]
                         shapes = [self._finalize_outline_group(layer, member, window_frames, name0)]
                         mask_properties = self._combo_mode_union_mask_properties(
                             layer, member, chunk["others"], window_frames, cross_mask)
+                        if subtract_entries:
+                            mask_properties = list(mask_properties) + subtract_entries
                     else:
                         shapes = self._finalize_shapes(
                             layer, chunk["accs"], window_frames,
@@ -1063,6 +1090,15 @@ class LottieExporter:
                             # only needed here for a genuinely separate
                             # cross-layer mask, exactly like "plain".
                             mask_properties = cross_mask
+                        # None from _combined_mask_properties is a "needs
+                        # nesting" SIGNAL, not a fallback - captured here,
+                        # BEFORE subtract entries turn the value non-None
+                        # and hide the signal.
+                        needs_nesting = (kind == "clip" and not chunk_pre_clipped
+                                         and mask_properties is None)
+                        if subtract_entries:
+                            mask_properties = (list(mask_properties) if mask_properties
+                                               else []) + subtract_entries
                     # "#N" rather than " N" - a space-separated digit suffix
                     # could collide with another Moho layer's own name (e.g.
                     # this mesh's own combo_mode split of "Leg_F" landing on
@@ -1070,7 +1106,7 @@ class LottieExporter:
                     # which is a DIFFERENT layer's actual name in this same
                     # document).
                     name = f"{layer.name}#{chunk_index}" if multi else layer.name
-                    if kind == "clip" and not chunk_pre_clipped and mask_properties is None:
+                    if needs_nesting:
                         # _combined_mask_properties's own "needs nesting"
                         # signal - see _nested_group_mask_layer. Not reached
                         # for a fully pre-clipped chunk: `mask_properties`
@@ -1078,11 +1114,15 @@ class LottieExporter:
                         # is `None` precisely when this layer has no
                         # cross-layer mask at all - a pre-clipped chunk's
                         # geometry needs no masksProperties in that case,
-                        # not the nested-layer fallback.
+                        # not the nested-layer fallback.  Subtractor entries
+                        # go on the OUTER layer's mask list, erasing from
+                        # the composited (already clip-masked) result -
+                        # exactly the SVG side's group-level erase.
                         group_entries = self._group_mask_entries(
                             layer, chunk["base"], window_frames)
                         collected.append(self._nested_group_mask_layer(
-                            shapes, group_entries, cross_mask, ip, op, name))
+                            shapes, group_entries,
+                            (cross_mask or []) + subtract_entries, ip, op, name))
                         continue
                     collected.append(self._shape_layer(name, shapes, ip, op, mask_properties))
                 self._stamp_alpha(collected, window_start, window_alpha, window_frames)
@@ -1334,6 +1374,39 @@ class LottieExporter:
         self._assert_stable(layer, "<combo_mode group>", "group mask", per_frame_flat)
         return self._mask_entries(per_frame_flat, frames)
 
+    def _subtract_group_entries(self, layer, subtract_accs: list, frames) -> list:
+        """masksProperties entries (mode "s", i.e. subtract) built from
+        combo_mode==2 (subtract) members' own fill geometry - the Lottie
+        counterpart of ShapeGroupRenderer._erasers_after's per-member erase
+        mask in moho2svg.py: a subtract member draws nothing of its own,
+        its fill region instead punches a hole through whatever is drawn
+        BELOW it (fill AND stroke), confirmed directly in Moho App
+        (2026-08-17): the member becomes invisible and the overlap with
+        the shapes below is removed.
+
+        `subtract_accs` is already the caller's job to scope correctly -
+        see _split_boolean_groups, which cuts each boolean group into
+        segments at every subtract member so a segment only ever receives
+        the subtractor(s) that come AFTER it (never one before it, and
+        never one belonging to a different group).  That is what keeps
+        this order-dependent: a segment past a group's last subtractor is
+        called with an empty `subtract_accs` and its caller skips this
+        method entirely (see _build_layers).
+
+        Lottie evaluates masksProperties sequentially, so mode "s" entries
+        appended AFTER whatever else a chunk already masks (cross-layer
+        mask, clip union, exclusion band) subtract from the running region
+        exactly like that SVG erase mask erases a member's finished pixels.
+        Still UNVERIFIED whether real Moho's cut is exact at the fill edge
+        (vs. this mask approximation) - no corpus document exercises
+        combo_mode 2 to confirm.
+        """
+        per_frame_flat = [
+            [subpath for acc in subtract_accs for subpath in acc["fill_per_frame"][f]]
+            for f in range(len(frames))]
+        self._assert_stable(layer, "<combo_mode group>", "subtract mask", per_frame_flat)
+        return self._mask_entries(per_frame_flat, frames, mode="s")
+
     def _prepare_union_band_widths(self, mesh, frame0) -> dict:
         """{id(shape): stroke_width_px} for every raw `Shape` (moho2svg.py's
         Shape, not an accumulator dict - accumulators do not exist yet the
@@ -1387,7 +1460,13 @@ class LottieExporter:
             if combo_mode == 0 and (base or clip):
                 flush()
                 base, clip = [], []
-            (clip if combo_mode == 3 else base).append(shape)
+            if combo_mode == 3:
+                clip.append(shape)
+            elif combo_mode in (0, 1):
+                base.append(shape)
+            # combo_mode 2 (subtract): no band width needed - it is not a
+            # base member, its own outline is never drawn, and it does not
+            # participate in the union-exclusion bands.
         flush()
         return result
 
@@ -1395,26 +1474,63 @@ class LottieExporter:
         """Partition one mesh's shape accumulators (in file order) into
         contiguous boolean-combination groups, exactly like
         ShapeGroupRenderer's own grouping in moho2svg.py: a combo_mode==0
-        shape starts a new group, combo_mode 1/3 shapes join the group in
+        shape starts a new group, combo_mode 1/2/3 shapes join the group in
         progress (see _new_accumulator for why combo_mode is guaranteed to
-        already be one of 0/1/3 here). Returns [(base_accs, clip_accs), ...]
-        per group - base_accs are combo_mode 0/1 members (drawn plainly,
-        never clipped), clip_accs are combo_mode==3 members (drawn clipped
-        to base_accs' own union - see _group_mask_entries).
+        already be one of 0/1/2/3 here). Returns [(base_accs, clip_accs,
+        subtract_accs), ...] - one entry per boolean-combination SEGMENT
+        (see below), not one per raw combo_mode==0 group boundary. base_accs
+        are combo_mode 0/1 members (drawn plainly, never clipped), clip_accs
+        are combo_mode==3 members (drawn clipped to base_accs' own union -
+        see _group_mask_entries), subtract_accs are the combo_mode==2
+        members that erase this segment's own accumulated result (fill AND
+        stroke) via mask mode "s" - see _subtract_group_entries, the Lottie
+        counterpart of ShapeGroupRenderer._flush's per-member erase mask in
+        moho2svg.py.
+
+        A combo_mode==2 member only erases what is drawn BELOW it (earlier
+        in the group), never a member drawn ON TOP of it (later) - the
+        ORDER-DEPENDENT rule confirmed directly against Moho App
+        (2026-08-17), matching moho2svg.py's own
+        ShapeGroupRenderer._erasers_after.  Lottie's masksProperties apply
+        to a whole LAYER, though, so one layer cannot mask part of a group
+        differently from another part.  This method resolves that by
+        cutting each combo_mode==0-bounded group into SEGMENTS at every
+        subtract member it contains: the base/clip accumulated so far close
+        out one segment, the subtractor itself starts a new one, and each
+        segment's own subtract_accs is every subtractor that comes AFTER
+        it in the group (never one before it) - so the segment following a
+        group's LAST subtractor gets an empty subtract_accs, exactly like a
+        group with no subtractor at all, and downstream code (which already
+        treats an empty "subtract" list as "no masking needed") needs no
+        further change.
         """
+        def split_group(members: list) -> list:
+            segments: list = []          # [[base, clip], ...], in order
+            base: list = []
+            clip: list = []
+            subtractor_runs: list = []   # subtractor_runs[i] follows segments[i]
+            for acc in members:
+                if acc["combo_mode"] == 2:
+                    segments.append([base, clip])
+                    subtractor_runs.append(acc)
+                    base, clip = [], []
+                elif acc["combo_mode"] == 3:
+                    clip.append(acc)
+                else:
+                    base.append(acc)
+            segments.append([base, clip])   # trailing segment, no subtractor after it
+            return [(b, c, subtractor_runs[i:])
+                    for i, (b, c) in enumerate(segments) if b or c]
+
         groups: list = []
-        base: list = []
-        clip: list = []
+        current: list = []
         for acc in accs:
-            if acc["combo_mode"] == 0 and (base or clip):
-                groups.append((base, clip))
-                base, clip = [], []
-            if acc["combo_mode"] == 3:
-                clip.append(acc)
-            else:
-                base.append(acc)
-        if base or clip:
-            groups.append((base, clip))
+            if acc["combo_mode"] == 0 and current:
+                groups.extend(split_group(current))
+                current = []
+            current.append(acc)
+        if current:
+            groups.extend(split_group(current))
         return groups
 
     @staticmethod
@@ -1422,9 +1538,11 @@ class LottieExporter:
         """A list of chunk dicts, in file order, from `_split_boolean_groups`'
         own output - one of:
 
-          {"kind": "plain", "accs": [...], "skip_outline": frozenset(...)}
-          {"kind": "clip", "accs": [...], "base": [...]}
-          {"kind": "union_exclude", "member": acc, "others": [...]}
+          {"kind": "plain", "accs": [...], "skip_outline": frozenset(...),
+           "subtract": [...]}
+          {"kind": "clip", "accs": [...], "base": [...], "subtract": [...]}
+          {"kind": "union_exclude", "member": acc, "others": [...],
+           "subtract": [...]}
 
         Each chunk becomes one Lottie layer - see _build_layers, which
         appends these in this same file order so the existing
@@ -1433,13 +1551,13 @@ class LottieExporter:
         already did back when one Moho layer was always exactly one Lottie
         layer.
 
-        Consecutive groups with no combo_mode==3 member and no multi-member
-        base merge into one "plain" chunk (no masking needed at all). A
-        group WITH a combo_mode==3 member gets its own "clip" chunk for
-        those members (needing a group mask built from the base - see
-        _group_mask_entries/_combined_mask_properties); a base's FILL is
-        never clipped by this, only a combo_mode==3 member's is, matching
-        moho2svg.py's own _render_shape.
+        Consecutive groups with no combo_mode==3 member, no combo_mode==2
+        member and no multi-member base merge into one "plain" chunk (no
+        masking needed at all). A group WITH a combo_mode==3 member gets
+        its own "clip" chunk for those members (needing a group mask built
+        from the base - see _group_mask_entries/_combined_mask_properties);
+        a base's FILL is never clipped by this, only a combo_mode==3
+        member's is, matching moho2svg.py's own _render_shape.
 
         A group whose base has MORE THAN ONE member additionally gets one
         "union_exclude" chunk per base member that has its own outline -
@@ -1455,6 +1573,13 @@ class LottieExporter:
         outlines - base and combo_mode==3 members alike - painted together
         once the group closes) without tracking file order at finer grain
         than "this group's own contribution" for either kind.
+
+        A group WITH a combo_mode==2 (subtract) member carries that
+        member's accumulator list on its own chunks under the "subtract"
+        key, and the plain run is flushed around it (like clip groups
+        already do): the subtract mask must apply to THIS group's layers
+        only, never to a neighbouring group merged into the same "plain"
+        chunk.
         """
         chunks: list = []
         plain_run: list = []
@@ -1467,8 +1592,7 @@ class LottieExporter:
                                "skip_outline": frozenset(skip_outline)})
             plain_run, skip_outline = [], set()
 
-        for base, clip in groups:
-            plain_run.extend(base)
+        for base, clip, subtract in groups:
             group_exclusions: list = []
             if len(base) > 1:
                 for member in base:
@@ -1476,12 +1600,38 @@ class LottieExporter:
                         skip_outline.add(id(member))
                         others = [m for m in base if m is not member]
                         group_exclusions.append((member, others))
-            if clip or group_exclusions:
+            # A group WITH a subtractor must keep its own base in its own
+            # "plain" chunk, so the subtract mask never erases a
+            # neighbouring group that would otherwise merge into the same
+            # run - close any earlier run first.  All other groups keep the
+            # old merge behaviour (flush after extend, below), which is
+            # what keeps a no-subtract document byte-identical.
+            if subtract and base and plain_run:
                 flush_plain()
+            plain_run.extend(base)
+            if subtract and base:
+                # This group's base becomes its OWN plain chunk, flushed
+                # NOW (before the clip/exclusion chunks below are
+                # appended, keeping the plain-first order) so the subtract
+                # key lands on exactly it and the next group cannot merge
+                # in.  A group with NO base member produces no plain chunk
+                # (nothing visible to erase from - mirrors
+                # ShapeGroupRenderer._flush's own `subtractors and solid`
+                # guard in moho2svg.py), so the chunk list length is
+                # checked rather than blindly indexing chunks[-1].
+                before = len(chunks)
+                flush_plain()
+                if len(chunks) > before:
+                    chunks[-1]["subtract"] = subtract
+            elif clip or group_exclusions:
+                flush_plain()
+            subtract_key = {"subtract": subtract} if subtract else {}
             if clip:
-                chunks.append({"kind": "clip", "accs": clip, "base": base})
+                chunks.append({"kind": "clip", "accs": clip, "base": base,
+                               **subtract_key})
             for member, others in group_exclusions:
-                chunks.append({"kind": "union_exclude", "member": member, "others": others})
+                chunks.append({"kind": "union_exclude", "member": member,
+                               "others": others, **subtract_key})
         flush_plain()
         return chunks
 
@@ -1988,7 +2138,7 @@ class LottieExporter:
         """
         exp = self.exporter
         combo_mode = shape.combo_mode
-        if combo_mode not in (0, 1, 3):
+        if combo_mode not in (0, 1, 2, 3):
             # Matches ShapeGroupRenderer._render_shape's own fallback in
             # moho2svg.py: an unrecognised value is drawn as a plain
             # replace shape rather than aborting the export.
@@ -2001,7 +2151,14 @@ class LottieExporter:
         outline_color = None
         outline_cap = None
         tapered = False
-        if shape.has_outline:
+        # A combo_mode==2 (subtract) member is INVISIBLE and only erases
+        # the group's accumulated result - see _subtract_group_entries.
+        # Its own outline is therefore never collected (no warnings either,
+        # matching ShapeGroupRenderer._render_shape's `visible` gate in
+        # moho2svg.py); its FILL geometry is still accumulated per frame in
+        # _accumulate_frame, because that is exactly what the subtract mask
+        # is built from.
+        if shape.has_outline and combo_mode != 2:
             line_width = exp.eval(style.line_width, frame0)
             outline_color = Color.from_raw(exp.eval(style.line_color, frame0))
             widths0 = self._point_widths(layer.mesh, shape.edges, frame0)

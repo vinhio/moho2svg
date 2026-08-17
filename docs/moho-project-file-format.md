@@ -825,7 +825,7 @@ present on all 112 shapes of the `1045` one — treat a missing `combo_mode` as
 | `0` | 96 | Normal — starts a new independent boolean group. |
 | `1` | 2 | Union — merged into the current group; the shared boundary disappears, and the *combined* outline is stroked using the group's first (base) member's styling, not its own. |
 | `3` | 14 | Intersect — clipped to the union of the group's solid members so far. |
-| `2` | **0** | Not present in any of these 19 documents. The module docstring reports having seen it in a real file; there is no sample here to decode it from, and `moho2svg.py` falls through to normal handling for it. |
+| `2` | **0** | Subtract — the member draws nothing of its own; its fill region punches a hole through whatever is drawn BELOW it in the group (fill AND stroke), never a member drawn on top of it. Not present in any of these 19 documents — decoded from a direct observation in Moho App (2026-08-17); order-dependence was CONFIRMED the same way. Still implemented but UNVERIFIED against a machine-readable reference on one remaining question, edge exactness (see the module docstring's BOOLEAN SHAPE COMBINATIONS section). |
 
 **A `combo_mode == 3` (intersect) member's own outline no longer shows a real
 gap that Moho does not draw.** `moho2svg.py` implements `combo_mode` by
@@ -1783,8 +1783,10 @@ use: **`layer_effects.visibility`** (animated show/hide),
 This is a living reverse-engineering effort, not a specification. Fields whose
 *values* are observed but whose *meaning* is not decoded:
 
-- `combo_mode: 2` — reported in the module docstring, absent from all 19
-  sample documents. ([§ 7.8](#78-boolean-shape-combination))
+- `combo_mode: 2` — decoded as Subtract, order-dependence included, from a
+  direct Moho App observation (2026-08-17), implemented in both exporters,
+  but absent from all 19 sample documents so its edge-exactness stays
+  unverified against a machine-readable reference. ([§ 7.8](#78-boolean-shape-combination))
 - `channel.interp.t` / `.im` / `.in` / `.s` / `.h` / `.v1` / `.v2` / `.b` —
   the interpolation-type enum and its parameters. ([§ 5.3](#53-the-interp-entries))
 - `channel.ref` — `true` on 207 channels across 3 documents; meaning not

@@ -201,7 +201,7 @@ def build_shapes_html(doc) -> str:
             elif combo == 3:
                 combo_html = '<span class="pill warn">intersect</span>'
             elif combo == 2:
-                combo_html = '<span class="pill warn">combo 2 (chưa giải mã)</span>'
+                combo_html = '<span class="pill warn">subtract</span>'
             else:
                 combo_html = "—"
             notes = []

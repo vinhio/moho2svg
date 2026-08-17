@@ -165,18 +165,27 @@ out/lottie/%.json: moho2lottie.py moho2svg.py Makefile $$(wildcard moho/$$*.anim
 # sharing that stem has no lottie export of its own.
 lottie-all: $(addprefix out/lottie/,$(addsuffix .json,$(PROJECT_STEMS)))
 
-# Runs both check scripts under tools/ against the lottie output of the
+# Runs the check scripts under tools/ against the lottie output of the
 # sample projects - see their own docstrings for what each actually checks
-# and why neither needs a Lottie player or a third-party package.
+# and why none of them needs a Lottie player or a third-party package.
 #
 # The geometry check gets the SAME $(LOTTIE_EXPORT_FLAGS) the export above
 # used, because those flags change geometry; passing them here is what makes
 # this a check of the writer rather than a diff of two different renders.
+#
+# check_lottie_stability.py is the one check here that does NOT compare against
+# the pipeline, and that is the point: check_lottie_geometry.py compares the
+# writer with the same pipeline that fed it, so it is blind to any wrong
+# decision the two sides share - which is how a whole class of defect (a
+# resampled loop whose vertex ring slipped, making shapes visibly spin in a
+# player) shipped past a green `make check-lottie`. The stability check reads
+# the emitted file alone and asks whether its keyframes can be interpolated.
 check-lottie: out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
 	python3 tools/check_bezier_roundtrip.py
 	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json 25 60 100 127 --require-masks $(LOTTIE_EXPORT_FLAGS)
 	python3 tools/check_lottie_geometry.py moho/SketchBone.animeproj out/lottie/SketchBone.json 1 77 86 120 --require-gradients $(LOTTIE_EXPORT_FLAGS)
 	python3 tools/check_lottie_geometry.py moho/WhatIsBone.animeproj out/lottie/WhatIsBone.json 1 120 240 --require-masks --require-gradients $(LOTTIE_EXPORT_FLAGS)
+	python3 tools/check_lottie_stability.py out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
 
 # Compares this exporter's own geometry against the frames MOHO ITSELF
 # exported, which is the only ground truth in the repository - see the

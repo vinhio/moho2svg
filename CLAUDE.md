@@ -29,8 +29,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file Python 3 CLI (`moho2svg.py`, ~2900 lines) that exports Moho vector
-artwork (`.mohoproj` / `.animeproj`, which are JSON) to SVG. There is no build
+A single-file Python 3 CLI (`moho2svg.py`, ~9,300 lines, a third of it the
+module docstring's evidence notes) that exports Moho vector artwork
+(`.mohoproj` / `.animeproj`, which are JSON) to SVG. There is no build
 system or package manifest, and no automated test suite — verification means
 running an export against a real project file and comparing against a
 reference SVG (see below).
@@ -100,7 +101,27 @@ Repository layout:
   emitted Lottie file agrees with what the pipeline computes directly, at any
   given frame — also accepts `--require-gradients`/`--require-masks` to assert
   a feature was actually exercised, not just silently skipped) both check this
-  repository against **itself**. `check_reference_frames.py` (`make
+  repository against **itself**.
+
+  **Know what that cannot see.** Both compare the writer against the same
+  pipeline that fed it, so any wrong decision the two sides *share* is
+  invisible to them — a clip region read with the wrong fill rule, a mask
+  band's loop ordering, the vertex ordering of a resampled loop. Three defects
+  of exactly that shape once shipped past a green `make check-lottie` and were
+  found by eye, in a player, much later. Two scripts exist for that blind spot,
+  both reading the emitted file alone:
+  `check_lottie_stability.py` (part of `make check-lottie`) asks whether each
+  animated shape's keyframes can be *interpolated* — it centres consecutive
+  keyframes and measures how much realigning their vertex rings would improve
+  them, which is what a player smears between keyframes when correspondence
+  breaks; and `diff_lottie_visible.py` (a tool, not a check) reports each
+  layer's visible region — own geometry ∩ accumulated mask, by polygon algebra
+  — between two Lottie files, which is how to tell a cosmetic change from one a
+  viewer would notice. Reach for the second whenever a change *might* have
+  moved something, or when a rendering report needs confirming or dismissing:
+  it settles in a second what took a long investigation by hand.
+
+  `check_reference_frames.py` (`make
   check-reference`) is the only one that checks it against an **outside
   authority**: real frames Moho 14.4 itself exported, under `moho/track/`
   (three documents' worth — see the script's own `CHECKS`/`WINDING_CHECKS`
@@ -123,7 +144,31 @@ Repository layout:
   `moho-to-lottie-plan.md` (the implementation plan and its own progress
   table — read this one for what is actually done versus still open).
 - `moho/` — gitignored local copies of `.mohoproj`/`.animeproj` source files
-  used for development/regression-checking.
+  used for development/regression-checking. `moho/track/` holds the reference
+  frame sets Moho itself exported (see `tools/check_reference_frames.py`).
+- **Three further gitignored reference corpora, none of them obvious from the
+  tree, and each one has already settled questions this repository could not
+  answer from its own samples:**
+  - `docs/moho14/` — Moho 14's own user manual, converted to per-chapter
+    Markdown (35 files) by `tmp/pdf2md.py`, which needs `pymupdf`. One sentence
+    of ch. 12.05 decoded both mask checkboxes; appendix G documents the render
+    CLI. **Search it before measuring anything.**
+  - `mohoscripts/` — 197 third-party Moho Lua scripts (121 unique). They call
+    Moho's own API, so they are a second opinion on behaviour — they
+    corroborated the asymmetric bone scale, flip propagation and the
+    control-bone model, and supplied the cycle formula. Evidence only: do not
+    copy code, and check any claim, since one of them carries an arithmetic
+    slip and another a model that is only right at the default camera zoom.
+    See `docs/moho-mohoscripts-plan.md` for the full analysis and its
+    remaining TODO steps.
+  - Moho's own scripting header, inside the app rather than this repo:
+    `/Applications/Moho.app/Contents/Resources/Support/Pro/Extra Files/Lua
+    Interfaces/pkg_moho.lua_pkg`. This is the highest-value source in the whole
+    project and the cheapest to consult: it declares the C++ struct members in
+    the order the JSON writes them, which decoded the whole `interp` entry
+    (`im/v1/v2/in/h/s/t`) outright, named `s` as `stagger`, and showed the
+    additive-cycle flag lives in an unserialised `flags` byte. It also settles
+    every `MOHO.*` enum. Read it before inferring any field's meaning.
 - `out/` — gitignored export output, regenerable by the Makefile pattern
   rules: `out/svg/ori/` (original full-texture exports), `out/svg/med/`,
   `out/svg/fast/` and `out/svg/raster/` (alternative brush-performance
@@ -237,9 +282,11 @@ python3 moho2lottie.py Project.mohoproj --out Project.json --validate # + schema
 ```
 
 `make lottie-all` exports every project under `moho/`; `make check-lottie`
-builds the three sample projects' Lottie exports and runs the two scripts
-under `tools/` — see `docs/moho-to-lottie-plan.md` Task 8 for what
-`check-lottie` actually asserts.
+builds the three sample projects' Lottie exports and runs three scripts under
+`tools/` (`check_bezier_roundtrip.py`, `check_lottie_geometry.py`,
+`check_lottie_stability.py`) — see `docs/moho-to-lottie-plan.md` Task 8 for what
+the first two assert, and the `tools/` entry above for the blind spot the third
+exists to cover. `make` with no target prints every target with examples.
 
 Both use one variable, **`LOTTIE_EXPORT_FLAGS`** (default
 `--wind-dynamics --point-bones`), and they must: those flags change geometry,
@@ -254,6 +301,55 @@ a change is to run an export against a real `.mohoproj`/`.animeproj` file and
 compare against a reference SVG Moho itself exported ("File > Export
 Animation") — that empirical-comparison process is how nearly every constant
 and formula in this file was originally derived (see the module docstring).
+
+### Running one check instead of all of them
+
+Every script under `tools/` runs standalone, which is how to iterate on one
+document without rebuilding everything:
+
+```bash
+# geometry of one emitted Lottie at chosen frames - PASS THE EXPORT FLAGS (see above)
+python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json \
+        25 60 --require-masks --point-bones --wind-dynamics
+# keyframe interpolability of one emitted Lottie, from the file alone
+python3 tools/check_lottie_stability.py out/lottie/Bandit.json --verbose
+# what visibly changed between two Lottie builds (needs pyclipper)
+python3 tools/diff_lottie_visible.py old.json new.json --layer Eye_ --frames 25,60
+# the outside-authority check; no per-document flag, it reads moho/track/ itself
+python3 tools/check_reference_frames.py
+```
+
+`make` will not rebuild an export whose sources are untouched, so force one
+with `rm -f out/lottie/Bandit.json && make out/lottie/Bandit.json`. Comparing a
+STALE artifact against a fresh pipeline is a real trap — it once produced a
+convincing but entirely false failure report.
+
+### Getting ground truth out of Moho itself
+
+Moho renders headlessly, and this is the authority every hard question in this
+repository was eventually settled against (appendix G of the manual documents
+the full flag set):
+
+```bash
+/Applications/Moho.app/Contents/MacOS/Moho -r FILE -f PNG -start N -end N -o OUT.png
+/Applications/Moho.app/Contents/MacOS/Moho -r FILE -f SVG -start N -end N -o OUT.svg
+```
+
+`-f SVG` is how the reference frame sets under `moho/track/` were made; `-f PNG`
+is required for anything Moho's own SVG export drops (blend modes, halos,
+shadows — see SHAPE EFFECTS). `-shapefx no -layerfx no` turns off exactly the
+effects this exporter does not implement, which makes a much fairer comparison
+target. Rendering one frame of a large rig takes ~2 seconds.
+
+**The technique worth reusing: render the same document TWICE with one field
+flipped.** The difference between those two renders is that field's effect,
+measured by Moho, with every unrelated modelling error in this exporter
+cancelled out. Editing the JSON by hand is fine — Moho reads it back happily,
+including fields hand-written into it. That is how `fixed_angle`,
+`mask_expansion`, stroke exposure and the Vitruvian-bone selector were each
+settled, and how a suspected regression was cleared; a plain "our render versus
+Moho's" comparison is far weaker, because this exporter's own baseline error is
+often larger than the effect being measured.
 
 ## Architecture
 
@@ -275,9 +371,9 @@ flexible/region binding). Do not re-derive or "fix" any of this without new
 reference evidence — some things that look like bugs (e.g. asymmetric bone
 scale in `Skeleton.world_matrices`) are intentionally preserved because they
 match real Moho output and are flagged rather than "corrected". See the
-docstring's KNOWN GAPS section for what is genuinely unresolved (combo_mode 2,
-gradient placement precision, bone-weight-falloff shape, brush stroke
-approximations, unrendered shape effects, and the `PatchLayer` heuristic
+docstring's KNOWN GAPS section for what is genuinely unresolved (gradient
+placement precision, bone-weight-falloff shape, brush stroke approximations,
+unrendered shape effects, and the `PatchLayer` heuristic
 below).
 
 **The document camera** (`animated_values.camera_track`/`camera_zoom`) is

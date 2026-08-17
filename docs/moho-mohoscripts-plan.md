@@ -21,7 +21,7 @@ point at local material that is not part of this repository.
 |---|---|
 | Corpus read | 2026-08-17 |
 | Files | 197 `*.lua`, 161,409 lines, 5.7 MB — **121 unique by content**, 88,494 lines |
-| Plan steps | 13 — Steps 1–7 done (7 partly), 0 and 8–12 open |
+| Plan steps | 14 — Steps 1–7 and 13 done (7 partly), 0 and 8–12 open |
 
 ---
 
@@ -690,6 +690,75 @@ If the extraction tables prove useful more than once, promote them into a small
 `docs/moho-scripting-api.md`: the method/field/constant inventory with the
 file:line where each is used, as a lookup table for future format questions.
 Only worth doing if a later step actually needs it twice.
+
+---
+
+### Step 13 — Close the blind spot `make check-lottie` has
+**Status:** ✅ **done.** Both tools built, wired and validated; the check found a
+fourth defect on its first run (below).
+
+Not from the scripts — from this session. Four Lottie defects surfaced while
+working through Steps 1–7, and `make check-lottie` was blind to every one of
+them, because it compares the writer against **the same pipeline that fed the
+writer**. Anything wrong in a decision both sides share is invisible to it: the
+clip region's fill rule, a mask band's loop ordering, the vertex ordering of a
+resampled loop. Each took a hand-built probe to find and another to prove fixed.
+
+Two of the three probes that worked are worth keeping. The third is not, and that
+distinction matters more than the tools:
+
+| Probe | Keep? | Why |
+|---|---|---|
+| **Frame-to-frame vertex slip** — for each animated `sh`, the cyclic shift that best aligns consecutive keyframes | **yes** | Found the "spinning shape" class outright (55/64 → 4/64). Needs only the emitted file, no player, no reference render. A pass/fail guard. |
+| **Visible region** — per layer, `own geometry ∩ accumulated mask`, by polygon algebra | **yes** | Settled the `Eye_Upper`/`Eye_Back` report in one run (0.04–0.09% change, i.e. untouched). A *comparison* tool between two files, not a CI assertion. |
+| **Player simulator** (`lottie_sim.py`) — replay layers/masks as SVG and rasterise | **no** | Not faithful enough: it showed an ankle ellipse that a real player never showed, which sent one whole investigation down the wrong path. Keeping it would keep inviting that mistake. |
+
+Delivered:
+
+1. **`tools/check_lottie_stability.py`**, now part of `make check-lottie`. Two
+   assertions per animated `sh`: keyframes agree on vertex count and closedness,
+   and consecutive keyframes stay in vertex *correspondence*.
+   The metric took two attempts, and the rejected one is worth recording:
+   - **Raw cyclic slip** discriminates well but means different things on
+     different shapes — 10 vertices of slip rotates a round fill visibly while
+     merely sliding points along a thin band.
+   - **Second differences** (is keyframe k+1 near the midpoint of k and k+2?)
+     was tried and **rejected**: it is dominated by genuine acceleration. A
+     whisker moving sharply scores 111% of its own size, and the buggy build
+     scored 6.55% median against the fixed build's 5.96% — no discrimination.
+   - **Realignment gain**, the one kept: centre both keyframes on their own
+     centroid, find the best cyclic shift, and report how much the rms vertex
+     distance *improves* at that shift, as a percentage of the shape's own
+     diagonal. A shape in correspondence gains nothing; a slipped ring gains
+     exactly the distance it is out of correspondence. It separates the fill and
+     band cases by itself, and shape compactness (`area/perimeter²`) is used to
+     fence them apart: 20% for blobs, 35% for thin bands.
+
+   Validated both ways: the pre-fix build **fails on 54 keyframe pairs**, naming
+   `Leg_F#1`, `Leg_F 2#1`, `Arm_F#1`, `Arm_B#1` — the exact layers reported as
+   "spinning" — while the fixed build passes at 9.2% (blob) and 28.0% (thin).
+   Runtime ~2.7 s for all three sample documents, 32,000 keyframe pairs.
+
+2. **`tools/diff_lottie_visible.py`** — per-layer visible region (own geometry ∩
+   accumulated mask) between two Lottie files, by polygon algebra. It reproduces
+   the whole `Eye_Upper`/`Eye_Back` investigation in **1.6 s**: worst visible
+   difference 0.09%, i.e. untouched. The rasterising simulator that first
+   suggested a problem there was deliberately **not** promoted — see the table
+   above.
+
+3. A `CLAUDE.md` note stating plainly what `check-lottie` can and cannot see,
+   and which tool to reach for instead.
+
+**A fourth defect, found by the new check on its first run.** Pre-clipped
+outline **bands** slip up to 31 of 64 vertices frame to frame (28% realignment
+gain on `Eye_Back#1` at frames 44 and 49). It is real but nearly invisible —
+sliding samples along a thin uniform band barely changes its outline, which is
+why no one reported it — and neither anchoring rule fixes it (nearest-point 31,
+rotating-frame extremum 29), because it is a *distribution* problem: a clipped
+band's arc-length resample slides whenever the clip cuts it in a different
+place. Fixing it properly means building the band from a clipped **centreline**
+instead of polygon-clipping the band. Fenced at 35% and recorded, not silently
+tolerated.
 
 ---
 

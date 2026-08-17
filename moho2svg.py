@@ -490,9 +490,23 @@ before it in the same layer:
     3   intersect - this shape's fill/stroke is clipped to the union of the
         group's solid (mode 0 or 1) members so far.
 
-combo_mode 2 has been observed in real files (Leg_F/S2 in the Bandit rig) but its
-effect has not been reverse-engineered; ShapeGroupRenderer draws it unclipped and
-prints a warning, rather than guessing.
+combo_mode 2 = subtract: the member draws NOTHING of its own; its fill region
+instead punches a hole through whatever is drawn BELOW it in the group (fill
+AND stroke) - CONFIRMED order-dependent by direct observation in Moho App
+(2026-08-17): with nothing else acting on the shapes, a subtractor erases
+only the member(s) drawn before it (below it), and leaves a member drawn
+AFTER it (on top of it) untouched.  Implemented per-member in
+ShapeGroupRenderer._flush: each member's own fill/stroke is wrapped in an
+erase mask built from every combo_mode-2 member that comes AFTER it in the
+group (even-odd bbox minus the subtractor paths, no stroke band - the cut
+must stay clean at the exact fill edge), so a member past the last
+subtractor gets no erase mask at all.  moho2lottie.py mirrors this by
+splitting the group into sub-runs at each subtractor and giving each run
+masksProperties mode "s" entries from every subtractor AFTER it
+(_subtract_group_entries).  Still UNVERIFIED, since no corpus document
+carries combo_mode 2 (it was seen once in a real file - Leg_F/S2 in an OLDER
+Bandit rig; the current Bandit's Leg_F/S2 is combo_mode 1): whether real
+Moho's subtract cut is exact at the fill edge (vs. this mask approximation).
 
 FIXED: a combo_mode==3 (intersect) member's own outline no longer shows a
 gap that Moho itself does not draw.  Confirmed on Bandit's Eye_Upper/S3 (the
@@ -1188,7 +1202,12 @@ one `psd_layer` value each, so it cannot be a reliable key on its own.
 --------------------------------------------------------------------------------
 KNOWN GAPS
 --------------------------------------------------------------------------------
-  - combo_mode 2 (see BOOLEAN SHAPE COMBINATIONS).
+  - combo_mode 2 (subtract) is implemented, order-dependence CONFIRMED
+    directly against Moho App (erases only members drawn BELOW/before it,
+    never one drawn after it), but still UNVERIFIED against a real Moho
+    export: no corpus document carries it, so its edge-exactness (does the
+    real cut land exactly at the fill edge, vs. this mask approximation?)
+    remains an open question (see BOOLEAN SHAPE COMBINATIONS).
   - Whether a combo_mode==3 member can ever legitimately want its OWN
     artist-drawn gap (segments_on==false unrelated to the intersect) is
     unconfirmed - see BOOLEAN SHAPE COMBINATIONS for the fix that now always
@@ -8766,6 +8785,12 @@ class _GroupMember:
     # brush-stamp paths tint real pixels and so need a plain colour, which a
     # paint-server reference cannot give them.
     line_paint: str = ""
+    # The fill's own paint (flat colour or gradient ref) and alpha, deferred
+    # from _render_shape so _flush can mask every fill of the group at once
+    # when a combo_mode-2 (subtract) member erases from it.
+    fill_paint: str = ""
+    fill_alpha: float = 1.0
+    has_fill: bool = False
 
 
 class ShapeGroupRenderer:
@@ -8859,8 +8884,21 @@ class ShapeGroupRenderer:
         if not fill_path:
             return
 
+        combo_mode = shape.combo_mode
+        if combo_mode not in (0, 1, 2, 3):
+            sys.stderr.write(f"  ! shape {name}: unknown combo_mode {combo_mode}, "
+                             f"drawn as-is\n")
+            combo_mode = 0
+        # A combo_mode-2 (subtract) member is INVISIBLE - its fill region
+        # only erases the group's accumulated result (see _flush), so it has
+        # no fill of its own and no outline.  Its fill/stroke attributes
+        # (paint, alpha, gradient, brush) are deliberately not computed into
+        # SVG: nothing of it renders.  See the module docstring's BOOLEAN
+        # SHAPE COMBINATIONS section.
+        visible = combo_mode != 2
+
         paint = fill_hex
-        if shape.has_fill and isinstance(style.fill_style, dict):
+        if visible and shape.has_fill and isinstance(style.fill_style, dict):
             if style.fill_style.get("type") == "SS_Gradient2":
                 gradient_def, gradient_ref = exp._build_gradient(
                     style.fill_style, f"grad_{exp._next_def_id()}", frame,
@@ -8875,7 +8913,7 @@ class ShapeGroupRenderer:
         # fill_style2 is a SECOND effect layered over the fill (SS_Texture2 /
         # SS_Soft observed).  Nothing here draws it, so say so rather than
         # dropping it silently, exactly like the fill_style branch above.
-        if shape.has_fill and isinstance(style.fill_style2, dict):
+        if visible and shape.has_fill and isinstance(style.fill_style2, dict):
             sys.stderr.write(f"  ! shape {name}: second fill effect "
                              f"{style.fill_style2.get('type')} not supported\n")
 
@@ -8883,24 +8921,10 @@ class ShapeGroupRenderer:
         tapered = (max(widths) - min(widths) > 1e-6) if widths else False
         point_width = widths[0] if (widths and not tapered) else 1.0
 
-        combo_mode = shape.combo_mode
-        if combo_mode not in (0, 1, 3):
-            sys.stderr.write(f"  ! shape {name}: unknown combo_mode {combo_mode}, "
-                             f"drawn as-is\n")
-            combo_mode = 0
         if combo_mode == 0 or not self._group:
             self._flush()             # a plain shape starts a new boolean group
 
-        clip = ""
-        if combo_mode == 3:            # intersect with the group's union so far
-            solid_so_far = [m.fill_path for m in self._group if m.combo_mode in (0, 1)]
-            clip = self._mask_union(solid_so_far, f"in_{exp._next_def_id()}")
-
         stroke_width_px = exp._stroke_width_px(line_width, point_width)
-        if shape.has_fill:
-            op = "" if fill_alpha >= 1 else f' fill-opacity="{fill_alpha:.3f}"'
-            self.body.append(f'{self.indent}<path id="{name}_fill" d="{fill_path}" '
-                             f'fill="{paint}"{op} fill-rule="evenodd" stroke="none"{clip}/>')
 
         stroke_path, taper_path = "", ""
         brush_dabs: list = []
@@ -8911,7 +8935,7 @@ class ShapeGroupRenderer:
         # (has_outline is whatever the TARGET declares) - see
         # ShapeGroupRenderer.suppress_outline for why the target's own
         # outline must not be redrawn here.
-        outline_enabled = shape.has_outline and not self.suppress_outline
+        outline_enabled = shape.has_outline and not self.suppress_outline and visible
 
         # The outline's own effect, mirroring the fill's above.  A gradient
         # becomes a real SVG paint server on the stroke; anything else warns,
@@ -9004,13 +9028,33 @@ class ShapeGroupRenderer:
 
         self._group.append(_GroupMember(fill_path, combo_mode, name, stroke_width_px,
                                         line_hex, line_alpha, cap, stroke_path, taper_path,
-                                        brush_dabs, brush_ref, brush_asset_name, line_paint))
+                                        brush_dabs, brush_ref, brush_asset_name, line_paint,
+                                        paint, fill_alpha, shape.has_fill and visible))
         for edge in shape.edges:
             seg = self.geometries[edge.curve].segments[edge.segment]
             self.pixel_points += [self.to_px(seg.p0), self.to_px(seg.c1),
                                   self.to_px(seg.c2), self.to_px(seg.p1)]
 
     # -- boolean-group outlines -------------------------------------------------
+
+    def _erasers_after(self, index: int) -> list[str]:
+        """Fill paths of every combo_mode-2 (subtract) member drawn AFTER
+        `index` in the current group - the ORDER-DEPENDENT rule confirmed
+        directly against Moho App (2026-08-17): a subtractor punches a hole
+        only through whatever is drawn BELOW it (earlier members), never
+        through a member drawn ON TOP of it (later in the group).  A member
+        past the group's last subtractor therefore gets an empty list here,
+        i.e. no erase mask at all."""
+        return [m.fill_path for j, m in enumerate(self._group)
+                if j > index and m.combo_mode == 2]
+
+    def _wrap_erase(self, lines: list[str], erase_clip: str) -> list[str]:
+        """Wrap `lines` (one rendered member's own fill or stroke markup) in
+        the `<g mask="...">` from `_erasers_after`, or return them unchanged
+        if `erase_clip` is empty (nothing after this member subtracts)."""
+        if not erase_clip:
+            return lines
+        return [f'{self.indent}<g{erase_clip}>', *lines, f'{self.indent}</g>']
 
     def _flush(self) -> None:
         """Emit the outlines of the just-finished boolean-combination group.
@@ -9021,12 +9065,45 @@ class ShapeGroupRenderer:
         module docstring.  Reproduced here by stroking (or tapered-outlining)
         every member with the base's style, each clipped against the group's
         other solid members.
+
+        A combo_mode-2 (subtract) member itself draws nothing (see
+        _render_shape's `visible` gate - its has_fill/stroke_path/etc. are
+        already forced empty/False, so it never reaches either loop below).
+        Instead, EVERY OTHER member's own fill/stroke is individually wrapped
+        in an erase mask built from `_erasers_after` - each combo_mode-2
+        member positioned after it in the group - so the erase stays
+        order-dependent per the module docstring's BOOLEAN SHAPE COMBINATIONS
+        section, rather than one mask erasing the whole group uniformly.
         """
         if not self._group:
             return
         base = self._group[0]
+        for i, member in enumerate(self._group):
+            if not member.has_fill or not member.fill_path:
+                continue
+            # combo_mode 3 (intersect): the fill is clipped to the union of
+            # the group's solid members SO FAR - the same "so far" the old
+            # render-time fill emit used (members strictly before this one).
+            clip = ""
+            if member.combo_mode == 3:
+                solid_so_far = [m.fill_path for m in self._group[:i]
+                                if m.combo_mode in (0, 1)]
+                if solid_so_far:
+                    clip = self._mask_union(solid_so_far,
+                                            f"in_{self.exporter._next_def_id()}")
+            erasers = self._erasers_after(i)
+            erase_clip = ""
+            if erasers:
+                erase_clip = self._mask_subtraction(
+                    erasers, member.fill_path, f"era_{self.exporter._next_def_id()}",
+                    base.stroke_width_px, band=False)
+            op = "" if member.fill_alpha >= 1 else f' fill-opacity="{member.fill_alpha:.3f}"'
+            fill_el = (f'{self.indent}<path id="{member.name}_fill" '
+                      f'd="{member.fill_path}" fill="{member.fill_paint}"{op} '
+                      f'fill-rule="evenodd" stroke="none"{clip}/>')
+            self.body.extend(self._wrap_erase([fill_el], erase_clip))
         solid = [m.fill_path for m in self._group if m.combo_mode in (0, 1)]
-        for member in self._group:
+        for i, member in enumerate(self._group):
             if not member.stroke_path and not member.taper_path and not member.brush_dabs:
                 continue
             style_source = base if member.combo_mode in (0, 1) else member
@@ -9049,6 +9126,14 @@ class ShapeGroupRenderer:
                                                   style_source.stroke_width_px)
             elif member.combo_mode == 3:
                 clip = self._mask_union(solid, f"in_{self.exporter._next_def_id()}")
+
+            erasers = self._erasers_after(i)
+            erase_clip = ""
+            if erasers:
+                own_path = member.stroke_path or member.taper_path or member.fill_path
+                erase_clip = self._mask_subtraction(
+                    erasers, own_path, f"era_{self.exporter._next_def_id()}",
+                    style_source.stroke_width_px, band=False)
 
             if member.brush_dabs:
                 dab_indent = self.indent + "  "
@@ -9082,9 +9167,9 @@ class ShapeGroupRenderer:
                             style_source.line_hex, style_source.line_alpha)
                         if ref is not None:
                             dabs_svg.append(self.exporter._brush_use_svg(dab, *ref, dab_indent))
-                self.body.append(f'{self.indent}<g id="{member.name}_line"{clip}>')
-                self.body.extend(dabs_svg)
-                self.body.append(f'{self.indent}</g>')
+                lines = [f'{self.indent}<g id="{member.name}_line"{clip}>',
+                        *dabs_svg, f'{self.indent}</g>']
+                self.body.extend(self._wrap_erase(lines, erase_clip))
                 continue
 
             if member.taper_path:
@@ -9093,19 +9178,21 @@ class ShapeGroupRenderer:
                 # A tapered outline is filled geometry, so the gradient goes on
                 # `fill` here and on `stroke` in the uniform-width case below -
                 # the same paint server either way.
-                self.body.append(
+                taper_el = (
                     f'{self.indent}<path id="{member.name}_line" d="{member.taper_path}" '
                     f'fill="{style_source.line_paint or style_source.line_hex}"{op} '
                     f'fill-rule="evenodd" stroke="none"{clip}/>')
+                self.body.extend(self._wrap_erase([taper_el], erase_clip))
                 continue
 
             op = ("" if style_source.line_alpha >= 1
                   else f' stroke-opacity="{style_source.line_alpha:.3f}"')
-            self.body.append(
+            stroke_el = (
                 f'{self.indent}<path id="{member.name}_line" d="{member.stroke_path}" '
                 f'fill="none" stroke="{style_source.line_paint or style_source.line_hex}" '
                 f'stroke-width="{style_source.stroke_width_px:.3f}"{op} '
                 f'stroke-linecap="{style_source.line_cap}" stroke-linejoin="round"{clip}/>')
+            self.body.extend(self._wrap_erase([stroke_el], erase_clip))
         self._group.clear()
 
     def _mask_union(self, paths: Sequence[str], mask_id: str) -> str:
@@ -9120,7 +9207,7 @@ class ShapeGroupRenderer:
         return f' mask="url(#{mask_id})"'
 
     def _mask_subtraction(self, paths: Sequence[str], own: str, mask_id: str,
-                           stroke_width_px: float) -> str:
+                           stroke_width_px: float, band: bool = True) -> str:
         """Hide everything covered by `paths`.
 
         A single even-odd path (the padded bbox, minus every path in `paths`)
@@ -9134,16 +9221,22 @@ class ShapeGroupRenderer:
         the other's edge, one stroke-width short of actually meeting) - so a
         stroked copy of every path in `paths`, one stroke-width wide, is
         painted back in on top, letting the two ends meet instead.
+
+        `band=False` skips that stroke-back: a combo_mode-2 subtract hole
+        must stay cut exactly at the subtractor's fill edge, with no painted
+        band blurring the erased edge - see _flush.
         """
         x0, y0, w, h = parse_path_bbox(list(paths) + [own], self.exporter.settings.mask_padding)
         box = f"M {x0:.1f} {y0:.1f} H {x0 + w:.1f} V {y0 + h:.1f} H {x0:.1f} Z "
-        band = "".join(f'<path d="{d}" fill="none" stroke="white" '
-                       f'stroke-width="{stroke_width_px:.3f}" stroke-linejoin="round"/>'
-                       for d in paths)
+        band_svg = ""
+        if band:
+            band_svg = "".join(f'<path d="{d}" fill="none" stroke="white" '
+                               f'stroke-width="{stroke_width_px:.3f}" stroke-linejoin="round"/>'
+                               for d in paths)
         self.defs.append(f'{self.indent}<mask id="{mask_id}" maskUnits="userSpaceOnUse" '
                          f'x="{x0:.1f}" y="{y0:.1f}" width="{w:.1f}" height="{h:.1f}">'
                          f'<path fill="white" fill-rule="evenodd" '
-                         f'd="{box}{" ".join(paths)}"/>{band}</mask>')
+                         f'd="{box}{" ".join(paths)}"/>{band_svg}</mask>')
         return f' mask="url(#{mask_id})"'
 
 

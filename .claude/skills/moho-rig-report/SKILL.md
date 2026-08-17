@@ -95,7 +95,7 @@ via Bash). The important blocks:
   draw order (`mesh.draw_order()` — today always the `shapes` array order;
   the `shape_order` channel is deliberately ignored, see
   `Mesh.draw_order`'s docstring) with fill/outline, the `combo_mode` pill
-  (union / intersect / combo 2 chưa giải mã) and a style note (brush,
+  (union / intersect / subtract) and a style note (brush,
   gradient fill, second effect, gradient line). If this string is EMPTY
   (a file with no mesh-carrying layer, e.g. a pure ImageLayer rig), drop
   the whole `<section id="shapes">...</section>` block when assembling in
