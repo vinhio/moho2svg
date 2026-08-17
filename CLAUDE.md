@@ -296,6 +296,28 @@ not — the export carried the flags and the check ran with defaults — and
 the mismatch. Change the variable, never one call site
 (`make check-lottie LOTTIE_EXPORT_FLAGS=` runs both sides plain).
 
+Two more Makefile variables trade file size for a bounded amount of visual
+approximation rather than changing what "correct" geometry means, so they
+stay separate from `LOTTIE_EXPORT_FLAGS`: **`LOTTIE_DECIMATE_TOLERANCE`**
+(default **2.0**, i.e. on by default — `moho2lottie.py --decimate-tolerance`,
+`LottieExporter._decimate_frames`) drops a keyframe wherever LINEAR
+interpolation between its kept neighbours already reproduces it within that
+many pixels; **`LOTTIE_RIGID_TOLERANCE`** (default empty/off —
+`--rigid-transform-tolerance`, `LottieExporter._rigid_ks_for_acc`) writes a
+shape as a static path plus an animated layer transform instead, whenever
+one shared affine matrix reproduces its whole fill+outline at every frame.
+Measured on `DarkMan.mohoproj` (a user-supplied, gitignored, heavily
+bone-skinned rig — see `docs/moho-to-lottie-design.md` § 4 for the numbers):
+decimation alone took it from 4.14 MB to 1.94 MB; the rigid-transform flag
+found almost nothing to do there (~20% of shapes qualify, none of the large
+ones — a real, flexibly-skinned character rig, not a gap in the detection),
+so it stays opt-in rather than a second default. `check-lottie`'s own
+`check_tolerance_flag` mirrors `LOTTIE_DECIMATE_TOLERANCE` into
+`check_lottie_geometry.py --tolerance=`, the same reason
+`LOTTIE_EXPORT_FLAGS` has to be threaded through both sides — set
+`LOTTIE_DECIMATE_TOLERANCE=` (empty) for a byte-exact export and an exact
+(3e-3px) check together.
+
 There is no test suite, linter, or formatter configured. The only way to verify
 a change is to run an export against a real `.mohoproj`/`.animeproj` file and
 compare against a reference SVG Moho itself exported ("File > Export
@@ -503,10 +525,30 @@ afterward regardless of what you touched:
   ("Independent angle", 65 bones / 11 documents): a flagged bone keeps its
   parent's position but not the parent's *departure from its own rest
   rotation*. Measured by rendering `TransformBoneTool.animeproj` with Moho
-  twice, flag on and forced off, so the flag's own effect is isolated — worth
-  up to 16 px, with about a third of it still unexplained. See that method's
-  "NOTE ON INDEPENDENT ANGLE" and `RenderSettings.fixed_angle_mode` (which
-  keeps the two rejected models available so the measurement can be re-run).
+  twice, flag on and forced off, so the flag's own effect is isolated —
+  worth up to 16 px. The 2026-08 re-measurement (three selective twins, see
+  the note's RESIDUAL section) retires the old "~1/3 recovery" claim: under
+  a clean per-axis delta metric "rest" recovers LegL at ~82%/76% and
+  overshoots LegR (152%/118%), the weak spot is the nested flagged pair
+  B12/B16 (48-216% of Moho's selective effect), and the remaining mismatch
+  is entangled with the binding model — recorded, not tuned. See that
+  method's "NOTE ON INDEPENDENT ANGLE" and `RenderSettings.fixed_angle_mode`
+  (which keeps the two rejected models available so the measurement can be
+  re-run).
+- **The `offset` field (Offset Bone tool) is now applied** (2026-08 decode —
+  see `Skeleton._solve`'s NOTE ON OFFSET and
+  `docs/moho-rigging-and-deformation.md` § 3.7): the POSE carries it while
+  the BIND transform basis does not, so `rest_to_pose` keeps the offset —
+  a gross (100-200 px) per-layer displacement on
+  `OffsetBoneTool.animeproj`, measured by Moho's own twin diff. `Skinner.build`
+  now makes TWO rest calls (`bind_rest=True` for the transform basis, plain
+  for the weight segments); do not collapse them back into one. The knob
+  `RenderSettings.offset_mode` ("on"/"off") keeps the pre-decode behaviour
+  one setting away so the measurement can be re-run. What the decode does
+  NOT close: this document's per-mesh rigid-follow binding model (Moho
+  moves every point of a mesh by the SAME vector) vs the exporter's
+  whole-skeleton distance blend — recorded as the binding-model gap,
+  fenced in `make check-reference`'s OffsetBoneTool row.
 - **`interp[].im` is the interpolation method**, and it is an ENUM, not a
   bitfield — decoded twice over, by rendering each value with Moho's own CLI
   and by Moho's own scripting header (`pkg_moho.lua_pkg`), which agree on all
@@ -539,16 +581,26 @@ afterward regardless of what you touched:
 - **`Skeleton.dynamic_angles`** (bone dynamics / spring physics, behind
   `--bone-dynamics`, off by default) drives the spring from the *parent's*
   world rotation, not the bone's own keyed angle — a bone with a constant
-  local angle still needs to swing when its parent moves. This is an
-  unverified model (Moho gives three force numbers and no equation); see the
-  method's own docstring for what has and hasn't been checked against a real
-  render. The same method also gates a second, independent family —
-  `wind_dynamics`, behind `--wind-dynamics`, off by default — reusing this
-  spring rather than a separate equation (no `wind_spring_force` field
-  exists in the file). Tested against `DarkMan.mohoproj` and **confirmed not
-  to reproduce the observed effect** (same or more oscillation than plain
-  playback, not less) — see the method's own WIND EVIDENCE section before
-  assuming this flag helps anything.
+  local angle still needs to swing when its parent moves. The spring itself
+  is now **decoded, not fitted** (2026-08, synthetic two-bone rigs rendered
+  by Moho 14.4 with one rigidly-bound marker mesh per bone — see the
+  method's EVIDENCE section and `docs/moho-rigging-and-deformation.md`
+  § 3.5): per-second units, one semi-implicit Euler step per frame
+  (`h = 1/fps`), spring ×96 and damping ×0.85 against the stored values;
+  `torque_force` is measured NOT to couple translation (0.0000 degrees at
+  torque 0.1 and 6.0 alike); `angle_weight` is live but unfitted and stays
+  unread. Still unresolved (recorded, not tuned): the units of the
+  parent-coupling terms, the chain solve (children see the parent's keyed
+  pose, not its simulated lag), and the BoneDynamics ears' ~55 px baseline
+  defect, which is NOT the spring. The same method also gates a second,
+  independent family — `wind_dynamics`, behind `--wind-dynamics`, off by
+  default — reusing this spring rather than a separate equation (no
+  `wind_spring_force` field exists in the file). Tested against
+  `DarkMan.mohoproj` **and now against a purpose-built minimal wind rig**,
+  and **confirmed not to reproduce the observed effect** (the rig renders
+  0.0000 degrees differently with wind subscribed vs not) — see the
+  method's own WIND EVIDENCE section before assuming this flag helps
+  anything.
 - **`Exporter._geometry_and_mapper`** (per-point rigid bone binding,
   `MeshPoint.parent`, behind `--point-bones`, off by default) — an older
   measurement recorded honouring this as much worse than ignoring it; a

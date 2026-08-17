@@ -1315,16 +1315,25 @@ KNOWN GAPS
     swings - which is how every rig in the corpus actually uses the feature.
     It responds on 3 of the 6 documents that use it, up from 1.  The three
     that stay inert have dynamic bones hanging off a parent that only
-    TRANSLATES; making those move needs a pivot-acceleration term, tried and
-    rejected on evidence (see dynamic_angles).  Force units are fitted, not
-    decoded.  `torque_force`, `angle_weight` and the
-    `*_control_delay`/`pos_`/`scale_` dynamics families are read or skipped
-    but never applied.  `wind_dynamics` now has a `--wind-dynamics` flag
-    that reuses this same spring, gated independently of `bone_dynamics` -
-    but it is a CONFIRMED negative result on the one bone tested
-    (`DarkMan.mohoproj`'s `hat -> right_part` `B3`: same or more oscillation
-    than plain playback, not the observed damping), shipped as plumbing for
-    a future model rather than a working simulation - see
+    TRANSLATES.  The spring itself is now DECODED, not fitted - 2026-08,
+    synthetic two-bone rigs rendered by Moho 14.4 with one rigidly-bound
+    marker mesh per bone (tmp/dynamics/, untracked): per-SECOND units, one
+    semi-implicit Euler step per frame, spring scaled x96 and damping x0.85
+    against the stored values (see Skeleton.dynamic_angles' EVIDENCE section
+    for the measurement tables and what remains unresolved, including the
+    units of the parent-coupling terms).  `torque_force` is measured NOT to
+    couple translation at all (a translating parent rotates the child 0.0000
+    degrees at torque 0.1 and 6.0 alike) - the pivot-acceleration reading is
+    dead for good.  `angle_weight` is measured live (a step response differs
+    visibly at weight 1.0 vs the -1.0/0.0 baseline) but its exact semantics
+    are not fitted, so it stays unread.  The `*_control_delay`/`pos_`/
+    `scale_` dynamics families are read or skipped but never applied.
+    `wind_dynamics` has a `--wind-dynamics` flag reusing this spring, gated
+    independently of `bone_dynamics` - still a negative result: a minimal
+    wind rig (physics on, wind.strength 100, wind_dynamics true, DarkMan's
+    own B3 keyframes) renders IDENTICALLY with wind on and off (0.00 degrees
+    difference at every keyframe), so the DarkMan B3 damping observation
+    must come from something other than these three fields alone - see
     Skeleton.dynamic_angles' WIND EVIDENCE section.
   - `Bandit.mohoproj`'s whole TAIL sits ~18 px (base) to ~32 px (tip) off
     vertically against Moho's own render, where every other layer in the
@@ -1336,7 +1345,10 @@ KNOWN GAPS
     and the tail bones are the document's only two with dynamics on.  Ruled
     out by measurement: all 28 rigid bindings, 5 subsets and all 4 falloffs
     leave the vertical error within ~2 px of each other.  See `make
-    check-reference`.
+    check-reference`.  (The decoded spring does NOT close this gap: Bandit's
+    root never rotates, so the parent terms stay zero, and the tail's
+    parent only translates - which the torque measurement above shows Moho's
+    own spring also does not couple.)
   - A channel's cycle marker IS applied (see Channel._parse_cycles), but its
     REPEAT COUNT is not decoded - nothing in the corpus separates "repeat
     forever" from "repeat N times", so a cycle runs until the channel's next
@@ -2801,6 +2813,10 @@ class Bone:
     # this bone does not inherit its parent's ROTATION, only its position.
     # Applied in Skeleton._world_matrices - see its NOTE ON INDEPENDENT ANGLE.
     fixed_angle: bool = False
+    # The Offset Bone tool: a static {x, y} added to this bone's base so it
+    # sits elsewhere without re-binding the artwork that follows it.  Applied
+    # in Skeleton._solve - see its NOTE ON OFFSET.
+    offset: Any = None
 
     def dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
         """Whether this bone's ANGLE dynamics is switched on at `frame`.
@@ -2951,6 +2967,7 @@ class Bone:
             scale_control_scale=raw.get("scale_control_scale", 1.0),
             scale_control_delay=raw.get("scale_control_delay", 0) or 0,
             fixed_angle=bool(raw.get("fixed_angle", False)),
+            offset=raw.get("offset") or {"x": 0.0, "y": 0.0},
         )
 
 
@@ -3011,11 +3028,17 @@ class Skeleton:
             return None
         return Skeleton([Bone._build(b) for b in raw["bones"]], raw.get("bones_groups") or [])
 
-    def world_matrices(self, frame: float, exporter: "Exporter") -> list[Mat2D]:
+    def world_matrices(self, frame: float, exporter: "Exporter",
+                       bind_rest: bool = False) -> list[Mat2D]:
         """One world-space matrix per bone, parents resolved before children
         regardless of list order (parents are not guaranteed to appear earlier
         in `bones` than their children - this walks each bone's parent chain
         on demand, memoising visited bones, rather than assuming any order).
+
+        `bind_rest=True` builds the BIND (rest) basis instead of a pose:
+        each bone's `offset` is suppressed, because the Offset Bone tool
+        moved the bone AFTER the artwork was bound - see _solve's NOTE ON
+        OFFSET.  Only Skinner.build passes it.
 
         NOTE ON SCALE: two separate rules, both measured against Moho's own
         renders.
@@ -3092,33 +3115,50 @@ class Skeleton:
         check-reference` is unchanged by this (Bandit's two flagged bones move
         its Tail group by 0.01-0.09 px, every other number identical).
 
-        RESIDUAL, stated plainly: "rest" recovers only about a third of the
-        effect (7.17 -> 4.93 and 5.82 -> 3.43 px).  The rest is not explained.
-        It may be this document's own baseline skinning error - our absolute
-        error on those same leg layers is 10.7 px mean with the flag ignored,
-        i.e. ~2x the effect being measured, so the delta comparison is itself
-        contaminated at second order - or the model may be incomplete for
-        NESTED flagged bones (this document has two such pairs: B11/B12 and
-        B15/B16, each a flagged bone whose parent is also flagged).  Recorded
-        rather than tuned away.  Reproduce with:
+        RESIDUAL, 2026-08 RE-MEASUREMENT.  The "rest recovers ~1/3" line above
+        was computed with a statistic that is not recorded, and does not
+        survive a clean per-axis delta metric (mean |bbox-centre delta| per
+        layer over frames 1-120; twins rendered with Moho 14.4, all three sets
+        now living at moho/track/_tmp_tbt_{noflag,outer,inner}/):
 
-            python3 - <<'EOF'   # write a no-flag twin
-            import json; d = json.load(open("moho/TransformBoneTool.animeproj"))
-            def w(o):
-                if isinstance(o, dict):
-                    if o.get("fixed_angle"): o["fixed_angle"] = False
-                    for v in o.values(): w(v)
-                elif isinstance(o, list):
-                    for v in o: w(v)
-            w(d); json.dump(d, open("moho/_tmp_tbt_noflag.animeproj", "w"))
-            EOF
-            Moho -r moho/TransformBoneTool.animeproj -f SVG -start 1 -end 120 \
-                 -o moho/track/TransformBoneTool/svg/TBT.svg
-            Moho -r moho/_tmp_tbt_noflag.animeproj -f SVG -start 1 -end 120 \
+            effect (Moho twin diff, dx,dy px)   ours rest-off    ours abs-off
+            total  LegL (4.10, 4.79)            (3.37, 3.65)     (6.04, 3.96)
+                   LegR (3.36, 3.96)            (5.10, 4.69)     (5.41, 4.59)
+
+        So under this metric "rest" recovers LegL at ~82%/76% and OVERSHOOTS
+        LegR (152%/118%); "absolute" overshoots both.  The old ~1/3 is
+        retired.  A third twin isolates each nested pair - the decomposition
+        (selective twin minus the no-flag twin, Moho vs ours):
+
+            effect          LegL Moho / ours     LegR Moho / ours
+            outer (B11,B15)  (3.54,4.13)/(3.06,2.95)  (2.32,4.17)/(3.39,2.47)
+            inner (B12,B16)  (1.78,2.08)/(0.86,1.32)  (1.58,1.66)/(3.42,4.03)
+
+        The outer pair recovers at ~71-146%, the inner pair at 48-216% - so
+        the weak spot IS the inner (parent-flagged) pair, but it is NOT
+        addressed by the candidate corrections (a) "uncorrected source",
+        (b) "sum of ancestors' departures", (c) "recursive rest": at this
+        nesting depth all three collapse into the current formula - the
+        correction sources are unflagged parents, and the parent's WORLD
+        departure already sums its whole ancestor chain.  The per-layer
+        mismatch that remains is entangled with the binding model (see
+        Skeleton._solve's NOTE ON OFFSET: this region blend distributes
+        weight where Moho follows a single bone rigidly), and separating the
+        two needs per-bone world-angle ground truth this repository cannot
+        produce from SVG references.  Recorded rather than tuned away - the
+        twins and the decomposition numbers above are the next attempt's
+        starting point.  Reproduce with:
+
+            # twins written by hand (B11/B12/B15/B16 are the flagged bones;
+            # clear none/all/only-outer/only-inner to taste), then
+            Moho -r tmp/phase2/_tmp_tbt_noflag.animeproj -f SVG -start 1 -end 120 \
                  -o moho/track/_tmp_tbt_noflag/TBT.svg
+            # (same for _tmp_tbt_outer/_tmp_tbt_inner; the as-authored set is
+            #  moho/track/TransformBoneTool/svg/)
 
-        then diff per-layer bbox centres between the two reference sets and
-        against this exporter under each `RenderSettings.fixed_angle_mode`.
+        then diff per-layer bbox centres between the reference sets with
+        tmp/scripts/diff_reference_sets.py and against this exporter under
+        each `RenderSettings.fixed_angle_mode` with tmp/scripts/ours_vs_set.py.
 
         NOTE ON FLIP PROPAGATION - REGRESSION, FOUND AND FIXED ONCE ALREADY.
         `flip_h`/`flip_v` were first implemented in commit "Fix bone
@@ -3460,14 +3500,16 @@ class Skeleton:
         return cached
 
     def _world_matrices(self, frame: float, exporter: "Exporter",
-                         dynamic: dict[int, float]) -> list[Mat2D]:
+                         dynamic: dict[int, float],
+                         bind_rest: bool = False) -> list[Mat2D]:
         """The world matrix of every bone - _solve's result without the
         orientation-only matrices its `fixed_angle` support needs."""
-        return self._solve(frame, exporter, dynamic)[0]
+        return self._solve(frame, exporter, dynamic, bind_rest=bind_rest)[0]
 
     def _solve(self, frame: float, exporter: "Exporter",
                 dynamic: dict[int, float],
-                rest: bool = False) -> tuple[list[Mat2D], list[Optional[Mat2D]]]:
+                rest: bool = False,
+                bind_rest: bool = False) -> tuple[list[Mat2D], list[Optional[Mat2D]]]:
         """world_matrices' body, with the simulated angles passed in rather
         than fetched.  Returns both the world matrices and the rotation-only
         `orient` matrices, the latter because `fixed_angle` needs a parent's
@@ -3519,6 +3561,30 @@ class Skeleton:
                 continue              # already solved below, as the bone2 half of a pair
             bone = self.bones[i]
             pos = Vec2.of(exporter.eval(bone.anim_pos, frame))
+            # NOTE ON OFFSET (the Offset Bone tool).  `offset` is a STATIC
+            # {x, y} added to this bone's base position, decoded 2026-08 by
+            # rendering OffsetBoneTool.animeproj with Moho twice - as authored
+            # and with the five non-zero offsets forced to 0 - and diffing per
+            # layer: the effect is a GROSS displacement (arm/leg/head layers
+            # move 100-200 px on a 1280x720 canvas, the full offset magnitude
+            # times the canvas scale), visible from frame 1, not the "soft
+            # weighting error only" the earlier reading predicted.  The
+            # asymmetry is the point: the POSE carries the offset while the
+            # TRANSFORM basis of rest_to_pose does not (the artwork was bound
+            # before the bone was moved), so rest_to_pose = pose(shifted) .
+            # rest^-1(unshifted) KEEPS the offset instead of cancelling it -
+            # which is why `bind_rest` (passed by Skinner.build for the
+            # transform basis) must suppress it there and nowhere else.  The
+            # WEIGHT basis (rest_p0/rest_p1) keeps the offset: per-point
+            # measurement of Moho's own twin shows every point of a mesh
+            # moving by the SAME vector - a rigid follow of its nearest bone
+            # that only a weight basis sitting on the shifted bones can
+            # reproduce.  The offset is in the bone's own local space, like
+            # anim_pos.
+            if (exporter.settings.offset_mode == "on" and not bind_rest
+                    and (bone.offset.get("x") or bone.offset.get("y"))):
+                pos = Vec2(pos.x + bone.offset.get("x", 0.0),
+                           pos.y + bone.offset.get("y", 0.0))
             scale = exporter.eval(bone.anim_scale, frame)
             # A "control bone" adds its own departure from rest on top of
             # whatever this bone is keyed to - see _control_offset.
@@ -3615,61 +3681,86 @@ class Skeleton:
         "JumpCycle" pose on the `bone_dynamics` of all six of its rabbit-ear
         bones.
 
-        UNVERIFIED INFERENCE, off unless `--bone-dynamics`/`--wind-dynamics`
-        is passed.  Moho gives three numbers per bone (`spring_force`,
-        `damping_force`,
-        `torque_force`) and nothing else: not the equation, not the units of
-        those numbers, not the integrator, not the initial conditions.
+        THE MODEL, now DECODED rather than inferred.  A bone with dynamics
+        is a pendulum hanging off its parent, with inertia in WORLD space.
+        Writing `pw` for the parent's world angle and `x` for this bone's own
+        local angle, the bone's world angle is `pw + x`, and a damped spring
+        pulling that world angle back to where the keyframes say it should be
+        expands to
 
-        THE MODEL.  A bone with dynamics is a pendulum hanging off its
-        parent, with inertia in WORLD space.  Writing `pw` for the parent's
-        world angle and `x` for this bone's own local angle, the bone's world
-        angle is `pw + x`, and a damped spring pulling that world angle back
-        to where the keyframes say it should be expands to
-
-            x'' = spring * (keyed - x) - damping * (x' + pw') - pw''
+            x'' = 96*spring * (keyed - x) - 0.85*damping * (x' + pw') - pw''
 
         Each term earns its place:
 
-          - `spring * (keyed - x)` and `-damping * x'` are the original
-            model, and are all that survives when the parent holds still.
-          - `-damping * pw'` and `-pw''` are what make the feature work at
-            all.  They are the parent's own world rotation arriving as a
+          - `96*spring * (keyed - x)` and `-0.85*damping * x'` are the
+            original model, and are all that survives when the parent holds
+            still - scaled and unit-fitted as described under EVIDENCE below.
+          - `-0.85*damping * pw'` and `-pw''` are what make the feature work
+            at all.  They are the parent's own world rotation arriving as a
             driving force, so a bone whose OWN angle never changes still
             swings when its parent turns.
 
-        UNITS are per FRAME, not per second.  Read as per-second, a spring of
-        2 and a damping of 1 make an oscillator so slack that the parent's
-        rotation drags a bone 200 degrees off its keyed angle and holds it
-        there; read per frame the same rig gives a smooth 3 / 13 / 27 degree
-        gradient from ear base to ear tip.  This is a fit, not a decoding -
-        but Moho is a frame-based program and the per-second reading is not
-        merely less accurate, it is unusable.
+        EVIDENCE - measured 2026-08 on synthetic rigs, Moho 14.4 as the
+        authority.  The rigs (tmp/dynamics/, untracked) are minimal two-bone
+        documents with one rigidly-bound marker mesh whose rendered rotation
+        IS the driven bone's world angle, read per frame by
+        tmp/dynamics/extract_markers.py - the per-bone ground truth this
+        repository never had from its other reference sets.  The key results:
 
-        `torque_force` is still read and still NOT used, and this time it was
-        tried properly rather than assumed unusable.  A pendulum whose
-        suspension point accelerates sideways does swing, so the obvious
-        reading is a pivot-acceleration term
-        `- torque * (pivot_acceleration . across) / length`, which is also
-        the only candidate that would make a bone react to a parent that
-        merely TRANSLATES.  Two independent checks rejected it:
+          - UNITS ARE PER SECOND, not per frame - the old per-frame claim
+            above was wrong, and so was its "per-second is unusable"
+            argument.  The same step-response document rendered at 12, 24
+            and 48 fps gives frame-numbered first-frame displacements of
+            39.79 / 9.95 / 2.49 degrees: constant times (1/fps)^2 to within
+            0.6%.  An oscillation whose per-frame size scales with (1/fps)^2
+            and whose period is constant in SECONDS is a per-second system
+            integrated with h = 1/fps.
+          - INTEGRATOR: one semi-implicit Euler step per frame
+            (v += a*h, then x += v*h), which reproduces the measured first
+            frame exactly (a*h^2, where plain Euler would give half that).
+          - SPRING AND DAMPING SCALES: fitted over the four step-response
+            sets (spring 2/damp 1 and spring 1/damp 4.4, each at 24 fps, plus
+            the 12/48 fps pairs; mean error 1.6 deg/frame against a 55-degree
+            swing) as 96*spring and 0.85*damping.  The two are correlated;
+            100/1.0 is the cleaner but worse fit (4.1 deg/frame).  The
+            damping may not be linear (the overdamped set's peaks are lower
+            than the fit while its tail is higher), but a quadratic-drag
+            term was tried and did not help.  Recorded as the best fit, not
+            as a proof of the constants' true form.
+          - The parent terms survived contact with data in STRUCTURE.  A
+            child whose parent ramps 0.5 rad over one second lags by 0.13
+            degrees, which is exactly the -0.85*damping*pw'/spring
+            equilibrium that term predicts with pw' in per-second units; a
+            three-bone chain (B1 and B2 both dynamic) shows B2's own local
+            angle deviating from keyed by only ~0.5 degrees while its parent
+            lags, consistent with the same structure.  But the UNITS of the
+            parent terms are unresolved: per-second rates flung the
+            BoneDynamics ears 30 px further off their reference on TorsoA's
+            ~12 rad/s swings, per-frame rates leave that document at its
+            baseline, and the two differ by <0.2 degrees on the gentle rigs.
+            The code keeps per-frame parent terms as the conservative
+            reading; the discrepancy is recorded, not tuned.
+          - `torque_force` - the pivot-acceleration reading is DEAD.  A
+            translating parent produces ZERO rotation at torque 0.1 and at
+            6.0 alike (max |theta| 0.0000 degrees in both), so torque does
+            not couple translation at all; it changes the rotational
+            response only slightly (a 0.5-rad ramp swing of 28.52 degrees at
+            torque 0.1 becomes 29.79 at 6.0, ~1 degree, plausibly an inertia
+            term).  The old double rejection (spike on BoneDynamics, sweep
+            on Bandit) is now superseded by this direct measurement: the
+            field is read, unused, and the pivot-acceleration candidate is
+            closed for good.
 
-          - On `BoneDynamics.animeproj` it spiked the ear tip to 81 degrees
-            off its keyed angle on one frame with neighbours at 40 and -21,
-            against a smooth 3 / 13 / 27 degree base-to-tip gradient without
-            it.
-          - Swept against Moho's own render of `Bandit.mohoproj` in BOTH
-            signs - +0.001 to +1.0 and -0.01 to -3.0 - it never improved the
-            match at any scale, and got monotonically worse away from zero
-            (tail base vertical error 18.06 px at 0, 20.68 px at -1.0,
-            25.71 px at -3.0).  The sign was worth testing because the
-            reference's tail lags the body by half a period, which reads as
-            anti-phase; it is not a sign error.
-
-        So it stays out, and the consequence is stated plainly rather than
-        hidden: a bone whose parent only translates still does not move.
-        That is exactly `Bandit.mohoproj`, whose root bone never rotates, so
-        `--bone-dynamics` remains a no-op there.
+        Still NOT verified, stated plainly: the parent's `pw` terms come from
+        the parent's KEYED pose (this simulation does not chain - each bone
+        is driven by its parent's keyframes, not by its parent's simulated
+        lag), chosen to keep the cost at one extra keyed world-matrix build
+        per frame; the R4 chain measurement above could not distinguish the
+        two because the simulated and keyed parent angles stay within ~3
+        degrees.  Initial conditions (start at the keyed angle with zero
+        velocity, re-enter from rest after a switch-off) follow the old
+        model and matched the step-response fit, but were not tested in
+        isolation.
 
         WHY THE REWRITE.  The previous model pulled the bone toward its own
         keyed angle and nothing else, so a bone whose `anim_angle` never
@@ -3692,13 +3783,15 @@ class Skeleton:
         parent's world motion.  Under the old model `--bone-dynamics` was a
         measured no-op on five of the six documents that use the feature.
 
-        WHAT IS STILL GUESSED.  The units of all three forces, the
-        integrator, and the initial conditions.  `pw` is
-        taken from the KEYED pose, not from the parent's own simulated
-        angle, so a chain lags its parent's keyframes rather than its
-        parent's lag - one order short of a full chain solve, chosen because
-        it keeps the cost at one extra world-matrix build per frame instead
-        of one per bone per sub-step.
+        WHAT IS STILL GUESSED.  The initial conditions in the
+        switch-off/switch-on case (pinned to keyed with zero velocity,
+        re-entering from rest) - the step-response fit above never tested a
+        mid-run switch.  `pw` is taken from the KEYED pose, not from the
+        parent's own simulated angle, so a chain lags its parent's keyframes
+        rather than its parent's lag - one order short of a full chain solve,
+        chosen because it keeps the cost at one extra world-matrix build per
+        frame.  Everything else the old note listed (units, integrator,
+        spring/damping scales) is now measured - see EVIDENCE above.
 
         HOW FAR IT IS CHECKED - AND IT FAILS.  `BoneDynamics.animeproj` now
         has a Moho render (`moho/BoneDynamics/`, 29 frames, scored by `make
@@ -3764,17 +3857,30 @@ class Skeleton:
         So NEITHER a literal reuse of the existing spring constants, in
         either integration order, is the mechanism Moho actually uses here -
         or the constants mean something other than what this reading
-        assumes. Rather than guess a third model with no way to check it (no
-        `moho/track/DarkMan/` reference exists), `--wind-dynamics` is being
-        shipped anyway, OFF by default, as working PLUMBING - the switch
-        detection (`Bone.wind_dynamics_on`/`_ever_on`), the per-bone
+        assumes.
+
+        A DIRECT MINIMAL-RIG TEST (2026-08) DID NOT REPRODUCE THE DAMPING
+        AT ALL.  A two-bone rig (tmp/dynamics/rigs/r7_on, untracked) was
+        built with every prerequisite Layer.physics_dynamic documents:
+        `physics.enabled && !static`, `wind.strength = 100` (later plus
+        turbulence 0.8 / frequency 2.0, matching DarkMan's own values), and
+        a bone with `wind_dynamics = True` carrying DarkMan B3's exact 8
+        keyframes.  Moho 14.4 rendered it twice - wind subscribed and not -
+        and the driven bone's rotation differs by 0.0000 degrees at every
+        keyframe across 120 frames.  So these three fields alone do NOT
+        damp a bone in Moho; the B3 observation above must come from
+        something else (a chain coupling, a layer-physics configuration
+        this rig does not replicate, or per-point physics on the artwork).
+        `--wind-dynamics` therefore stays OFF by default, as PLUMBING - the
+        switch detection (`Bone.wind_dynamics_on`/`_ever_on`), the per-bone
         family-union gating in this method, and the CLI/RenderSettings
-        wiring in both moho2svg.py and moho2lottie.py - for whoever next
-        gets real reference frames for a wind-subscribed document to fit an
-        actual model against, rather than starting from nothing. Passing it
-        today reuses the Angle spring, which is now KNOWN not to reproduce
-        the observed smoothing - treat it as a documented negative result,
-        not a fix.
+        wiring in both moho2svg.py and moho2lottie.py - and passing it today
+        reuses the Angle spring as a documented negative result, not a fix.
+        The next attempt should chase the DarkMan B3 damping with the
+        moho-relationship-trace checklist rather than fit more spring
+        variants: every variant tried so far (two integration orders, two
+        equations, now a faithful minimal rig) is measurably not the
+        mechanism.
 
         Cost note: the state at frame F depends on every frame before it, so
         this simulates start_frame..F on each call, now with one keyed
@@ -3825,14 +3931,18 @@ class Skeleton:
         if stop <= start:
             return {i: exporter.eval(self.bones[i].anim_angle, start) for i in on_at_stop}
         fps = float(document.fps) or 24.0
+        # DECODED 2026-08, synthetic rigs under tmp/dynamics/ (see the
+        # docstring's EVIDENCE section and its table): the spring-damper runs
+        # in PER-SECOND units - one semi-implicit Euler step per frame,
+        # h = 1/fps - with the stored spring scaled by 96 and the stored
+        # damping by 0.85.  The per-frame reading this code used before is
+        # measured WRONG: the same document rendered at 12/24/48 fps gives a
+        # response whose frame-numbered displacement scales exactly with
+        # (1/fps)^2, and whose oscillation period is constant in SECONDS.
+        h = 1.0 / fps
         x = {i: exporter.eval(self.bones[i].anim_angle, start) for i in candidates}
         v = {i: 0.0 for i in candidates}
         parents = {i: self.bones[i].parent for i in candidates}
-        # Sub-stepping keeps the explicit integrator stable for a stiff spring;
-        # 4 steps a frame is comfortably inside the stability limit for every
-        # spring/damping pair present in the corpus.
-        substeps = 4
-        h = 1.0 / substeps
         # Three consecutive keyed poses are kept so the parent's world angular
         # velocity and acceleration, and the bone's own pivot acceleration,
         # are available as plain second differences.
@@ -3842,35 +3952,47 @@ class Skeleton:
         while f < stop - 1e-9:
             f = min(f + 1.0, stop)
             following = self._keyed_world_state(f, exporter, candidates, parents)
-            step = f - (f - 1.0)                      # always 1.0; kept for clarity
-            # The switch is asked once per frame, not once per sub-step: it is
-            # keyframed at whole frames, so sub-stepping it would only cost
-            # time.  A bone whose dynamics is OFF this frame is pinned to its
-            # keyed angle with zero velocity, so it follows the keys exactly
-            # and re-enters the simulation from rest when it turns back on.
+            # The switch is asked once per frame: it is keyframed at whole
+            # frames, and the integrator takes one step per frame.  A bone
+            # whose dynamics is OFF this frame is pinned to its keyed angle
+            # with zero velocity, so it follows the keys exactly and
+            # re-enters the simulation from rest when it turns back on.
             for i in candidates:
                 bone = self.bones[i]
                 target = exporter.eval(bone.anim_angle, f)
                 if not active(i, f):
                     x[i], v[i] = target, 0.0
                     continue
-                # Parent world rotation, as a velocity and an acceleration in
-                # radians per second.  Zero for a root bone, and zero whenever
-                # the parent holds still - which is what makes this a strict
-                # superset of the old own-angle-only model.
+                # Parent world rotation, as a velocity and an acceleration.
+                # Zero for a root bone, and zero whenever the parent holds
+                # still - which is what makes this a strict superset of the
+                # old own-angle-only model.  Deliberately in PER-FRAME units
+                # even though the spring itself is per-second (see EVIDENCE
+                # below): per-second parent rates matched a gentle 0.5 rad/s
+                # synthetic ramp (0.13-degree lag, measured exactly) but
+                # flung the BoneDynamics ears 30 px further off their
+                # reference on TorsoA's ~12 rad/s swings, while per-frame
+                # parent terms leave that document at its baseline and are
+                # indistinguishable on every other reference set.  The
+                # coupling scale is recorded as UNRESOLVED, not tuned - the
+                # per-frame reading is the conservative one for the corpus.
                 # Differences are wrapped into (-pi, pi] before use: atan2
                 # jumps by 2*pi at the branch cut, and an unwrapped jump would
                 # read as an enormous angular acceleration and fling the bone.
                 back = _wrap_angle(current.angle[i] - previous.angle[i])
                 forward = _wrap_angle(following.angle[i] - current.angle[i])
-                parent_rate = (forward + back) / (2.0 * step)
-                parent_accel = (forward - back) / (step * step)
-                for _ in range(substeps):
-                    accel = (bone.spring_force * (target - x[i])
-                             - bone.damping_force * (v[i] + parent_rate)
-                             - parent_accel)
-                    v[i] += accel * h
-                    x[i] += v[i] * h
+                parent_rate = (forward + back) / 2.0
+                parent_accel = forward - back
+                # Semi-implicit Euler: update the velocity FIRST, then the
+                # angle from the NEW velocity.  This order (rather than the
+                # old explicit 4-substep one) is part of the decode - it is
+                # what reproduces the measured first-frame displacement
+                # a*h^2 exactly.
+                accel = (96.0 * bone.spring_force * (target - x[i])
+                         - 0.85 * bone.damping_force * (v[i] + parent_rate)
+                         - parent_accel)
+                v[i] += accel * h
+                x[i] += v[i] * h
             previous, current = current, following
         return {i: x[i] for i in on_at_stop}
 
@@ -6011,15 +6133,26 @@ class Skinner:
         saved = exporter._active_actions
         exporter._active_actions = []
         try:
-            rest = skeleton.world_matrices(0.0, exporter)
+            # bind_rest=True: the Offset Bone tool moved bones AFTER the
+            # artwork was bound, so the TRANSFORM basis of rest_to_pose
+            # predates the shift - see Skeleton._solve's NOTE ON OFFSET.
+            # The WEIGHT basis (rest_p0/rest_p1 below) keeps the offset:
+            # the artwork sits where the shifted bones are, and binding
+            # distances are measured there - measured per-point on
+            # OffsetBoneTool.animeproj, where Moho's own offset-zeroed twin
+            # moves every point of a mesh by the SAME vector (rigid follow
+            # of its nearest bone), which an unshifted weight basis cannot
+            # reproduce.
+            rest_transform = skeleton.world_matrices(0.0, exporter, bind_rest=True)
+            rest_weights = skeleton.world_matrices(0.0, exporter)
         finally:
             exporter._active_actions = saved
         pose = skeleton.world_matrices(frame, exporter)
         bones = []
         for i, bone in enumerate(skeleton.bones):
-            rest_p0 = rest[i].apply(Vec2(0.0, 0.0))
-            rest_p1 = rest[i].apply(Vec2(bone.length, 0.0))
-            rest_to_pose = pose[i].compose(rest[i].inverse())
+            rest_p0 = rest_weights[i].apply(Vec2(0.0, 0.0))
+            rest_p1 = rest_weights[i].apply(Vec2(bone.length, 0.0))
+            rest_to_pose = pose[i].compose(rest_transform[i].inverse())
             bones.append(SkinBone(rest_p0, rest_p1, bone.strength, rest_to_pose))
         return Skinner(bones)
 
@@ -6244,6 +6377,10 @@ class RenderSettings:
     # ANGLE), "absolute" (the rejected variant), or "off" (pre-2026-08
     # behaviour, kept so the measurement can be re-run).
     fixed_angle_mode: str = "rest"      # Skeleton._world_matrices
+    # How to honour a bone's `offset` (Offset Bone tool): "on" (measured -
+    # see Skeleton._solve's NOTE ON OFFSET) or "off" (pre-2026-08 behaviour,
+    # kept so the measurement can be re-run).
+    offset_mode: str = "on"             # Skeleton._world_matrices
     forced_mask_containers: frozenset[str] = field(default_factory=frozenset)  # --mask-container
     bezier_samples_per_segment: int = 10           # TaperedStrokeOutliner
     mask_padding: float = 50.0

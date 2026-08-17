@@ -96,7 +96,9 @@ TOKEN = re.compile(r'<g\b([^>]*)>|</g>|<path\b([^>]*)>')
 GROUP_ID = re.compile(r'\bid="([^"]*)"')
 PATH_D = re.compile(r'\bd="([^"]+)"')
 
-# (project, reference glob, frames, [(group, our layer names, dx limits, dy limits)])
+# (project, reference glob, frames,
+#  [(group, our layer names, dx limits, dy limits)],
+#  optional settings dict for RenderSettings - e.g. {"bone_dynamics": True})
 CHECKS = [
     ('moho/Bandit.mohoproj', 'moho/track/Bandit/svg/Bandit_%05d.svg', range(25, 128), [
         ('Muzzle', {'Muzzle', 'Mouth Stroke', 'Whiskers'}, (3.0, 10.0), (6.0, 12.0)),
@@ -105,11 +107,14 @@ CHECKS = [
         ('Tail', {'TailBase', 'Tip'}, (10.0, 25.0), (35.0, 75.0)),
     ]),
     # THESE TOLERANCES ARE A FENCE, NOT AN ACCEPTANCE CRITERION.  This is the
-    # one document that can test bone dynamics, and the model FAILS it: the
-    # ears sit ~55 px out with dynamics off and get worse with it on (see
-    # Skeleton.dynamic_angles).  The numbers below are where the exporter
-    # actually is, recorded so the gap cannot silently widen; they are not a
-    # claim that it is close.
+    # one document that can test bone dynamics.  The spring model itself is
+    # now DECODED (see Skeleton.dynamic_angles' EVIDENCE section), but this
+    # rig still fails at ~55 px with dynamics off AND on alike - the baseline
+    # defect is elsewhere (unidentified; ruled out: scale inheritance, squash
+    # formulas, falloffs, control bones, skin weights), and the decoded
+    # dynamics neither widens nor closes it.  The numbers below are where the
+    # exporter actually is, recorded so the gap cannot silently widen; they
+    # are not a claim that it is close.
     #
     # MOVED when Channel._smooth replaced its inferred monotone cubic with the
     # measured "Smooth" curve.  On this document that trade was: every group's
@@ -138,6 +143,54 @@ CHECKS = [
         ('goz-bebegi', {'goz-bebegi'}, (6.0, 12.0), (6.0, 14.0)),
         ('ayak-sag', {'ayak-sag'}, (2.0, 4.0), (2.0, 6.0)),
         ('cizgiler-sag', {'cizgiler-sag'}, (10.0, 28.0), (6.0, 15.0)),
+    ]),
+    # A REAL dynamics regression fence, on the synthetic rig the spring was
+    # decoded with (see Skeleton.dynamic_angles' EVIDENCE section): the
+    # marker is rigidly bound to the driven bone and its points orbit the
+    # pivot, so this row's displacement IS the spring's step response - the
+    # reference bbox centre travels 86 px over the 55-degree swing, and the
+    # tolerances are the decoded model's measured residual against Moho's
+    # own render (mean 0.5 / max 1.3 px).  The rig lives in tmp/
+    # (untracked) and the row skips when it is absent, like every gitignored
+    # reference set.
+    ('tmp/dynamics/rigs/r1.animeproj',
+     'moho/track/dyn_r1/svg/r1_%05d.svg', range(1, 121), [
+        ('Eyes', {'Eyes'}, (1.5, 3.0), (1.0, 2.0)),
+    ], {'bone_dynamics': True}),
+    # TransformBoneTool is A FENCE over the fixed_angle residual (see
+    # Skeleton.world_matrices' NOTE ON INDEPENDENT ANGLE, 2026-08
+    # re-measurement): LegL is driven by the nested flagged pair B15/B16,
+    # the case the formula reproduces worst (48-216% of Moho's own effect).
+    # The numbers below are where the exporter actually is.
+    ('moho/TransformBoneTool.animeproj',
+     'moho/track/TransformBoneTool/svg/TBT_%05d.svg', range(1, 121), [
+        ('LegL', {'LegL'}, (35.0, 65.0), (10.0, 25.0)),
+        ('LegR', {'LegR'}, (8.0, 15.0), (8.0, 12.0)),
+        ('ArmL', {'ArmL'}, (2.0, 5.0), (2.0, 6.0)),
+        ('ArmR', {'ArmR'}, (2.0, 4.0), (2.0, 4.0)),
+        ('Body', {'Body'}, (1.0, 2.0), (1.0, 2.0)),
+        ('Head', {'Head', 'EyeBrow', 'Eyes', 'Mouth'}, (2.0, 4.0), (3.0, 5.0)),
+    ]),
+    # OffsetBoneTool is A FENCE over a known binding-model gap, not an
+    # acceptance criterion (same status as BoneDynamics above).  The `offset`
+    # decode itself is measured elsewhere (Skeleton._solve's NOTE ON OFFSET):
+    # this row records where the exporter actually is AFTER that decode, so
+    # the remaining gap - every mesh here is bound parent_bone=-1 / empty
+    # subset under binding_mode 2, which Moho renders as an effectively
+    # per-mesh RIGID follow of one bone while this exporter blends the whole
+    # 26-bone skeleton by distance falloff - cannot silently widen.  The
+    # displacement metric cancels the (large) static part of that gap, which
+    # is why the numbers are smaller than the absolute per-frame errors.
+    ('moho/OffsetBoneTool.animeproj',
+     'moho/track/OffsetBoneTool/svg/OffsetBoneTool_%05d.svg', range(1, 121), [
+        ('arm R', {'arm R'}, (25.0, 45.0), (12.0, 20.0)),
+        ('leg R', {'leg R'}, (18.0, 38.0), (20.0, 42.0)),
+        ('head', {'head', 'face', 'mouth', 'teeth', 'inside', 'shades',
+                  'head shades', 'head-shades'}, (13.0, 32.0), (16.0, 30.0)),
+        ('BODY', {'BODY', 'Shirt', 'pants', 'b-shades', 'body-Top',
+                  'b-top-shades', 'pant-shades'}, (13.0, 24.0), (6.0, 12.0)),
+        ('arm L', {'arm L'}, (13.0, 25.0), (14.0, 28.0)),
+        ('leg L', {'leg L'}, (8.0, 16.0), (5.0, 10.0)),
     ]),
 ]
 
@@ -195,14 +248,17 @@ def bbox_centre(points):
     return ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
 
 
-def run_check(project, pattern, frames, groups):
+def run_check(project, pattern, frames, groups, settings=None):
     frames = list(frames)
-    if not os.path.isfile(pattern % frames[0]):
-        print('skipped %s: %s not present (gitignored reference frames)\n'
+    if (not os.path.isfile(project)
+            or not os.path.isfile(pattern % frames[0])):
+        print('skipped %s: project or %s not present (gitignored)\n'
               % (os.path.basename(project), os.path.dirname(pattern)))
         return []
     Channel.reset_cache()
     exporter = Exporter(load_document(project))
+    for key, value in (settings or {}).items():
+        setattr(exporter.settings, key, value)
     errors = {name: [] for name, _, _, _ in groups}
     base = None
     for frame in frames:
@@ -355,8 +411,10 @@ def run_winding_check(project, pattern, frames, layers):
 
 def main() -> int:
     failures = []
-    for project, pattern, frames, groups in CHECKS:
-        failures += run_check(project, pattern, frames, groups)
+    for row in CHECKS:
+        project, pattern, frames, groups = row[:4]
+        settings = row[4] if len(row) > 4 else None
+        failures += run_check(project, pattern, frames, groups, settings)
     for project, pattern, frames, layers in WINDING_CHECKS:
         failures += run_winding_check(project, pattern, frames, layers)
     if failures:
