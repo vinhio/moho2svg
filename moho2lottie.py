@@ -15,6 +15,22 @@ form. See docs/moho-to-lottie-design.md for why, and for what that costs in
 file size. ImageLayer is the one exception - see IMAGE LAYERS below for why
 it cannot be flat-baked the same way, and does decompose an affine matrix.
 
+Two OFF-BY-DEFAULT flags shrink that cost, opt-in so the default output stays
+byte-identical to before either existed: `--decimate-tolerance PX` drops a
+keyframe wherever LINEAR interpolation between its kept neighbours already
+reproduces it within that many pixels (LottieExporter._decimate_frames);
+`--rigid-transform-tolerance PX` writes a shape as a static path plus an
+animated LAYER transform, mesh-layer-style flat-baking's own exception
+extended to any shape that happens to move like ImageLayer's affine case
+does, whenever it genuinely is one shared matrix (LottieExporter.
+_rigid_ks_for_acc, reusing decompose_affine_2x2). Measured on
+DarkMan.mohoproj (see docs/moho-to-lottie-design.md section 4): decimation
+alone is the one worth reaching for (1.4x-2.4x smaller depending on
+tolerance); the rigid-transform flag helps genuinely rigid content but found
+almost nothing to do on that document specifically (~20% of shapes qualify,
+none of the large ones - a real, flexibly-skinned character rig, not a
+gap in the detection).
+
 Deliberately out of scope for this exporter (see docs/moho-to-lottie-design.md
 section 2.2, and the corresponding counted warnings on stderr at the end of
 an export): brush-textured strokes (drawn as a plain uniform stroke
@@ -138,6 +154,7 @@ import math
 import os
 import sys
 from collections import Counter
+from typing import Optional
 
 from moho2svg import (Color, Exporter, LayerKind, RenderSettings, Vec2, build_path_bezier,
                        load_document, walk_render_tree)
@@ -728,7 +745,14 @@ class LottieExporter:
     docstring for why (per-call def-id counter, Smart Bone scratch state).
     """
 
-    def __init__(self, document, settings: "RenderSettings" = None):
+    # A 2x3 affine fit needs at least this many reference points to be
+    # well-posed (3 non-collinear points exactly determine it) - see
+    # _rigid_ks_for_acc/_fit_affine.
+    _RIGID_MIN_POINTS = 3
+
+    def __init__(self, document, settings: "RenderSettings" = None,
+                 decimate_tolerance_px: float = 0.0,
+                 rigid_transform_tolerance_px: float = 0.0):
         self.document = document
         self.exporter = Exporter(document, settings)
         self.warnings: Counter = Counter()
@@ -739,6 +763,26 @@ class LottieExporter:
         # is every sample document in this repository except Bandit.mohoproj.
         self._assets: list = []
         self._asset_counter: int = 0
+        # --decimate-tolerance (px); 0 (the default) disables _decimate_frames
+        # entirely, keeping every property's keyframes at 100% of the sampled
+        # frames - BYTE-IDENTICAL to this writer's behaviour before this flag
+        # existed. See _decimate_frames for what a positive value does and
+        # docs/moho-to-lottie-design.md section 4 for the measurement behind
+        # it (DarkMan.mohoproj: 1.4x-2.4x smaller across 0.3px-4px).
+        self.decimate_tolerance_px = decimate_tolerance_px
+        # --rigid-transform-tolerance (px); 0 (the default) disables
+        # _rigid_ks_for_acc entirely - BYTE-IDENTICAL to this writer's
+        # behaviour before this flag existed. See _rigid_ks_for_acc for what
+        # a positive value does. Unlike decimate_tolerance_px this is meant
+        # to be near-lossless when it fires (a genuinely rigid shape is
+        # reproduced to floating-point precision, not approximated) - a
+        # small positive value (e.g. 0.05) is a reasonable default to PASS
+        # explicitly, not a quality/size trade-off knob like decimation.
+        # Measured on DarkMan.mohoproj at --rigid-transform-tolerance 0.5:
+        # only ~20% of shapes qualify, and none of its largest ones (that
+        # rig is genuinely, flexibly skinned almost everywhere) - see
+        # docs/moho-to-lottie-design.md section 4.
+        self.rigid_transform_tolerance_px = rigid_transform_tolerance_px
 
     def _next_asset_id(self) -> int:
         self._asset_counter += 1
@@ -1788,6 +1832,91 @@ class LottieExporter:
                           for e in edges}
         return [self.exporter.eval(mesh.points[i].width, frame) for i in point_indices]
 
+    def _decimate_frames(self, frames, values: list, residual) -> tuple:
+        """Ramer-Douglas-Peucker-style keyframe reduction: drop a frame
+        whose own value is already reproduced, within
+        `self.decimate_tolerance_px`, by LINEAR interpolation between its
+        two nearest KEPT neighbours - exactly the interpolation `_keyframes`'
+        own LINEAR "i"/"o" easing performs at playback (see that method's
+        docstring: every kept keyframe still sits at its own EXACT sampled
+        value, so a player reconstructs a DROPPED frame no worse than this
+        tolerance, the same guarantee the kept frames already had).
+
+        `residual(a, b, mid, t)` measures how far `mid` (the candidate to
+        drop) sits from that straight-line interpolation between `a` and
+        `b` at fractional position `t` - in PIXELS, in whatever shape `a`/
+        `b`/`mid` are for this property (a bezier dict for a path property,
+        a float for a scalar one, an (x, y) pair for a point one - see
+        _path_residual/_scalar_residual/_point_residual, this method's own
+        three callers' argument).
+
+        Off (returns `frames`/`values` unchanged) when
+        `decimate_tolerance_px <= 0` (the default) or there are fewer than
+        3 frames - guarantees byte-identical output to this writer's
+        behaviour before this feature existed, at the default tolerance of
+        0.  Iterative (explicit stack, not recursion) since a document can
+        have hundreds of frames.
+        """
+        tol = self.decimate_tolerance_px
+        n = len(frames)
+        if tol <= 0 or n < 3:
+            return frames, values
+        keep = [False] * n
+        keep[0] = keep[-1] = True
+        stack = [(0, n - 1)]
+        while stack:
+            i, j = stack.pop()
+            if j <= i + 1:
+                continue
+            span = frames[j] - frames[i]
+            worst_d, worst_k = -1.0, i + 1
+            for k in range(i + 1, j):
+                t = (frames[k] - frames[i]) / span if span else 0.0
+                d = residual(values[i], values[j], values[k], t)
+                if d > worst_d:
+                    worst_d, worst_k = d, k
+            if worst_d > tol:
+                keep[worst_k] = True
+                stack.append((i, worst_k))
+                stack.append((worst_k, j))
+        kept_frames = [f for f, k in zip(frames, keep) if k]
+        kept_values = [v for v, k in zip(values, keep) if k]
+        return kept_frames, kept_values
+
+    @staticmethod
+    def _path_residual(a: dict, b: dict, mid: dict, t: float) -> float:
+        """Worst-case pixel distance, across every vertex AND tangent
+        handle ("v"/"i"/"o") of one bezier subpath, between `mid`'s actual
+        value and the straight-line interpolation of `a`/`b` at `t` - the
+        `residual` _decimate_frames uses for a path property.  Tangent
+        handles are checked too, not just vertices: they are drawn (as
+        Bezier control offsets), so a handle that snapped linearly instead
+        of following the real curve would show as a visible curvature
+        error even where the vertex itself lands exactly right."""
+        worst = 0.0
+        for key in ("v", "i", "o"):
+            for (ax, ay), (bx, by), (mx, my) in zip(a[key], b[key], mid[key]):
+                lx, ly = ax + (bx - ax) * t, ay + (by - ay) * t
+                d = math.hypot(mx - lx, my - ly)
+                if d > worst:
+                    worst = d
+        return worst
+
+    @staticmethod
+    def _scalar_residual(a: float, b: float, mid: float, t: float) -> float:
+        """The `residual` _decimate_frames uses for a scalar property
+        (stroke width, gradient stop, alpha) - already unit-agnostic, so
+        `decimate_tolerance_px` is read as "the property's own unit" here
+        (percent for alpha, px for width) rather than strictly pixels."""
+        return abs(mid - (a + (b - a) * t))
+
+    @staticmethod
+    def _point_residual(a, b, mid, t: float) -> float:
+        """The `residual` _decimate_frames uses for a 2D point property
+        (a gradient's start/end point)."""
+        (ax, ay), (bx, by), (mx, my) = a, b, mid
+        return math.hypot(mx - (ax + (bx - ax) * t), my - (ay + (by - ay) * t))
+
     def _keyframes(self, frames, s_values: list) -> list:
         """Build a Lottie keyframe list from parallel `frames`/`s_values`
         (`s_values[i]` already shaped as that keyframe's own "s" - a one-
@@ -1829,9 +1958,18 @@ class LottieExporter:
         keeps the file in single-digit megabytes rather than hundreds -
         measured at roughly 293 MB versus about 10 MB across this
         repository's sample documents.
+
+        When still animated, `_decimate_frames` gets one more pass at
+        shrinking it (a no-op at the default `decimate_tolerance_px == 0`)
+        - see that method's own docstring. `_path_residual` is already in
+        pixels (every "v"/"i"/"o" coordinate this writer emits is), so
+        `decimate_tolerance_px` applies directly here with no unit
+        mismatch - unlike _scalar_property/_point_property's own
+        `decimate` parameter, this one has no reason to ever be disabled.
         """
         if all(b == per_frame[0] for b in per_frame[1:]):
             return {"a": 0, "k": per_frame[0]}
+        frames, per_frame = self._decimate_frames(frames, per_frame, self._path_residual)
         return {"a": 1, "k": self._keyframes(frames, [[b] for b in per_frame])}
 
     def _stamp_alpha(self, collected: list, start_index: int,
@@ -1856,9 +1994,23 @@ class LottieExporter:
         for produced in collected[start_index:]:
             produced.setdefault("ks", identity_transform())["o"] = prop
 
-    def _scalar_property(self, per_frame: list, frames) -> dict:
+    def _scalar_property(self, per_frame: list, frames, decimate: bool = True) -> dict:
         """A Lottie scalar property (e.g. stroke width): static when the
         value never changes across frames, keyframed otherwise.
+
+        `decimate=False` (used by _rigid_ks_for_acc for "r"/"sk" -
+        rotation/skew DEGREES, not pixels) skips the `_decimate_frames`
+        pass entirely: `decimate_tolerance_px` is a PIXEL budget, and a
+        rotation held `decimate_tolerance_px` DEGREES off its true value
+        can move a point far more than that many pixels once the shape's
+        own distance from its rotation anchor multiplies it in - measured
+        directly: enabling both --decimate-tolerance and --rigid-transform-
+        tolerance together on SketchBone.animeproj produced real (not
+        rounding-noise) geometry disagreements up to several pixels at
+        frames 77/86, gone once "r"/"sk" stopped being decimated. Stroke
+        WIDTH (this method's original, still `decimate=True`, caller) has
+        no such mismatch - it is already in pixels, the same unit
+        `decimate_tolerance_px` is.
 
         Stroke width depends on exporter._layer_scale, which is a per-frame
         value in principle (an animated bone scale would change it) - this
@@ -1882,13 +2034,21 @@ class LottieExporter:
         """
         if all(abs(v - per_frame[0]) < 1e-9 for v in per_frame[1:]):
             return {"a": 0, "k": per_frame[0]}
+        if decimate:
+            frames, per_frame = self._decimate_frames(frames, per_frame, self._scalar_residual)
         return {"a": 1, "k": self._keyframes(frames, [[v] for v in per_frame])}
 
-    def _point_property(self, per_frame_points: list, frames) -> dict:
+    def _point_property(self, per_frame_points: list, frames, decimate: bool = True) -> dict:
         """A Lottie 2D point property (e.g. a gradient's start/end point):
         static when it never changes across frames, keyframed otherwise -
         the 2D-point counterpart of _scalar_property.  `per_frame_points` is
         one (x, y) tuple per frame.
+
+        `decimate=False` (used by _rigid_ks_for_acc for "s" - scale
+        PERCENT, not pixels) skips `_decimate_frames` - see
+        _scalar_property's own docstring for why a non-pixel unit cannot
+        safely share `decimate_tolerance_px` with this writer's pixel-space
+        properties. Position ("p", already pixels) keeps the default.
 
         A keyframe's own "s" must be a FLAT array of numbers here - Lottie's
         position/vector-property keyframes (schema: vector-keyframe, used by
@@ -1905,6 +2065,9 @@ class LottieExporter:
         """
         if all(p == per_frame_points[0] for p in per_frame_points[1:]):
             return {"a": 0, "k": list(per_frame_points[0])}
+        if decimate:
+            frames, per_frame_points = self._decimate_frames(
+                frames, per_frame_points, self._point_residual)
         return {"a": 1,
                 "k": self._keyframes(frames, [list(p) for p in per_frame_points])}
 
@@ -1920,6 +2083,17 @@ class LottieExporter:
         count - see _assert_stable.
         """
         return [{"ty": "sh", "ks": self._path_property(list(per_subpath), frames)}
+                for per_subpath in zip(*per_frame_subpaths)]
+
+    @staticmethod
+    def _sh_elements_static(per_frame_subpaths: list) -> list:
+        """The STATIC counterpart of _sh_elements: one "sh" element per
+        subpath, fixed at its reference (first) frame's own value - used
+        when _rigid_ks_for_acc has found a single per-frame transform that
+        reproduces every OTHER frame from this one, so no per-frame path
+        keyframing is needed for the geometry itself at all (the motion
+        lives entirely in the caller's "tr" item instead)."""
+        return [{"ty": "sh", "ks": {"a": 0, "k": per_subpath[0]}}
                 for per_subpath in zip(*per_frame_subpaths)]
 
     @staticmethod
@@ -2384,6 +2558,178 @@ class LottieExporter:
             "ao": 0, "ip": float(ip), "op": float(op), "st": 0.0,
         }
 
+    def _rigid_ks_for_acc(self, acc: dict, frames) -> Optional[tuple]:
+        """Try to express EVERY frame of `acc`'s fill+outline geometry as
+        one reference-frame (frame 0 of `frames`) static shape plus a
+        SINGLE shared per-frame affine transform, reusing
+        decompose_affine_2x2 - the same decomposition ImageLayer already
+        relies on and self-checks (_assert_affine_decomposition) - instead
+        of this writer's usual per-frame vertex baking (see the module
+        docstring's "Every deformation is BAKED..." paragraph).  Returns
+        `(ks, scales_per_frame)` - `ks` a ready-to-use Lottie "tr"/layer
+        "ks" dict (anchor (0, 0), so "p" alone places the shape - exactly
+        _finalize_image_layer's own convention), `scales_per_frame` the
+        plain `(scale_x, scale_y)` fraction (1.0 == no change, NOT the
+        `ks["s"]` percentage) this transform applies at each of `frames`,
+        for _finalize_outline_group to divide back out of its own stroke
+        WIDTH (a group's "tr" scale visually scales its stroke width too,
+        the same way an SVG `<g transform="scale(2)">` doubles a nested
+        path's rendered stroke, so the raw per-frame width has to be
+        pre-shrunk by that same factor or it would be applied twice).
+        Returns None (not a tuple) to tell the caller to keep the existing
+        per-frame path baking.
+
+        A shape qualifies only if EVERY vertex AND tangent handle ("v"/
+        "i"/"o"), of BOTH its fill and its outline, is reproduced by that
+        SAME shared matrix within self.rigid_transform_tolerance_px, at
+        EVERY frame - tangent handles are checked too (via the matrix's
+        LINEAR part only, since a handle is a DELTA/vector, not a point -
+        see _affine_reproduces_vectors), not just vertices, since a handle
+        that snapped linearly instead of following the real curve would be
+        a visible curvature error even where every vertex lands exactly
+        right. A genuinely skinned/deformed shape (most of a bone-rigged
+        mesh - measured on DarkMan.mohoproj: roughly 80% of shapes fail
+        this, including every one of its largest/most expensive ones,
+        which are exactly the flexibly-skinned body parts - see
+        docs/moho-to-lottie-design.md section 4) fails at the first frame
+        that genuinely bends, and this method returns None - the caller's
+        existing per-frame vertex baking is completely unaffected, so this
+        is pure upside: no shape can render WORSE than before this method
+        existed, only smaller when it applies.
+
+        Off entirely (returns None immediately) at the default
+        rigid_transform_tolerance_px == 0, and whenever there are fewer
+        than 2 frames or fewer than _RIGID_MIN_POINTS reference points to
+        pose a well-determined fit.
+        """
+        tol = self.rigid_transform_tolerance_px
+        if tol <= 0:
+            return None
+        fill_frames = acc.get("fill_per_frame") or []
+        outline_frames = acc.get("outline_per_frame") or []
+        n = len(fill_frames)
+        if n < 2 or (outline_frames and len(outline_frames) != n):
+            return None
+
+        def verts(subpaths):
+            return [tuple(v) for b in subpaths for v in b["v"]]
+
+        def vecs(subpaths, key):
+            return [tuple(v) for b in subpaths for v in b[key]]
+
+        ref_v = verts(fill_frames[0]) if fill_frames else []
+        ref_ov = verts(outline_frames[0]) if outline_frames else []
+        if len(ref_v) + len(ref_ov) < self._RIGID_MIN_POINTS:
+            return None
+        ref_i, ref_o = vecs(fill_frames[0], "i"), vecs(fill_frames[0], "o")
+        ref_oi = vecs(outline_frames[0], "i") if outline_frames else []
+        ref_oo = vecs(outline_frames[0], "o") if outline_frames else []
+        fit_points = ref_v + ref_ov
+
+        positions, scales, rotations, skews = [], [], [], []
+        for fi in range(n):
+            frame_v = verts(fill_frames[fi]) if fill_frames else []
+            frame_ov = verts(outline_frames[fi]) if outline_frames else []
+            if len(frame_v) != len(ref_v) or len(frame_ov) != len(ref_ov):
+                return None
+            m = self._fit_affine(fit_points, frame_v + frame_ov)
+            if m is None:
+                return None
+            a, b, c, d, e, f = m
+            if not (self._affine_reproduces(a, b, c, d, e, f, ref_v, frame_v, tol)
+                    and self._affine_reproduces(a, b, c, d, e, f, ref_ov, frame_ov, tol)
+                    and self._affine_reproduces_vectors(
+                        a, b, c, d, ref_i, vecs(fill_frames[fi], "i"), tol)
+                    and self._affine_reproduces_vectors(
+                        a, b, c, d, ref_o, vecs(fill_frames[fi], "o"), tol)
+                    and self._affine_reproduces_vectors(
+                        a, b, c, d, ref_oi, vecs(outline_frames[fi], "i") if outline_frames else [], tol)
+                    and self._affine_reproduces_vectors(
+                        a, b, c, d, ref_oo, vecs(outline_frames[fi], "o") if outline_frames else [], tol)):
+                return None
+            scale_x, scale_y, rotation, skew = decompose_affine_2x2(a, b, c, d)
+            positions.append((e, f))
+            scales.append((scale_x * 100.0, scale_y * 100.0))
+            rotations.append(rotation)
+            skews.append(skew)
+
+        ks = {
+            "a": {"a": 0, "k": [0, 0]},
+            "p": self._point_property(positions, frames),
+            # decimate=False on scale/rotation/skew - see _scalar_property's
+            # own docstring: decimate_tolerance_px is a PIXEL budget, and
+            # these three are in percent/degrees, not pixels, so decimating
+            # them with it can move a vertex far more than that many pixels
+            # once this shape's own size multiplies the error in. Position
+            # ("p", already pixels) keeps decimating - safe, same unit.
+            "s": self._point_property(scales, frames, decimate=False),
+            "r": self._scalar_property(rotations, frames, decimate=False),
+            "sk": self._scalar_property(skews, frames, decimate=False),
+            "sa": {"a": 0, "k": 0},
+            "o": {"a": 0, "k": 100},
+        }
+        return ks, [(sx / 100.0, sy / 100.0) for sx, sy in scales]
+
+    @staticmethod
+    def _fit_affine(ref_pts: list, frame_pts: list) -> Optional[tuple]:
+        """Least-squares 2x3 affine `(a, b, c, d, e, f)` mapping
+        `ref_pts[i]` as close as possible to `frame_pts[i]` for every `i`
+        (x' = a*x + c*y + e, y' = b*x + d*y + f) - the candidate
+        _rigid_ks_for_acc verifies before trusting it. The x' and y' fits
+        share one 3x3 normal-equations matrix (built from `ref_pts` alone),
+        inverted once via the closed-form symmetric-3x3 cofactor formula.
+        None if `ref_pts` is degenerate (collinear or coincident points -
+        the matrix is then singular)."""
+        sxx = sxy = sx = syy = sy = s1 = 0.0
+        for x, y in ref_pts:
+            sxx += x * x; sxy += x * y; sx += x
+            syy += y * y; sy += y; s1 += 1
+        m00, m01, m02, m11, m12, m22 = sxx, sxy, sx, syy, sy, s1
+        det = (m00 * (m11 * m22 - m12 * m12) - m01 * (m01 * m22 - m12 * m02)
+               + m02 * (m01 * m12 - m11 * m02))
+        if abs(det) < 1e-9:
+            return None
+        inv00 = (m11 * m22 - m12 * m12) / det
+        inv01 = (m02 * m12 - m01 * m22) / det
+        inv02 = (m01 * m12 - m02 * m11) / det
+        inv11 = (m00 * m22 - m02 * m02) / det
+        inv12 = (m02 * m01 - m00 * m12) / det
+        inv22 = (m00 * m11 - m01 * m01) / det
+        tx0 = tx1 = tx2 = ty0 = ty1 = ty2 = 0.0
+        for (x, y), (fx, fy) in zip(ref_pts, frame_pts):
+            tx0 += x * fx; tx1 += y * fx; tx2 += fx
+            ty0 += x * fy; ty1 += y * fy; ty2 += fy
+        a = inv00 * tx0 + inv01 * tx1 + inv02 * tx2
+        c = inv01 * tx0 + inv11 * tx1 + inv12 * tx2
+        e = inv02 * tx0 + inv12 * tx1 + inv22 * tx2
+        b = inv00 * ty0 + inv01 * ty1 + inv02 * ty2
+        d = inv01 * ty0 + inv11 * ty1 + inv12 * ty2
+        f = inv02 * ty0 + inv12 * ty1 + inv22 * ty2
+        return a, b, c, d, e, f
+
+    @staticmethod
+    def _affine_reproduces(a, b, c, d, e, f, ref_pts, frame_pts, tol: float) -> bool:
+        """True iff applying affine `(a,b,c,d,e,f)` to every point of
+        `ref_pts` lands within `tol` px of the matching point of
+        `frame_pts` - the POINT form (translation included) _rigid_ks_for_acc
+        uses to verify vertices."""
+        for (x, y), (fx, fy) in zip(ref_pts, frame_pts):
+            if math.hypot(a * x + c * y + e - fx, b * x + d * y + f - fy) > tol:
+                return False
+        return True
+
+    @staticmethod
+    def _affine_reproduces_vectors(a, b, c, d, ref_vecs, frame_vecs, tol: float) -> bool:
+        """The VECTOR form of _affine_reproduces (no translation) - used to
+        verify a bezier tangent handle, which is a DELTA from its own
+        vertex, not a point in its own right."""
+        if len(ref_vecs) != len(frame_vecs):
+            return False
+        for (x, y), (fx, fy) in zip(ref_vecs, frame_vecs):
+            if math.hypot(a * x + c * y - fx, b * x + d * y - fy) > tol:
+                return False
+        return True
+
     def _eval_gradient(self, shape, fill_style: dict, frame0: float):
         """The frame-invariant part of a gradient fill - stop colours/
         locations, type, effect scale/rotation - evaluated once, since none
@@ -2489,12 +2835,28 @@ class LottieExporter:
                 name = f"{name}_{len(style_names_used)}"
             style_names_used.add(name)
 
+            # A gradient's own "s"/"e" points (_gradient_fill) are computed
+            # from acc["fill_per_frame"]'s WORLD-space bounding box each
+            # frame - correct only under the identity "tr" every group has
+            # used until now.  Once a group's own "tr" carries real motion,
+            # gradient placement would need reworking into the group's now
+            # non-trivial LOCAL space too - out of scope here, so a
+            # gradient-bearing shape is simply never offered the rigid-
+            # transform path, keeping today's (already correct) per-frame
+            # bbox placement untouched.
+            rigid = (self._rigid_ks_for_acc(acc, frames)
+                    if acc["gradient"] is None else None)
+            rigid_ks, rigid_scales = rigid if rigid is not None else (None, None)
+
             if (acc["outline_kind"] is not None and acc["outline_per_frame"][0]
                     and id(acc) not in skip_outline):
-                out.append(self._finalize_outline_group(layer, acc, frames, name))
+                out.append(self._finalize_outline_group(
+                    layer, acc, frames, name, rigid_ks, rigid_scales))
 
             if acc["has_fill"]:
-                elements = self._sh_elements(acc["fill_per_frame"], frames)
+                elements = (self._sh_elements_static(acc["fill_per_frame"])
+                           if rigid_ks is not None
+                           else self._sh_elements(acc["fill_per_frame"], frames))
                 if acc["gradient"] is not None:
                     elements.append(self._gradient_fill(acc, frames))
                 else:
@@ -2502,7 +2864,8 @@ class LottieExporter:
                     elements.append({"ty": "fl", "r": FILL_RULE_EVEN_ODD,
                                       "c": {"a": 0, "k": [color.r, color.g, color.b]},
                                       "o": {"a": 0, "k": color.a * 100}})
-                elements.append({"ty": "tr", **identity_transform()})
+                elements.append({"ty": "tr", **(rigid_ks if rigid_ks is not None
+                                                else identity_transform())})
                 out.append({"ty": "gr", "nm": f"{name}_fill", "it": elements})
         return [group for block in reversed(blocks) for group in block]
 
@@ -2568,14 +2931,27 @@ class LottieExporter:
         dy = -math.sin(rotation) * scale * half_h
         return (cx - dx, cy - dy), (cx + dx, cy + dy)
 
-    def _finalize_outline_group(self, layer, acc: dict, frames, name: str) -> dict:
+    def _finalize_outline_group(self, layer, acc: dict, frames, name: str,
+                                rigid_ks: Optional[dict] = None,
+                                rigid_scales: Optional[list] = None) -> dict:
         """One shape's outline as a Lottie group - the pure-data half of
         what used to be _build_outline_group, split out once geometry
-        collection became eager (see _accumulate_frame)."""
+        collection became eager (see _accumulate_frame).
+
+        `rigid_ks`/`rigid_scales` are `_rigid_ks_for_acc`'s own return
+        value (already computed once by the caller, `_finalize_shapes`, so
+        the fill and outline groups of the SAME shape always share the
+        identical fitted transform) - None (the default, and always for
+        the `union_exclude` call site in _build_layers, which has no acc
+        to fit against) keeps this method's original per-frame path
+        baking exactly as before.
+        """
         self._assert_stable(layer, acc["name"], f"outline({acc['outline_kind']})",
                              acc["outline_per_frame"])
         color = acc["outline_color"]
-        elements = self._sh_elements(acc["outline_per_frame"], frames)
+        elements = (self._sh_elements_static(acc["outline_per_frame"])
+                   if rigid_ks is not None
+                   else self._sh_elements(acc["outline_per_frame"], frames))
         if acc["outline_kind"] == "taper":
             # Even-odd unconditionally, matching the SVG writer, which puts
             # fill-rule="evenodd" on a tapered outline whether it came back
@@ -2588,13 +2964,26 @@ class LottieExporter:
                               "c": {"a": 0, "k": [color.r, color.g, color.b]},
                               "o": {"a": 0, "k": color.a * 100}})
         else:
+            width_per_frame = acc["outline_width_per_frame"]
+            if rigid_scales is not None:
+                # The group's own "tr" scale visually re-scales a nested
+                # "st" stroke's width too (same as an SVG/Lottie <g
+                # transform="scale(k)"> doubling a child path's rendered
+                # stroke) - divide it back out here (geometric mean of the
+                # fitted scale_x/scale_y, exact for the common uniform-
+                # scale case) so the FINAL rendered width still matches
+                # what the per-frame pipeline actually computed, not that
+                # value applied twice.
+                width_per_frame = [w / math.sqrt(max(sx * sy, 1e-12))
+                                   for w, (sx, sy) in zip(width_per_frame, rigid_scales)]
             elements.append({"ty": "st",
                               "c": {"a": 0, "k": [color.r, color.g, color.b]},
                               "o": {"a": 0, "k": color.a * 100},
-                              "w": self._scalar_property(acc["outline_width_per_frame"], frames),
+                              "w": self._scalar_property(width_per_frame, frames),
                               "lc": acc["outline_cap"],
                               "lj": 2})
-        elements.append({"ty": "tr", **identity_transform()})
+        elements.append({"ty": "tr", **(rigid_ks if rigid_ks is not None
+                                        else identity_transform())})
         return {"ty": "gr", "nm": f"{name}_line", "it": elements}
 
 
@@ -2679,6 +3068,29 @@ def main() -> None:
                              "point's own explicitly-bound bone (mesh.points[].parent "
                              "names bone 0 or 1 there) instead of blending in bone 2's "
                              "much larger swing")
+    parser.add_argument("--rigid-transform-tolerance", type=float, default=0.0, metavar="PX",
+                        help="write a shape as a static path plus an animated Lottie "
+                             "layer transform (position/scale/rotation/skew) instead of "
+                             "dense per-frame path keyframes, whenever ONE shared affine "
+                             "matrix reproduces every vertex and tangent handle of its "
+                             "fill+outline, at every frame, within this many pixels. 0 "
+                             "(the default) disables this entirely - see "
+                             "LottieExporter._rigid_ks_for_acc. Unlike --decimate-"
+                             "tolerance this is meant to be near-lossless when it fires "
+                             "(pass a small value like 0.05, not a big one); it only ever "
+                             "helps a shape that is actually rigid (a plain transform, no "
+                             "real skin deformation) - measured on DarkMan.mohoproj at "
+                             "~20% of shapes qualifying, none of the largest ones, since "
+                             "that rig is genuinely, flexibly skinned almost everywhere - "
+                             "see docs/moho-to-lottie-design.md section 4")
+    parser.add_argument("--decimate-tolerance", type=float, default=0.0, metavar="PX",
+                        help="drop a keyframe whenever LINEAR interpolation between "
+                             "its kept neighbours already reproduces it within this "
+                             "many pixels (0, the default, keeps every sampled frame "
+                             "as its own keyframe - byte-identical to not passing this "
+                             "flag at all). See LottieExporter._decimate_frames; "
+                             "measured on DarkMan.mohoproj at 1.4x-2.4x smaller across "
+                             "0.3px-4px - see docs/moho-to-lottie-design.md section 4")
     parser.add_argument("--validate", action="store_true",
                         help="validate the output against lottie/lottie.schema.json "
                              "(needs the optional 'jsonschema' package)")
@@ -2706,7 +3118,9 @@ def main() -> None:
                                                bone_dynamics=args.bone_dynamics,
                                                wind_dynamics=args.wind_dynamics,
                                                point_bone_binding=args.point_bones,
-                                               image_search_dir=args.image_dir))
+                                               image_search_dir=args.image_dir),
+                               decimate_tolerance_px=args.decimate_tolerance,
+                               rigid_transform_tolerance_px=args.rigid_transform_tolerance)
     lottie = exporter.export(frames, include_hidden=args.include_hidden)
 
     with open(args.out, "w", encoding="utf-8") as f:

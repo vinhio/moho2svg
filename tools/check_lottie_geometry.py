@@ -27,6 +27,7 @@ through one variable, `LOTTIE_EXPORT_FLAGS`.
 """
 
 import json
+import math
 import os
 import sys
 
@@ -282,15 +283,130 @@ def expected_layers(project_path: str, frame: float, include_hidden: bool = Fals
 
 def path_property_at(ks: dict, frame: float) -> dict:
     """The bezier value a Lottie path property (`{"a":0/1, "k":...}`) holds
-    at `frame` - the static value, or the keyframe whose "t" equals `frame`
-    exactly (this checker only ever asks for frames the exporter itself
-    sampled, so an exact match is expected, not interpolation)."""
+    at `frame` - the static value, the keyframe whose "t" equals `frame`
+    exactly, or - when `frame` falls BETWEEN two kept keyframes, which only
+    happens once moho2lottie.py's `--decimate-tolerance` has dropped some -
+    LINEAR interpolation between them.  This matches `_keyframes`' own
+    LINEAR "i"/"o" easing exactly (see that method's docstring: every KEPT
+    keyframe already sits at its own exact sampled value, so only a
+    straight line needs reproducing in between), so this stays an exact
+    check of what a Lottie player actually renders, not an approximation
+    added for this checker's own convenience."""
     if ks["a"] == 0:
         return ks["k"]
-    for kf in ks["k"]:
+    keyframes = ks["k"]
+    for kf in keyframes:
         if abs(kf["t"] - frame) < 1e-6:
             return kf["s"][0]
-    raise KeyError(f"no keyframe at frame {frame}")
+    before = [kf for kf in keyframes if kf["t"] < frame]
+    after = [kf for kf in keyframes if kf["t"] > frame]
+    if not before or not after:
+        raise KeyError(f"no keyframe at frame {frame}, and it falls outside "
+                       f"the keyframe range ({keyframes[0]['t']}-{keyframes[-1]['t']})")
+    a, b = before[-1], after[0]
+    t = (frame - a["t"]) / (b["t"] - a["t"])
+    av, bv = a["s"][0], b["s"][0]
+
+    def lerp_pairs(a_pairs, b_pairs):
+        return [[ax + (bx - ax) * t, ay + (by - ay) * t]
+                for (ax, ay), (bx, by) in zip(a_pairs, b_pairs)]
+
+    return {"c": av["c"], "v": lerp_pairs(av["v"], bv["v"]),
+            "i": lerp_pairs(av["i"], bv["i"]), "o": lerp_pairs(av["o"], bv["o"])}
+
+
+def _interp_keyframed(prop: dict, frame: float):
+    """Shared bracket-and-interpolate step for scalar_at/point_at: the
+    keyframe pair straddling `frame`, and the fractional position `t`
+    between them - or the exact keyframe's own "s" (`unwrap`d by the
+    caller) if one lands exactly on `frame`."""
+    keyframes = prop["k"]
+    for kf in keyframes:
+        if abs(kf["t"] - frame) < 1e-6:
+            return None, kf["s"]
+    before = [kf for kf in keyframes if kf["t"] < frame]
+    after = [kf for kf in keyframes if kf["t"] > frame]
+    if not before or not after:
+        raise KeyError(f"no keyframe at frame {frame}, and it falls outside "
+                       f"the keyframe range ({keyframes[0]['t']}-{keyframes[-1]['t']})")
+    a, b = before[-1], after[0]
+    t = (frame - a["t"]) / (b["t"] - a["t"])
+    return t, (a["s"], b["s"])
+
+
+def scalar_at(prop: dict, frame: float) -> float:
+    """The value a Lottie SCALAR property (e.g. "tr"'s "r"/"sk") holds at
+    `frame` - `path_property_at`'s own static/exact/linear logic, for a
+    keyframe "s" shaped `[v]` (see moho2lottie.py's `_scalar_property`)."""
+    if prop["a"] == 0:
+        return prop["k"]
+    t, s = _interp_keyframed(prop, frame)
+    if t is None:
+        return s[0]
+    av, bv = s
+    return av[0] + (bv[0] - av[0]) * t
+
+
+def point_at(prop: dict, frame: float) -> list:
+    """The value a Lottie 2D POINT property (e.g. "tr"'s "a"/"p"/"s") holds
+    at `frame`, for a keyframe "s" shaped `[x, y]` FLAT, not `[[x, y]]`
+    (see moho2lottie.py's `_point_property` docstring for why point and
+    scalar properties wrap their keyframe "s" differently)."""
+    if prop["a"] == 0:
+        return prop["k"]
+    t, s = _interp_keyframed(prop, frame)
+    if t is None:
+        return s
+    av, bv = s
+    return [x + (y - x) * t for x, y in zip(av, bv)]
+
+
+def group_transform_at(tr: dict, frame: float) -> tuple:
+    """(a, b, c, d, e, f) - the 2x3 affine a shape-group's own "tr" item
+    represents at `frame`, reconstructed from its anchor/position/scale/
+    rotation/skew the same way moho2lottie.py's own
+    _assert_affine_decomposition round-trips decompose_affine_2x2's
+    output - re-derived independently here rather than trusted, matching
+    this whole checker's own reason to exist. Identity (`grp` built by
+    `identity_transform()`, every group before --rigid-transform-tolerance
+    existed and every one it does not apply to) reduces to (1,0,0,1,0,0),
+    a no-op - so this is safe to call unconditionally, not only for a
+    group this checker suspects is rigid-transformed."""
+    ax, ay = point_at(tr["a"], frame)
+    px, py = point_at(tr["p"], frame)
+    sx, sy = point_at(tr["s"], frame)
+    sx, sy = sx / 100.0, sy / 100.0
+    rotation = scalar_at(tr["r"], frame)
+    skew = scalar_at(tr.get("sk", {"a": 0, "k": 0}), frame)
+    rad_r, rad_k = math.radians(rotation), math.radians(skew)
+    cr, sr, tan_k = math.cos(rad_r), math.sin(rad_r), math.tan(rad_k)
+    a = cr * sx
+    b = sr * sx
+    c = cr * tan_k * sy - sr * sy
+    d = sr * tan_k * sy + cr * sy
+    e = px - (a * ax + c * ay)
+    f = py - (b * ax + d * ay)
+    return a, b, c, d, e, f
+
+
+def transform_bezier(bez: dict, tr: tuple) -> dict:
+    """`bez` (a `path_property_at`-shaped dict) mapped through the affine
+    `tr` (`group_transform_at`'s own return) - vertices ("v") as POINTS
+    (translation included), tangent handles ("i"/"o") as VECTORS/deltas
+    (translation excluded), matching moho2lottie.py's own
+    _affine_reproduces/_affine_reproduces_vectors distinction."""
+    a, b, c, d, e, f = tr
+
+    def pt(p):
+        x, y = p
+        return [a * x + c * y + e, b * x + d * y + f]
+
+    def vec(p):
+        x, y = p
+        return [a * x + c * y, b * x + d * y]
+
+    return {"c": bez["c"], "v": [pt(p) for p in bez["v"]],
+            "i": [vec(p) for p in bez["i"]], "o": [vec(p) for p in bez["o"]]}
 
 
 def emitted_layers(lottie: dict, frame: float):
@@ -302,6 +418,14 @@ def emitted_layers(lottie: dict, frame: float):
     moho2lottie.LottieExporter._windows), so it legitimately has no
     keyframe at a frame outside that window - that is not a mismatch to
     report, it is the layer correctly not being there.
+
+    Each shape-group's own "tr" item (see group_transform_at) is applied
+    to its "sh" siblings before returning them - needed once
+    moho2lottie.py's --rigid-transform-tolerance can give a group a
+    non-identity "tr" (a static path plus an animated transform, instead
+    of dense per-frame path keyframes); a no-op for every group that still
+    carries `identity_transform()`, i.e. everything before that flag
+    existed and everything it does not apply to.
     """
     out = []
     for layer in lottie["layers"]:
@@ -309,7 +433,11 @@ def emitted_layers(lottie: dict, frame: float):
             continue
         shapes = []
         for grp in layer["shapes"]:
+            tr_item = next((e for e in grp["it"] if e["ty"] == "tr"), None)
+            tr = group_transform_at(tr_item, frame) if tr_item is not None else None
             beziers = [path_property_at(e["ks"], frame) for e in grp["it"] if e["ty"] == "sh"]
+            if tr is not None:
+                beziers = [transform_bezier(b, tr) for b in beziers]
             if not beziers:
                 continue
             kind = "outline" if grp["nm"].endswith("_line") else "fill"
@@ -445,9 +573,20 @@ def check_masks_present(project_path: str, lottie: dict) -> int:
 
 
 def main() -> int:
+    global TOLERANCE
     args = sys.argv[1:]
     require_gradients = "--require-gradients" in args
     require_masks = "--require-masks" in args
+    # --tolerance widens the geometry-comparison TOLERANCE itself (default
+    # 3e-3px, meant for exact-keyframe output) - needed to check a file
+    # written with moho2lottie.py's own --decimate-tolerance, which
+    # deliberately introduces up to that many pixels of error at a DROPPED
+    # frame in exchange for a smaller file (see moho2lottie.py's
+    # _decimate_frames). Pass the SAME number here that the export used, the
+    # same reason LOTTIE_EXPORT_FLAGS must match on both sides.
+    tolerance_args = [a for a in args if a.startswith("--tolerance=")]
+    if tolerance_args:
+        TOLERANCE = float(tolerance_args[-1].split("=", 1)[1])
     # Geometry-changing export flags.  These are NOT preferences of this
     # script: they have to be whatever moho2lottie.py was run with, or the
     # comparison is between two different renders.  The Makefile keeps both

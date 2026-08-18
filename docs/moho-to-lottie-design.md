@@ -218,6 +218,38 @@ times smaller across the corpus.
 That is a change to the same writer, not a rewrite, and it is deliberately not
 in v1.
 
+**Implemented** (both OFF by default, so v1's own output stays byte-identical
+unless explicitly requested): `--rigid-transform-tolerance PX`
+(`LottieExporter._rigid_ks_for_acc`) is exactly that later optimisation - a
+shape whose fill+outline vertices AND tangent handles are all reproduced, at
+every frame, by ONE shared affine matrix (fit least-squares, then verified,
+never trusted blind) gets a static path plus an animated LAYER transform
+(`decompose_affine_2x2`, the same decomposition ImageLayer already relies on
+and self-checks) instead of dense per-frame path keyframes. `--decimate-
+tolerance PX` (`LottieExporter._decimate_frames`) is a second, independent
+lever: drop a keyframe wherever LINEAR interpolation between its kept
+neighbours already reproduces it within that many pixels - this is the
+Ramer-Douglas-Peucker idea applied to a Lottie keyframe track, and it works
+regardless of whether a shape is rigid.
+
+Measured on `DarkMan.mohoproj` (a user-supplied, gitignored, heavily
+bone-skinned character rig - not one of the sample documents in the table
+above): `--rigid-transform-tolerance` alone found almost nothing to do -
+only ~20% of shapes qualify, and NONE of the largest/most expensive ones
+(`leg`, `shoe`, `palm`), because they are genuinely flexibly-skinned
+(different points blend across different bones with different weights),
+which no single matrix can represent, affine or otherwise. This is a
+finding about that DOCUMENT's animation style, not a gap in the detection -
+a document built more like a "paper cutout" rig (rigid limbs on hinges,
+little or no per-point mesh deformation) would see much closer to the
+three-to-nine-times number above. `--decimate-tolerance` is the lever that
+actually helps a genuinely, continuously deforming rig like this one: 1.4x
+smaller at an imperceptible 0.3px tolerance, up to 2.4x at a visible-if-you
+-look-for-it 4px, because dense per-frame keyframing is otherwise the ONLY
+way to reproduce continuous bone rotation without a Lottie player's own
+linear keyframe interpolation visibly cutting the corner of the true arc
+(see `tools/check_lottie_stability.py`, which measures exactly that risk).
+
 ---
 
 ## 5. Document and layer mapping

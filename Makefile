@@ -12,6 +12,9 @@ help:
 	@echo '  make svg-all                           every moho/ project in all four svg forms'
 	@echo '  make lottie-all                        every moho/ project -> out/lottie/'
 	@echo '  make lottie-all VALIDATE=--validate    also schema-validate each export'
+	@echo '  make out/lottie/DarkMan.json LOTTIE_EXPORT_FLAGS=--point-bones LOTTIE_DECIMATE_TOLERANCE=2.0'
+	@echo '                                        shrink one lottie export (see moho2lottie.py --decimate-tolerance /'
+	@echo '                                        --rigid-transform-tolerance, and LOTTIE_RIGID_TOLERANCE)'
 	@echo '  make out/lottie/BoneStrengthTool.json IMAGE_DIR=/Applications/Moho.app/Contents/Resources/Support'
 	@echo '                                        (or any SVG/lottie target) resolve ImageLayer sources -'
 	@echo '                                        see moho2svg.py --image-dir'
@@ -21,7 +24,8 @@ help:
 	@echo ''
 	@echo 'Setup:'
 	@echo '  make venv                              create .venv and install optional packages'
-	@echo '                                        (Pillow, psd-tools); then source .venv/bin/activate'
+	@echo '                                        (Pillow, psd-tools, pyclipper) - every target below then'
+	@echo '                                        uses it automatically, no activation needed'
 	@echo ''
 	@echo 'Single-file targets (build any project by name):'
 	@echo '  make out/svg/ori/Bandit.svg            one original export (full brush texture)'
@@ -45,9 +49,12 @@ help:
 # is not reliably honoured by every real-world player - confirmed silently
 # ignored by both lottie-web's canvas renderer and LottieFiles' own preview
 # player; see moho2lottie.py's _clip_polygon_loops). The virtualenv is
-# gitignored; activate it once per shell before running any other target:
-# `make venv && source .venv/bin/activate`. (jsonschema stays out of the
-# venv - it is needed only by `moho2lottie.py --validate`, so
+# gitignored; every `make` target below already runs under it automatically
+# once it exists (see the PYTHON variable, a few lines down) - no need to
+# `source .venv/bin/activate` yourself before running `make` (only before
+# running a script directly with a bare `python3 moho2svg.py ...`, since
+# that bypasses make and its PYTHON variable entirely). (jsonschema stays
+# out of the venv - it is needed only by `moho2lottie.py --validate`, so
 # `pip install jsonschema` it on demand instead.)
 .PHONY: venv
 venv:
@@ -71,6 +78,20 @@ venv:
 .SECONDEXPANSION:
 .PHONY: svg-all lottie-all format
 
+# PYTHON: use .venv/bin/python3 (Pillow/psd-tools/pyclipper already on its
+# path) whenever `make venv` has created it, plain `python3` (no optional
+# packages) otherwise - so every recipe below gets the optional-package
+# path without needing `source .venv/bin/activate` first. $(wildcard ...)
+# is evaluated once, when make reads this file, so `make venv` itself (which
+# creates .venv/bin/python3 for the FIRST time) still has to run under
+# plain `python3` - that recipe hardcodes it rather than using this
+# variable, deliberately, since .venv/bin/python3 cannot exist yet at that
+# point. Every other recipe uses $(PYTHON), not a literal `python3` -
+# checked with `grep -n '[^N]python3' Makefile` after any edit here, since
+# a literal one silently falls back to skipping every optional package
+# again, the exact bug this variable exists to remove.
+PYTHON := $(if $(wildcard .venv/bin/python3),.venv/bin/python3,python3)
+
 # IMAGE_DIR (empty/unset by default, exactly like moho2svg.py's own
 # --image-dir - neither guesses a Moho install path) - the local `Support/`
 # directory an ImageLayer's source (e.g. a PSD in Moho's own shipped content
@@ -93,7 +114,7 @@ define export_svg_recipe
 	mkdir -p $(dir $(1))
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $(1)"; exit 1; fi; \
-	python3 moho2svg.py "$$src" --combined $(1) $(2) $(image_dir_flag)
+	$(PYTHON) moho2svg.py "$$src" --combined $(1) $(2) $(image_dir_flag)
 endef
 
 # Original export: full brush texture at default spacing - the closest match
@@ -154,11 +175,42 @@ out/svg/ori/png/%.png: out/svg/ori/%.svg
 # purely the flag mismatch. Change this variable, not the two call sites.
 VALIDATE ?=
 LOTTIE_EXPORT_FLAGS ?= --wind-dynamics --point-bones
+
+# LOTTIE_DECIMATE_TOLERANCE defaults ON at 2.0px - measured (see
+# docs/moho-to-lottie-design.md section 4) as a good general trade-off:
+# barely-if-at-all visible, and a real win on any document with dense,
+# continuous per-frame motion (DarkMan.mohoproj: 4.14 MB -> 1.94 MB); a
+# document with mostly-static content pays nothing extra either way, since
+# a shape that never moves was already written once (see _path_property).
+# Override to 0 (empty) for byte-for-byte lossless output, e.g.
+#   make out/lottie/Bandit.json LOTTIE_DECIMATE_TOLERANCE=
+# or raise it for a smaller/rougher file, e.g. LOTTIE_DECIMATE_TOLERANCE=4.0.
+#
+# LOTTIE_RIGID_TOLERANCE stays OFF (empty) by default, unlike the above:
+# measured to help almost nothing on a genuinely bone-skinned document like
+# DarkMan.mohoproj (~20% of shapes qualify, none of the large ones - see
+# docs/moho-to-lottie-design.md section 4), so it is opt-in per export
+# rather than a blanket default, e.g.
+#   make out/lottie/SomeCutoutRig.json LOTTIE_RIGID_TOLERANCE=0.5
+# for a document built more like rigid cutout parts on hinges, where it can
+# actually pay off.
+#
+# Neither is part of LOTTIE_EXPORT_FLAGS itself: unlike --wind-dynamics/
+# --point-bones/--bone-dynamics, which change what "correct" geometry even
+# means, a tolerance only trades size for a bounded, chosen amount of visual
+# approximation - keeping these separate variables is what lets
+# `make check-lottie` still verify EXACTLY that bound (via
+# check_tolerance_flag below), rather than either being blind to it or
+# forced back to a lossless-only check.
+LOTTIE_DECIMATE_TOLERANCE ?= 2.0
+LOTTIE_RIGID_TOLERANCE ?=
+lottie_size_flags = $(if $(LOTTIE_DECIMATE_TOLERANCE),--decimate-tolerance $(LOTTIE_DECIMATE_TOLERANCE)) \
+                    $(if $(LOTTIE_RIGID_TOLERANCE),--rigid-transform-tolerance $(LOTTIE_RIGID_TOLERANCE))
 out/lottie/%.json: moho2lottie.py moho2svg.py Makefile $$(wildcard moho/$$*.animeproj moho/$$*.mohoproj)
 	mkdir -p out/lottie
 	@src="$$(ls moho/$*.animeproj moho/$*.mohoproj 2>/dev/null | head -1)"; \
 	if test -z "$$src"; then echo "no source project under moho/ for $@"; exit 1; fi; \
-	python3 moho2lottie.py "$$src" --out $@ $(LOTTIE_EXPORT_FLAGS) $(VALIDATE) $(image_dir_flag)
+	$(PYTHON) moho2lottie.py "$$src" --out $@ $(LOTTIE_EXPORT_FLAGS) $(lottie_size_flags) $(VALIDATE) $(image_dir_flag)
 
 # Every project's lottie export (PROJECT_STEMS from above). A name with both
 # extensions (SketchBone) exports once, through the .animeproj; a .mohoproj
@@ -180,12 +232,29 @@ lottie-all: $(addprefix out/lottie/,$(addsuffix .json,$(PROJECT_STEMS)))
 # resampled loop whose vertex ring slipped, making shapes visibly spin in a
 # player) shipped past a green `make check-lottie`. The stability check reads
 # the emitted file alone and asks whether its keyframes can be interpolated.
+#
+# check_tolerance_flag mirrors whatever LOTTIE_DECIMATE_TOLERANCE the export
+# above used (2.0px by default, same variable) as check_lottie_geometry.py's
+# own --tolerance, or it fails on the size/accuracy trade-off
+# --decimate-tolerance was asked to make - exactly the LOTTIE_EXPORT_FLAGS
+# drift this target's own comment above already warns about. Set
+# LOTTIE_DECIMATE_TOLERANCE= (empty) for a byte-exact export AND an exact
+# (3e-3px) check together. See tools/check_lottie_geometry.py's own
+# --tolerance= (note the "=": unlike --decimate-tolerance, that script does
+# not consume a separate argv token for the number, so passing this as a
+# plain space-separated flag would misparse the number as a frame). Reads
+# LOTTIE_DECIMATE_TOLERANCE alone, not LOTTIE_RIGID_TOLERANCE too - the
+# rigid-transform path is verified exact by construction
+# (LottieExporter._rigid_ks_for_acc never returns a fit outside its own
+# tolerance), so it does not need extra check slack the way a deliberately
+# lossy decimation does.
+check_tolerance_flag = $(if $(LOTTIE_DECIMATE_TOLERANCE),--tolerance=$(LOTTIE_DECIMATE_TOLERANCE))
 check-lottie: out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
-	python3 tools/check_bezier_roundtrip.py
-	python3 tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json 25 60 100 127 --require-masks $(LOTTIE_EXPORT_FLAGS)
-	python3 tools/check_lottie_geometry.py moho/SketchBone.animeproj out/lottie/SketchBone.json 1 77 86 120 --require-gradients $(LOTTIE_EXPORT_FLAGS)
-	python3 tools/check_lottie_geometry.py moho/WhatIsBone.animeproj out/lottie/WhatIsBone.json 1 120 240 --require-masks --require-gradients $(LOTTIE_EXPORT_FLAGS)
-	python3 tools/check_lottie_stability.py out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
+	$(PYTHON) tools/check_bezier_roundtrip.py
+	$(PYTHON) tools/check_lottie_geometry.py moho/Bandit.mohoproj out/lottie/Bandit.json 25 60 100 127 --require-masks $(LOTTIE_EXPORT_FLAGS) $(check_tolerance_flag)
+	$(PYTHON) tools/check_lottie_geometry.py moho/SketchBone.animeproj out/lottie/SketchBone.json 1 77 86 120 --require-gradients $(LOTTIE_EXPORT_FLAGS) $(check_tolerance_flag)
+	$(PYTHON) tools/check_lottie_geometry.py moho/WhatIsBone.animeproj out/lottie/WhatIsBone.json 1 120 240 --require-masks --require-gradients $(LOTTIE_EXPORT_FLAGS) $(check_tolerance_flag)
+	$(PYTHON) tools/check_lottie_stability.py out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatIsBone.json
 
 # Compares this exporter's own geometry against the frames MOHO ITSELF
 # exported, which is the only ground truth in the repository - see the
@@ -194,7 +263,7 @@ check-lottie: out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatI
 # Bandit/svg/ (103 frames), SketchBone/new/ (120) and BoneDynamics/ (29) -
 # and skips any that is absent rather than failing.
 check-reference:
-	python3 tools/check_reference_frames.py
+	$(PYTHON) tools/check_reference_frames.py
 
 # Pretty-print the project under moho/ matching the target stem to a .json
 # file - format one with e.g. `make format/moho/Bandit` (writes
