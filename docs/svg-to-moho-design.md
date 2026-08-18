@@ -18,9 +18,10 @@ The same flat-bake contract as `lottie2moho.py` (its module docstring):
   coordinates**; every layer transform stays identity.
 - Static is fine here because the input is static: SVG has no keyframe
   timeline.  (SMIL/CSS animation is out of scope, see section 9.)
-- Paint order: SVG paints in document order, later on top; Moho paints the
-  LATER layer on top.  The layer list is therefore reversed, exactly like
-  `lottie2moho.py`'s shape list.
+- Paint order: SVG paints in document order, later on top - and so does
+  Moho.  The SAME convention, so the document order is kept (measured
+  2026-08: reversing it, as `lottie2moho.py` must for Lottie's
+  earlier-on-top order, put the later SVG element UNDER the earlier one).
 
 ## 2. Input model
 
@@ -69,6 +70,14 @@ hard rule:
 3. SVG itself is y-down like the pixel space, so no extra SVG-side flip
    exists — the viewBox's own y runs downward and lands in `pixel_to_moho`
    unchanged.
+4. **The handle model is approximate on arcs.**  The closed-form inverse
+   fit (section 4.1) is exact at a curve's own points, but Moho's
+   smoothness/weight/offset model cannot represent a kappa cubic exactly:
+   measured on an r80/r40 ring, 45-degree arc subdivision renders 94% of
+   the true ring area with the cardinal points exact (~1 px on the axes,
+   the residual spread around the diagonals).  Arcs are therefore split
+   at <= 45 degrees (a 90-degree split measured 17% off).  This residual
+   is the price of the shared handle model - recorded, not tuned.
 
 ## 4. Geometry mapping
 
@@ -93,7 +102,7 @@ Command coverage:
 | `C`/`c` | cubic — the direct case |
 | `S`/`s` | reflected cubic: reflect the previous handle; at a path start the control point equals the current point |
 | `Q`/`q`, `T`/`t` | quadratics: converted to cubic (`C1 = P0 + 2/3 (Q − P0)`, `C2 = P1 + 2/3 (Q − P1)`) |
-| `A`/`a` | elliptical arc: converted to cubic per the SVG spec's endpoint-to-center parameterization, split at ≥π/2 sweeps |
+| `A`/`a` | elliptical arc: converted to cubic per the SVG spec's endpoint-to-center parameterization, split at ≤45-degree sweeps (measured: 90-degree pieces lose ~17% of a circle's area through the handle model; 45-degree pieces keep it within ~1 px on the cardinal axes and ~6% area) |
 | `Z`/`z` | close: joins to the subpath's first point |
 
 One Moho curve per subpath, points in the subpath's own order.  A closed
@@ -143,12 +152,23 @@ One Moho `Style` dict per shape, the full 27-key form `lottie2moho.py`'s
 ### 5.1 Gradients
 
 `linearGradient`/`radialGradient` map to Moho's `SS_Gradient2` effect in
-the style (`fill_style` slot), the same shape `lottie2moho.py`'s
-`gradient_fill_style` already emits — including its known limitation that
-placement is approximate (carried over from the forward exporter, see its
-GRADIENTS notes).  `gradientTransform` composes into the placement.
-`spreadMethod` and gradient units other than objectBoundingBox are counted
-warnings.
+the style (`fill_style` slot).  Measured requirements, each one discovered
+by rendering (2026-08, the t6 gate):
+
+- The parallel `fill_style_id` integer (9 for `SS_Gradient2`) must be
+  present or Moho renders the flat `fill_color` instead.
+- The style's `fill_color` carries the FIRST stop's colour (real files do
+  this; the default black otherwise shows through).
+- `project_data.global_render_style_*` must be 0 (not −1) and
+  `global_render_style_minimize_randomness` True, or all gradients render
+  flat.
+- **Placement is approximate** — the known gap carried over from the
+  forward exporter's GRADIENTS notes.  Additionally, the renderer has a
+  measured DEAD ANGLE at exactly −45°: a linear gradient there renders
+  flat at every `effect_scale` (−42° and −48° render fine, grid-mapped).
+  The writer nudges that one angle 3° off — visually indistinguishable.
+- `gradientTransform` composes into the placement; `spreadMethod` and
+  gradient units other than objectBoundingBox are counted warnings.
 
 ## 6. Transform mapping
 

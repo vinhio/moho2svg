@@ -19,14 +19,20 @@ the WarningCounter convention.
 
 | Task | What | State |
 |---|---|---|
-| 1 | CLI, SVG parser, scaffolding, M/L/Z paths | planned |
-| 2 | Full path command set (C/S/Q/T/H/V/A) | planned |
-| 3 | Primitives | planned |
-| 4 | Transforms | planned |
-| 5 | Styles | planned |
-| 6 | Gradients | planned |
-| 7 | Holes, fill rule, defs/use | planned |
-| 8 | Verification harness + corpus | planned |
+| 1 | CLI, SVG parser, scaffolding, M/L/Z paths | done |
+| 2 | Full path command set (C/S/Q/T/H/V/A) | done |
+| 3 | Primitives | done |
+| 4 | Transforms | done |
+| 5 | Styles | done |
+| 6 | Gradients | done — placement approximate (design 5.1) |
+| 7 | Holes, fill rule, defs/use | done |
+| 8 | Verification harness + corpus | done |
+
+All gates measured 2026-08: 9-file corpus converts with zero exceptions and
+loads in Moho 14.4 headless (9/9 with retry); bbox gates match independent
+expectations within 6 px on every file; the donut hole is pixel-verified
+(94% of the true ring area, cardinal points within ~1 px); gradients render
+(colour-sampled); a real-world 166-layer SVG converts and renders.
 
 ## Task 1 — CLI, minimal parser, document scaffolding, straight-line paths
 
