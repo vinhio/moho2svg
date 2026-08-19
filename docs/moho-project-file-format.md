@@ -161,17 +161,17 @@ what is being skipped.
 | `width` / `height` | `1280×720`, `1920×1080` | Canvas size in pixels. **Used** — see [§ 4](#4-coordinate-system). |
 | `fps` | `24.0` | Frame rate. Not used: `--frame N` takes a frame number, not a time. |
 | `start_frame` / `end_frame` | `1`/`25`, `25`/`127`, `1`/`120`, `1`/`240` | Animation range. Note `start_frame` is not always `0`, while this tool's `--frame` default *is* `0`. |
-| `back_color` | `{r:234, g:234, b:234, a:255}` | Canvas background. **0–255 integers**, unlike style colours ([§ 5.2](#52-channel-types-and-val-element-shapes)). Not drawn — the exported SVG has a transparent background. |
-| `antialiasing` | `true` | Render flag. |
+| `back_color` | `{r:234, g:234, b:234, a:255}` | Canvas background. **0–255 integers**, unlike style colours ([§ 5.2](#52-channel-types-and-val-element-shapes)). Not drawn — the exported SVG has a transparent background. Probed inert (`docs/moho-field-probes.md`). |
+| `antialiasing` | `true` | Project-wide render-quality flag. Shares its flat name with the **per-layer** `MeshLayer.antialiasing` ([§ 6.4](#64-type-specific-fields)) — the two were probed TOGETHER (`tools/probe_field.py` matches by literal key name, not JSON path) and found inert combined; a null result cannot be attributed to one owner alone, see `schema/project.schema.json`'s own note. |
 | `depth_sort` / `distance_sort` | `false` | 3D sorting of layers. |
-| `depth_of_field`, `focus_distance`, `focus_range`, `focus_blur` | `false`, numbers | Camera depth-of-field. |
-| `noise_grain`, `pixelation` | `0.0` | Global render effects. |
-| `stereo_mode`, `stereo_separation` | `0`, number | Stereoscopic output. |
-| `global_render_style_fill_style`, `..._line_style`, `..._layer_style` | int (`0` in every one of the 19 sampled documents) | A document-wide style override applied at render time. **Correction:** an earlier revision of this document reported these as an empty string in the 5-file sample; direct inspection of the raw JSON shows the true value is the **integer `0`**, in the original 5 files too, not `""`. `schema/project.schema.json` types the field as `["string", "integer"]` precisely because the *value set this format allows* is not yet known to be closed to `0` — if a document ever sets a non-zero value, this tool would ignore it and could produce visibly wrong colours. | 
-| `global_render_style_minimize_randomness` | bool | Same override family. `false` throughout. |
-| `color_palette` | `"Basic Colors.png"` | Editor swatch palette. |
+| `depth_of_field`, `focus_distance`, `focus_range`, `focus_blur` | `false`, numbers | Camera depth-of-field. `depth_of_field` alone is inert on Bandit.mohoproj's own stored blur/distance/range values, but `focus_blur`/`focus_distance` each affect rendering once `depth_of_field=true` is set as a precondition; `focus_range` stayed inert even then (docs/moho-field-probes.md). |
+| `noise_grain`, `pixelation` | `0.0` | Global render effects. `noise_grain` must be written as an **integer** — a float value made Moho's headless render silently produce no output at all. `noise_grain=5` affects rendering. `pixelation` shares its flat name with the **per-layer** `LayerEffects.pixelation` ([§ 6.4](#64-type-specific-fields)); isolated from it (the two cannot be varied together — a value valid for one is the wrong JSON shape for the other and the combined document fails to render), this project-wide owner is inert while the per-layer owner affects rendering. |
+| `stereo_mode`, `stereo_separation` | `0`, number | Stereoscopic output. `stereo_mode` alone is inert; `stereo_separation` affects rendering once `stereo_mode=1` is set as a precondition. |
+| `global_render_style_fill_style`, `..._line_style`, `..._layer_style` | int (`0` in every one of the 19 sampled documents) | A document-wide style override applied at render time. **Correction:** an earlier revision of this document reported these as an empty string in the 5-file sample; direct inspection of the raw JSON shows the true value is the **integer `0`**, in the original 5 files too, not `""`. `schema/project.schema.json` types the field as `["string", "integer"]` precisely because the *value set this format allows* is not yet known to be closed to `0` — if a document ever sets a non-zero value, this tool would ignore it and could produce visibly wrong colours. Probed: `fill_style` and `line_style` are individually inert; `layer_style` affects rendering (docs/moho-field-probes.md). | 
+| `global_render_style_minimize_randomness` | bool | Same override family. `false` throughout. Probed inert. |
+| `color_palette` | `"Basic Colors.png"` | Editor swatch palette. Probed inert. |
 | `soundtrack` | str | Audio file reference. |
-| `extra_swf_frame`, `display_quality` | bool, int | Legacy export options. |
+| `extra_swf_frame`, `display_quality` | bool, int | Legacy export options. Both probed inert. |
 
 ---
 
@@ -311,9 +311,9 @@ keyframe at frame `0` in all 19 documents:
 | Key | `type` | Value seen | Meaning |
 |---|---|---|---|
 | `camera_track` | `Vec3` | `{0, 0, 3.732051}` in 18 of 19; `{0.232877, 0.481034, 3.732051}` in `Rabbit.animeproj` **(19-file finding — a real x/y camera pan, not the default)** | Camera position. The `z` value is the default camera distance. |
-| `camera_pan_tilt` | `Vec2` | `{0, 0}` in every document | Camera pan/tilt. |
+| `camera_pan_tilt` | `Vec2` | `{0, 0}` in every document | Camera pan/tilt. Forcing it to `{0.3, 0.3}` on Bandit.mohoproj affects rendering (docs/moho-field-probes.md) — a real, currently-unapplied camera field. |
 | `camera_zoom` | `Val` | `2.0` in 18 of 19; `1.413848` in `Rabbit.animeproj` | Camera zoom. **Correction:** an earlier revision of this document reported `0.0` from the 5-file sample; direct inspection shows the true value is `2.0` in every one of the original 5 files too, not `0.0`. Whether `2.0` is itself Moho's neutral/no-op zoom value, or a real non-default zoom this tool should be applying, is not decoded. |
-| `camera_roll` | `Val` | `0.0` in every document | Camera roll. |
+| `camera_roll` | `Val` | `0.0` in every document | Camera roll. Forcing it to `0.6` on Bandit.mohoproj affects rendering (docs/moho-field-probes.md) — a real, currently-unapplied camera field. |
 | `timeline_markers` | `String` | `""` in every document | Editor timeline annotations. |
 
 None of these are read by `moho2svg.py` (confirmed: no reference to
@@ -393,29 +393,29 @@ This is the important gap list: every field here changes what Moho draws.
 | ~~`layer_effects.alpha`~~ | `Val` channel | non-trivial on **139 leaf layers across 15 files** (11 of them animated) | **No longer in this list — decoded and applied.** The layer's own opacity. MEASURED as a plain linear blend: at 0.5 a layer lands on the exact midpoint of its 1.0 and 0.0 renders (mean error 0.13/255 over its own pixels), so it maps directly onto SVG `opacity` and Lottie's transform `o`. A *container's* own alpha is still **not** applied — three models were measured and the best still scored worse than ignoring it; 5 layers corpus-wide, each warned about. See [§ 6.3a](#63a-layer-opacity). |
 | ~~`blend_mode`~~ | int | `0` on 3,794 layers; `1` on 117, `2` on 49, `3` on 2 | **No longer in this list — decoded and applied.** See [§ 6.6](#66-blend_mode). |
 | ~~`layer_effects.visibility`~~ | `Bool` channel | non-trivial on **190 layers across 14 files** | **No longer in this list — decoded and applied.** The animated show/hide from the General tab's Compositing Effects group (manual ch. 12.02), which the manual states outright is "totally independent of the visibility box displayed in the layer list". A layer draws only when both are true — see `Layer.visible_at`. The earlier "`true` everywhere" reading was a 19-file artefact. |
-| `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | `Val` channels | `0.0` everywhere | Per-layer image effects. All off in the samples. |
+| `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | `Val` channels | `0.0` everywhere | Per-layer image effects. All off in the samples. `.pixelation` shares its flat name with the project-wide `project_data.pixelation` ([§ 3](#3-project_data)); isolated from it, THIS (per-layer) occurrence affects rendering — probed AFFECTS RENDER on Bandit.mohoproj (docs/moho-field-probes.md). `.blur`/`.noise`/`.threshold`/`.ambient_occlusion` were not probed. |
 | `layer_outline` | `{on, color, width}` | `on: false` everywhere | An extra outline stroked around the whole layer. |
 | `layer_shadow` | `{on, angle, blur, color, expansion, offset, threshold, noise_amp, noise_scale, clip_to_group}` | `on: false` everywhere | Drop shadow. |
 | `layer_shading` | `{on, angle, blur, color, contraction, offset, threshold, noise_amp, noise_scale}` | `on: false` everywhere | Inner shading. |
-| `perspective_shadow` | `{on, blur, color, scale, shear, threshold}` | `on: false` everywhere | Perspective shadow. |
+| `perspective_shadow` | `{on, blur, color, scale, shear, threshold}` | `on: false` everywhere | Perspective shadow. Its own `shear` (a `Val` channel, NOT the same field as `transforms.shear` below despite the shared name) probed inert with the effect itself off — a real effect gated behind `on=true` is not ruled out. |
 | `layer_color` | `{on, color}` | `on: false` everywhere | A flat colour override for the whole layer. |
-| `transforms.rotation_x`, `.rotation_y` | `Val` channels | `0.0` everywhere | 3D rotation. A 2D exporter cannot express these. |
-| `transforms.shear` | `Vec3` channel | `0` everywhere | Shear. Could be expressed in an SVG matrix, but is not. |
+| `transforms.rotation_x`, `.rotation_y` | `Val` channels | `0.0` everywhere | 3D rotation. A 2D exporter cannot express these. Both probed AFFECTS RENDER on Bandit.mohoproj (docs/moho-field-probes.md) — real, currently-unapplied fields. |
+| `transforms.shear` | `Vec3` channel | `0` everywhere | Shear. Could be expressed in an SVG matrix, but is not. Shares its flat name with `perspective_shadow.shear` above; isolated from it, THIS occurrence probed AFFECTS RENDER (docs/moho-field-probes.md). |
 | `transforms.translation.z`, `.scale.z` | float | defaults | Layer depth. |
-| `transforms.following`, `.physics_nudge` | channels | defaults | Path-following offset and physics displacement. |
+| `transforms.following`, `.physics_nudge` | channels | defaults | Path-following offset and physics displacement. Both probed inert on Bandit.mohoproj — `following` is confounded by `follow_curve = -1` (see below) in every sampled document, and `physics_nudge` by `physics.enabled = false` in every sample; neither was retested with its gating field forced on. |
 | `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: false` | Motion blur. Not meaningful for a single-frame export anyway. |
 | `distortion_layer_uuid` | str | `""` in all 827 layers that have it; **absent in the `1021` file** | Points at another layer used as a distortion mesh — the most likely storage hook for Smart Warp. See [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp). |
-| `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`, defaults | "Follow path" rigging. |
+| `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`, defaults | "Follow path" rigging. `follow_curve` is `-1` ("no curve selected") in **every** sampled document corpus-wide, with no exception found — so `follow_layer_uuid`/`follow_bending`/`following` above can only be probed under that one (feature-disabled) configuration; all three came back inert there (docs/moho-field-probes.md). `rotate_to_follow` was not probed. |
 | `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | disabled | 2D physics simulation. |
-| `scale_compensation`, `scale_normalization` | bool/float | defaults | How a layer's stroke width reacts to scaling. Relevant to [§ 7.6](#76-stroke-width) if ever non-default. |
+| `scale_compensation`, `scale_normalization` | bool/float | defaults | How a layer's stroke width reacts to scaling. Relevant to [§ 7.6](#76-stroke-width) if ever non-default. Both probed inert on Bandit.mohoproj, whose ancestor scale is 1.0 throughout — neither was retested under an actual non-1.0 ancestor scale. |
 | `layer_ordering` | `String` channel | `""` | Animated child reordering (with `animated_layer_order` on `BoneLayer`). Would change draw order per frame. |
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |
-| `layer_ref_*` (`uuid`, `path`, `fileref`, `mod_date`, `same_doc`) | mixed | empty | Linked/referenced external layer. A document using these would be missing artwork here. |
+| `layer_ref_*` (`uuid`, `path`, `fileref`, `mod_date`, `same_doc`) | mixed | empty | Linked/referenced external layer. A document using these would be missing artwork here. All five probed inert on Bandit.mohoproj — see [§ 11.4](#114-action_refs-and-layercomps). |
 | `camera_immune` | bool | `true` on 6 layers in 3 files | **Now applied** — the layer projects through the DEFAULT camera, so it stays put on screen while the camera moves (manual ch. 12.02, "Immune to camera movements"). Inherited by descendants. See [§ 9](moho-animation-and-transform.md#9-camera-animation) of the animation doc. |
-| `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. |
+| `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. `dof_immune` probed inert (depth_of_field is itself off in the probed document). `face_camera` probed AFFECTS RENDER; `face_camera_mode` is inert with `face_camera` left off but AFFECTS RENDER once `face_camera=true` is set as a precondition. `3d_mode` was not probed here (see the 3d_mode/3d_shading_density finding in docs/moho-field-probes.md from an earlier task). |
 | `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (648 instances), always at identical defaults | 3D-extrusion rendering settings, entirely inert in every sample because `3d_mode` is `0` everywhere. |
-| `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. |
-| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `modification_date` | mixed | — | Editor state, or (for `render_only`) an undecoded render toggle that is off in every sample. `mask_expansion` moved out of this list — decoded and applied, see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes). |
+| `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. Probed inert on Bandit.mohoproj. |
+| `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `modification_date` | mixed | — | Editor state, or (for `random_num`/`render_only`) an undecoded render toggle. Both probed inert on Bandit.mohoproj under this file's default probe settings. `mask_expansion` moved out of this list — decoded and applied, see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes). |
 | `metadata`, `script_data` | obj | see [§ 6.4](#64-type-specific-fields) | Editor/script bookkeeping bags, key sets now enumerated. |
 
 ### 6.3a Layer opacity
@@ -472,6 +472,9 @@ hidden by either visibility mechanism.
   strokes and do not.
 - `gap_filling`, `antialiasing` (`exclude_lines_from_mask` is decoded but
   deliberately not applied — see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes)).
+  `antialiasing` here shares its flat name with the project-wide
+  `project_data.antialiasing` ([§ 3](#3-project_data)) — see that entry for
+  the combined-probe result and its caveat.
 - `triangulated`, `squashable_deformer`, `frame_zero_deformer` — three
   deformer flags that exist **only in the `1045` format generation** (all 21
   `MeshLayer`s of `Bandit.mohoproj`; absent from every `1038` and `1021`
@@ -509,7 +512,9 @@ layer `Happy Dance`) — an earlier revision of this document claimed `1`
 everywhere, which was too strong. Its meaning is not decoded, and this tool
 never branches on it. Also
 carries `grandpa_bone` (lets bones bind layers nested deeper than direct
-children), `flexi_bone_elbow`, `animated_layer_effects` — none used. See
+children), `flexi_bone_elbow`, `animated_layer_effects` — none used.
+`flexi_bone_elbow` probed inert on Bandit.mohoproj (docs/moho-field-probes.md).
+See
 `layer_ordering`/`animated_layer_order` and `gravity`/`wind` below, both
 shared with `GroupLayer` but shaped differently.
 
@@ -1584,6 +1589,20 @@ show/hide sets of layers, used to export variants of one document).
 It most plausibly holds references to actions defined outside this document,
 matching the `layer_ref_*` fields on layers, but that is a guess, not a
 finding. Neither is read by this tool.
+
+Both were probed on `Bandit.mohoproj` with a single synthesised element (the
+manual's Appendix F `{name, uuid, layer_ids[]}` shape for `layercomps`, a
+generic placeholder object for `action_refs`, since no real document supplies
+either): both **inert**. Editing either array is therefore safe even though
+neither's real-world element grammar has ever been observed in the corpus
+(docs/moho-field-probes.md).
+
+The five `layer_ref_*` fields on every layer (`layer_ref_fileref`,
+`layer_ref_path`, `layer_ref_uuid`, `layer_ref_same_doc`, `layer_ref_mod_date`)
+are present everywhere with empty/zero defaults and are the plausible storage
+hook for referencing another (possibly external) document's layer — no
+sampled document uses them non-trivially. All five probed inert on
+Bandit.mohoproj (docs/moho-field-probes.md).
 
 ---
 
