@@ -75,3 +75,50 @@ Findings A-D — this file is an append-only log of every probe actually run,
 not a deduplicated summary, matching `tools/probe_field.py`'s own append
 behaviour.
 | `DocState_gridSize` | `40` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `action_refs` | `[{"probe": true}]` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `antialiasing` | `false` | 22 | Bandit.mohoproj | 25 | none | inert |
+| `back_color` | `{"r": 10, "g": 20, "b": 30, "a": 255}` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `camera_pan_tilt` | `{"type": "Vec2", "ref": false, "mute": false, "when": [0], "val": [{"x": 0.3, "y": 0.3}], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `camera_roll` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.6], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `depth_of_field` | `true` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `display_quality` | `0` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `extra_swf_frame` | `true` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `focus_blur` | `0.9` | 1 | Bandit.mohoproj | 25 | `depth_of_field=true` x1 | **AFFECTS RENDER** |
+| `focus_distance` | `10.0` | 1 | Bandit.mohoproj | 25 | `depth_of_field=true` x1 | **AFFECTS RENDER** |
+| `focus_range` | `5.0` | 1 | Bandit.mohoproj | 25 | `depth_of_field=true` x1 | inert |
+| `global_render_style_fill_style` | `1` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `global_render_style_layer_style` | `1` | 1 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `global_render_style_minimize_randomness` | `false` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `layercomps` | `[{"name": "probe", "uuid": "11111111-1111-1111-1111-111111111111", "layer_ids": []}]` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `stereo_mode` | `1` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `stereo_separation` | `0.5` | 1 | Bandit.mohoproj | 25 | `stereo_mode=1` x1 | **AFFECTS RENDER** |
+| `dof_immune` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `face_camera` | `true` | 25 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `face_camera_mode` | `0` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `flexi_bone_elbow` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `follow_bending` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `follow_curve` | `0` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `follow_layer_uuid` | `"99999999-9999-9999-9999-999999999999"` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `following` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.4], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `layer_ref_fileref` | `{"relativeTo": "Absolute", "path": "/nonexistent/probe.png"}` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `layer_ref_mod_date` | `123456` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `layer_ref_path` | `"probe.png"` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `layer_ref_same_doc` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `layer_ref_uuid` | `"88888888-8888-8888-8888-888888888888"` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `physics_nudge` | `{"type": "Vec2", "ref": false, "mute": false, "when": [0], "val": [{"x": 0.3, "y": 0.3}], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `quality_flags` | `0` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `random_num` | `999999` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `render_only` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `rotation_x` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [30.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `rotation_y` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [30.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `scale_compensation` | `false` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `scale_normalization` | `3.0` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `antialiasing` | `false` | 22 | Bandit.mohoproj | 25 | none | inert |
+| `noise_grain` | `5` | 1 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `pixelation` | `20` | 1 | .probe_fixture_pixelation_projectonly.mohoproj | 25 | none | inert |
+| `pixelation` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[20.0],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 25 | .probe_fixture_pixelation_layeronly.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `shear` | `{"type":"Vec3","ref":false,"mute":false,"when":[0],"val":[{"x":0.4,"y":0.0,"z":0.0}],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 25 | .probe_fixture_shear_transformsonly.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `shear` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[0.6],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 25 | .probe_fixture_shear_pshadowonly.mohoproj | 25 | none | inert |
+| `color_palette` | `"Nonexistent Palette.png"` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `global_render_style_line_style` | `1` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `face_camera_mode` | `0` | 25 | Bandit.mohoproj | 25 | `face_camera=true` x25 | **AFFECTS RENDER** |
