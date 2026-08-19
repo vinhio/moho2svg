@@ -1220,6 +1220,20 @@ them exists in `1038` or `1021`. That is consistent with a
 deformation-mesh feature arriving in the same release family as those files,
 and it means an older reader will never see them.
 
+**M1.5 batch 5 (2026-08):** the table above's `false`/`true` "on all 21"
+values are specific to that single sample file (`Bandit.mohoproj`), not
+universal. A 76-document corpus scan of every `1045` document found
+`triangulated` true on 16 of 297 sites across 5 documents (`Boar.mohoproj`,
+`Lute.mohoproj`, `Night_Boy.mohoproj`, `Spacewoman.mohoproj`,
+`Whale.mohoproj`) and `frame_zero_deformer` false on 140 of 248 sites across
+all 10 `1045` documents (Bandit's own 21 sites do hold the values shown
+above). `squashable_deformer` remains false in every sample checked so
+far. Direct Moho-render probes (forcing each field to its minority value on
+a document where the OTHER value is genuinely authored) found both
+`triangulated` and `frame_zero_deformer` inert on the frames tested — see
+`schema/layer.schema.json`'s `MeshLayer` $def and
+`docs/moho-project-file-format.md` § 6.4 for the exact fixtures.
+
 Related but separate: `parent_bone == -3` on 9 `ImageLayer` instances, always
 with a non-empty `flexi_bone_subset` ([§ 2.5](#25-how-a-layer-attaches-to-the-skeleton)).
 That is a raster deformation mode, not Smart Warp, and is equally undecoded.

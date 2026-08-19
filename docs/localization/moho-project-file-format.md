@@ -419,17 +419,17 @@ Moho vẽ.
 | `layer_effects.alpha` | channel `Val` | `1.0` trên 535 layers, **`0.6` trên 9 layers** | Opacity layer. **Cái này thực sự được các mẫu khai thác** — chín layer đáng lẽ render ở 60% mà lại render hoàn toàn đặc. |
 | `blend_mode` | int | `0` trên 528 layers, **`1` trên 16 layers** | Blend mode layer. `0` chắc là Normal; `1` chưa giải mã. 16 layers hòa trộn khác trong Moho so với trong SVG. |
 | `layer_effects.visibility` | channel `Bool` | `true` ở mọi nơi | show/hide **hoạt ảnh**, độc lập với cờ tĩnh `visible`. Sẽ cho phép một layer xuất hiện giữa hoạt ảnh. |
-| `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | các channel `Val` | `0.0` ở mọi nơi | Các effect ảnh theo layer. Tất cả tắt trong các mẫu. |
+| `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | các channel `Val` | `0.0` ở mọi nơi | Các effect ảnh theo layer. **Đã sửa:** `.blur` không phải `0.0` khắp nơi (79 occurrence khác `0.0` trên 25 tài liệu) và AFFECTS RENDER; `.pixelation` cũng AFFECTS RENDER. **M1.5 batch 5:** `.noise` nay đã đo — trơ, ép `5.0` trên `Bandit.mohoproj` (không có tài liệu nào trong kho dùng giá trị khác `0.0`). Xem bản gốc tiếng Anh. |
 | `layer_outline` | `{on, color, width}` | `on: false` ở mọi nơi | Một đường viền thêm viền quanh toàn bộ layer. |
-| `layer_shadow` | `{on, angle, blur, color, expansion, offset, threshold, noise_amp, noise_scale, clip_to_group}` | `on: false` ở mọi nơi | Drop shadow. |
-| `layer_shading` | `{on, angle, blur, color, contraction, offset, threshold, noise_amp, noise_scale}` | `on: false` ở mọi nơi | Shading trong. |
+| `layer_shadow` | `{on, angle, blur, color, expansion, offset, threshold, noise_amp, noise_scale, clip_to_group}` | `on: false` ở mọi nơi | Drop shadow. **Đã sửa (M1.4a):** `on` là `true` thật trên 36/76 tài liệu. **M1.5 batch 5:** `angle`/`expansion`/`clip_to_group` nay đã đo — cả ba **ảnh hưởng đến render** trên `Bandit.mohoproj` (khung `on` ép `true`), giống `blur`/`threshold` đã đo trước đó. Xem bản gốc tiếng Anh. |
+| `layer_shading` | `{on, angle, blur, color, contraction, offset, threshold, noise_amp, noise_scale}` | `on: false` ở mọi nơi | Shading trong. **Đã sửa (M1.4a):** `on` là `true` thật trên 14/76 tài liệu. **M1.5 batch 5:** `angle`/`contraction` nay đã đo — cả hai trơ, giống mọi trường khác của `LayerShading` đã đo trên `Bandit.mohoproj` (chưa đo lại trên một trong 14 tài liệu thật sự bật hiệu ứng này). Xem bản gốc tiếng Anh. |
 | `perspective_shadow` | `{on, blur, color, scale, shear, threshold}` | `on: false` ở mọi nơi | Shadow phối cảnh. |
 | `layer_color` | `{on, color}` | `on: false` ở mọi nơi | Một override màu phẳng cho toàn bộ layer. |
 | `transforms.rotation_x`, `.rotation_y` | các channel `Val` | `0.0` ở mọi nơi | Rotation 3D. Một exporter 2D không thể biểu diễn các giá trị này. |
 | `transforms.shear` | channel `Vec3` | `0` ở mọi nơi | Shear. Có thể biểu diễn trong một ma trận SVG, nhưng không làm. |
 | `transforms.translation.z`, `.scale.z` | float | các mặc định | Độ sâu layer. |
 | `transforms.following`, `.physics_nudge` | các channel | các mặc định | Offset theo-dường-và dịch chuyển physics. |
-| `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: false` | Motion blur. Dù sao cũng vô nghĩa cho một xuất một-frame. |
+| `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: false` | Motion blur. **Đã sửa (M1.4a/M1.5 batch 5):** dòng này từng nói cả hai điều trên đều sai — `on` là `true` thật trên 2 tài liệu, và motion blur THẬT SỰ ảnh hưởng đến một render một-frame. `frames`/`frame_percentage`/`extended_frames`/`sub_frames` ảnh hưởng đến render; `radius`/`skip`/`alpha_start`/`alpha_end` thì trơ, đo trên cùng cửa sổ `on: true` thật của `Snow-girl-cut51.mohoproj` (khung 175). Xem bản gốc tiếng Anh và `schema/layer.schema.json`'s `MotionBlur`. |
 | `distortion_layer_uuid` | str | `""` trong tất cả 827 layers có nó; **vắng mặt trong file `1021`** | Trỏ tới một layer khác được dùng như mesh biến dạng — móc lưu trữ khả dĩ nhất cho Smart Warp. Xem [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp). |
 | `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`, các mặc định | Rigging "follow path". |
 | `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | bị vô hiệu | Mô phỏng physics 2D. |
@@ -464,6 +464,20 @@ Moho vẽ.
   [`moho-rigging-and-deformation.md` § 5.2](moho-rigging-and-deformation.md#52-các-file-thực-sự-cho-thấy-gì).
 - `3d_mode` (luôn `0`) và `3d_options` — xem `Mesh3DOptions` bên dưới.
 - `metadata` — xem bên dưới.
+
+> **Cập nhật M1.5 batch 5 (2026-08).** Cả chín trường "sketchy lines" ở
+> trên (`noisy_lines`, `noisy_shapes`, `extra_sketchy`, `extra_lines`,
+> `noise_interval`, `animated_noise`, `gap_filling`, `triangulated`,
+> `frame_zero_deformer`) nay đã được đo bằng render thật của Moho — không
+> còn đồng loạt trơ như mô tả cũ. `noisy_shapes`, `animated_noise` và
+> `noise_interval` **CÓ ảnh hưởng đến render** khi đo trên tài liệu thực sự
+> dùng cờ đó (`DonkeyAndMan.mohoproj`, `Others/TargetBone.animeproj`);
+> `noisy_lines`, `extra_sketchy`, `extra_lines`, `triangulated`,
+> `frame_zero_deformer`, `gap_filling` vẫn trơ. Số liệu "false/false/true
+> khắp nơi" cho `triangulated`/`frame_zero_deformer` ở trên cũng đã sai —
+> quét lại 76 tài liệu tìm thấy cả hai giá trị thật trên nhiều tài liệu.
+> Xem bản gốc tiếng Anh (mục tương ứng) và `schema/layer.schema.json`'s
+> `MeshLayer` để biết chi tiết đầy đủ.
 
 **`Mesh3DOptions`** (`MeshLayer.3d_options`) — **(phát hiện từ 19 file.)** Mười
 cài đặt 3D-extrusion bị khóa bởi `3d_mode`, hiện diện trên **từng `MeshLayer`
@@ -524,6 +538,19 @@ tài liệu không hề dùng physics — mang `wind.strength = 100.0` trên **c
 hiệu có gì đang được mô phỏng. Cờ `wind_dynamics` trên từng bone nhiều khả
 năng mới là công tắc đăng ký (false trên mọi bone của cả hai tài liệu 1045),
 nhưng điều đó **chưa được giải mã**. Không trường nào được `moho2svg.py` đọc.
+
+> **Cập nhật M1.5 batch 5.** Đoạn trên đã lạc hậu so với bản gốc tiếng Anh:
+> `wind_dynamics` nay ĐÃ được đọc bởi cả hai exporter (để cảnh báo và cho cờ
+> `--wind-dynamics` thử mô phỏng lò xo, dù được XÁC NHẬN KHÔNG tái tạo đúng
+> hiệu ứng thật của Moho — xem mục WIND EVIDENCE trong `moho2svg.py`).
+> Trường `direction` dưới cả `gravity` và `wind` nay đã đo trực tiếp bằng
+> render thật của Moho: dựng lại đúng tiền đề mà bằng chứng WIND EVIDENCE
+> từng dùng (rig tổng hợp không lưu trong git) nhưng lần này trên
+> `Bandit.mohoproj` — tài liệu thật đã sẵn có `wind.strength = 100.0` cùng
+> giá trị turbulence giống `DarkMan.mohoproj` — cả `gravity.direction` lẫn
+> `wind.direction` đều **trơ**, xác nhận lại phát hiện WIND EVIDENCE trên
+> một tài liệu thật thay vì chỉ trên rig cũ. Xem bản gốc tiếng Anh để biết
+> chi tiết đầy đủ.
 
 **`SwitchLayer`** — `switch_keys` (một channel `String` có các mục `val` là
 **tên các layer con**) chọn con đang hoạt động; được dùng. Không dùng:
@@ -1553,10 +1580,16 @@ trường có *giá trị* được quan sát thấy nhưng *ý nghĩa* chưa đ
 - Các trường cel-shading `toon_*` của `ImageLayer`, `sampling_mode`,
   `quality_level` — một toàn bộ loại layer không được mô hình hóa chút nào.
   **(Phát hiện từ 19 file.)** ([§ 6.5](#65-imagelayer-phát-hiện-từ-19-file))
-- Nội bộ `SS_Crayon`/`SS_Soft`/`SS_Shadow`/`SS_Texture2` — `rand_seed`,
-  `clear_background`, `reduce_randomization`, `fill_mode`, và sự tương tác
+- Nội bộ `SS_Soft`/`SS_Shadow`/`SS_Texture2` — `fill_mode`, và sự tương tác
   giữa `fill_style` và `fill_style2` của một shape khi cả hai hiện diện.
-  **(Phát hiện từ 19 file.)** ([§ 8.3](#83-các-biến-thể-effect-style-phát-hiện-từ-19-file))
+  **(Phát hiện từ 19 file.)** ([§ 8.3](#83-các-biến-thể-effect-style-phát-hiện-từ-19-file)).
+  **Cập nhật M1.5 batch 5:** `SS_Crayon`'s `rand_seed`/`clear_background`/
+  `reduce_randomization` không còn trong danh sách này — cả ba đã đo trên
+  `Snow-girl-cut12.mohoproj` (một shape thật sự dùng Crayon): đều trơ. Xem
+  bản gốc tiếng Anh. Ngoài ra `SS_Halo` (`halo_radius`/`blur_radius`/
+  `halo_color`/`halo_only`, đều ẢNH HƯỞNG ĐẾN RENDER) và `SS_Shaded`
+  (`angle`/`shadow_only`, cũng ẢNH HƯỞNG ĐẾN RENDER) — hai effect được phát
+  hiện ở lần quét 46-file sau tài liệu gốc này — cũng đã đo trong cùng đợt.
 - Các công tắc boolean `g_<number>` và `psd_layers` trong túi `metadata`
   riêng của một layer. **(Phát hiện từ 19 file.)** ([§ 6.4](#64-các-trường-riêng-theo-loại))
 - **Smart Warp** — một toàn bộ tính năng biến dạng Moho **không có biểu diễn
