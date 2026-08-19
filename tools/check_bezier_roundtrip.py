@@ -99,7 +99,13 @@ def check_document(path):
 def main():
     targets = sys.argv[1:] or sorted(
         os.path.join(MOHO_DIR, f) for f in os.listdir(MOHO_DIR)
-        if f.endswith((".mohoproj", ".animeproj"))
+        # Dot-prefix guard (M1.4a fix round 1, matching mohoedit.iter_documents'
+        # own): a killed tools/probe_field.py leaves a stray
+        # ".probe_*.mohoproj" beside the real document it was twinning, and
+        # this walk (unlike the shared helper) does not go through
+        # iter_documents at all, so it needs the same guard independently.
+        # See mohoedit.iter_documents' own docstring for the full incident.
+        if not f.startswith(".") and f.endswith((".mohoproj", ".animeproj"))
     )
     failures = 0
     for path in targets:

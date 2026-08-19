@@ -4520,8 +4520,15 @@ class Mesh:
         authoritative enough that it has now been investigated twice.
 
         NOT handled: a mesh with `anim_shape_order` true, i.e. a z-order the
-        animator ANIMATED. It is false on all 614 meshes here, so nothing
-        exercises it and no guess is made about which frame's order to use.
+        animator ANIMATED. It is true on 14 of 4,969 corpus meshes across 7
+        documents (all `Snow-girl/Snow-girl-cut*.mohoproj`: cut7, cut8,
+        cut10, cut11, cut12, cut14, cut51 - see schema/mesh.schema.json and
+        docs/moho-project-file-format.md section 7.1 for the M1.4a corpus
+        scan), so it is not unconditionally false - but nothing in this
+        repository consumes `shape_order` even where `anim_shape_order` is
+        true (this method itself always returns `self.shapes` in file
+        order, per the rest of this docstring), so no guess is made about
+        which frame's order to use.
         """
         return self.shapes
 

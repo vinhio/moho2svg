@@ -80,12 +80,31 @@ def iter_documents(moho_dir: typing.Optional[str] = None) -> typing.Iterator[str
     "did I verify anything real" check stays next to its own reporting, so a
     future gate added on top of this helper does not silently inherit an
     exemption from that doctrine by omission.
+
+    DOT-PREFIXED FILENAMES ARE EXCLUDED (M1.4a fix round 1). No legitimate
+    corpus document is ever dot-prefixed. This guard exists because
+    `tools/probe_field.py`'s `make_twin()` deliberately writes its temp twin
+    document BESIDE the real one it is probing (`.probe_<tag>_<random>...`,
+    see that function's own docstring for why -- relative `ImageLayer`
+    filerefs need to resolve against the real document's directory), cleaned
+    up in a `finally` block on every normal exit path. A hard kill
+    (`SIGKILL`) of that process skips the `finally` block entirely, so a
+    stray `.probe_*.mohoproj` can survive in `moho/` and would otherwise be
+    silently walked here as if it were a real corpus document -- exactly
+    what happened once already (a killed orchestration run left two such
+    files behind, inflating this function's own count from 76 to 78 and
+    corrupting one `make check-lottie`/`check-roundtrip` pass before it was
+    caught by eye, not by any gate). The same guard incidentally also
+    excludes macOS AppleDouble shadow files (`._Name.mohoproj`), a second,
+    independent reason to exclude anything dot-prefixed.
     """
     if moho_dir is None:
         moho_dir = os.path.join(_REPO_ROOT, "moho")
     found = []
     for dirpath, _dirnames, filenames in os.walk(moho_dir):
         for fn in filenames:
+            if fn.startswith("."):
+                continue
             if fn.endswith(CORPUS_EXTENSIONS):
                 found.append(os.path.join(dirpath, fn))
     yield from sorted(found)
