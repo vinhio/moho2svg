@@ -348,7 +348,70 @@ Counts below are across all 19 sampled documents.
 | `SwitchLayer` | 17 | Children are alternatives; only one shows at a time. | **yes** |
 | `ImageLayer` | 15 | **(19-file finding, not in the original 5-file sample.)** A raster image/movie/PSD-import layer — see [§ 6.5](#65-imagelayer-19-file-finding). | **no** — silently dropped |
 | `PatchLayer` | 12 | No mesh of its own — reuses another layer's mesh ([§ 12](#12-patch-layers)). | **yes**, resolved |
-| anything else | 0 in these 19 files | Audio, particle, note, 3D layers etc. are not modelled. | no |
+| anything else | 0 in these 19 files | Audio, particle, note, 3D layers etc. are not modelled — see below for `ParticleLayer`'s own count in the full 76-document corpus. | no |
+
+**`ParticleLayer` (M1.5 batch 3, 76-document corpus finding).** Absent from
+the original 19-file sample, but real elsewhere: 39 objects across 24
+documents (`Gathered-01Intro2.mohoproj`, `Gathered-02Wire2.mohoproj`, 19 of
+the 22 `Snow_wars/*.moho` episodes, `TheNutcrackerBallet/The Nutcracker
+Ballet.moho`, `metamorphosis/Scene 2.moho`, `metamorphosis/Scene 5.moho`) —
+sprays copies of its own sub-layers outward from its origin (manual ch.
+11.11, Particles tab at 12.11). Still **not rendered by either exporter**
+(unsupported-layer warning, drawn as nothing), but its 18 single-owner
+fields (`accel_angle`, `accel_rate`, `damping`, `evenly_spaced`,
+`free_floating`, `num_particles`, `orient_particles`, `particle_activation`,
+`particle_lifetime`, `preview_particles`, `random_start_time`, `seed`,
+`source_shape`, `start_dir`, `start_full`, `start_spread`,
+`use_base_as_source`, `velocity_spread`) plus its own `velocity` (shared,
+unrelated, with the rigid-body `Physics.velocity` — see below) are now
+`EDITABLE`: each was probed against Moho 14.4's own headless render
+(`tools/probe_field.py`), mostly on `Gathered-01Intro2.mohoproj` at frame 210
+(inside its `particle_activation` window `[194,201]`, with `particle_lifetime`
+= 24 so the emitted particles are still alive and moving), 15 of 19 AFFECTING
+RENDER and 4 (`free_floating`, `preview_particles`, `start_full`,
+`use_base_as_source`) inert — see each field's own entry in
+`schema/layer.schema.json`'s `ParticleLayer` for the exact probe row and, for
+the inert ones, the plausible (not fully confirmed) reason. Forcing
+`num_particles` to `300` or `particle_lifetime` to `4` or `evenly_spaced` to
+`true` on `Gathered-01Intro2.mohoproj` each **reproducibly crashed Moho's own
+headless renderer** (`SIGSEGV`) — a real defect in Moho itself on that
+specific document/value combination, not a probe artefact; all three fields
+were still measured cleanly by retrying on a second real-usage document
+(`Snow_wars/01 opening.moho` for the latter two, a milder `50` for
+`num_particles`). Two fields — `source_shape` and `particle_activation` — were
+wrongly described by an earlier plan as constant/single-valued; a corpus scan
+found 8 and 4 distinct values respectively (`particle_activation` is
+genuinely animated on 3 of the 24 documents, not always a static "on").
+
+**`velocity`/`density` are each declared under TWO unrelated `$defs`, both
+now resolved the `through_alpha` way ([§ 8.4](#84-gradients)).**
+`ParticleLayer.velocity` (particle emission speed) and `Physics.velocity`
+(rigid-body initial linear velocity, `LayerCommon.physics`, inherited by
+every layer) share a flat name purely by coincidence — confirmed separate
+subsystems, each probed independently (isolating one owner's occurrences
+from the other's, since `tools/probe_field.py` matches by flat key name
+across the whole document): `ParticleLayer.velocity` AFFECTS RENDER forced to
+`10.0` on `Gathered-01Intro2.mohoproj` (frame 210); `Physics.velocity`
+AFFECTS RENDER forced to `{500.0,-500.0}` on `WhatIsBone.animeproj` (frame
+60, `enable_physics` forced true document-wide — the same precondition the
+rest of that family needs, established in M1.5 batch 2). Likewise
+`Crayon.density` (crayon fill-texture graininess, `style.schema.json`) and
+`Physics.density` (rigid-body mass) share a flat name: `Physics.density`
+AFFECTS RENDER forced to `1000.0` on the same `WhatIsBone.animeproj` fixture;
+`Crayon.density` (26 occurrences across 8 documents, all as an *inline*
+`fill_style` rather than a named style) came back **inert** even at an
+extreme `0.01` (vs. its own stored `1.0`) on `OffsetBoneTool.animeproj`,
+isolated from `Physics.density` the same way — plausibly because the same
+shapes' own `line_width` (this style's own field for the crayon texture's
+stroke-like thickness, not its graininess) sits at `0.001852`, leaving too
+little visible crayon texture for density to change; not conclusively
+resolved. Both keys register `EDITABLE` on both owners (a real result either
+way, `AFFECTS RENDER` or `inert`, per this project's `probe_field.py`
+convention), so — unlike `through_alpha`, whose second owner had no writer
+at all and stayed `UNKNOWN` — neither needed an
+`x-moho-registry-conflict-waived` waiver: `tools/check_field_coverage.py`'s
+rule 5 only fires when a name's occurrences DISAGREE on disposition, and
+here they don't.
 
 ### 6.2 Common fields that affect rendering and **are** used
 
@@ -408,7 +471,7 @@ This is the important gap list: every field here changes what Moho draws.
 | `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: true` on real occurrences in 2 of 76 documents (`SlickObjectTransition.mohoproj`, `Snow-girl-cut51.mohoproj`) | Motion blur. **Correction (M1.4a):** an earlier revision of this row claimed both "`on: false`" everywhere and "not meaningful for a single-frame export anyway" — BOTH are false. Flipping Snow-girl-cut51.mohoproj's own genuinely-active block (`on: true`, layer 6/7) to off at frame 175 (inside the animated `[169, 187)` window) AFFECTS RENDER — motion blur DOES change Moho's own single-frame headless PNG output. Its own `alpha_start`/`alpha_end` sub-fields, probed the same non-confounded way (real `on: true`, only the sub-field's value changed), came back inert — see their own entries in `schema/layer.schema.json`'s `MotionBlur`. Now `EDITABLE` for the compound key itself (docs/moho-field-probes.md). |
 | `distortion_layer_uuid` | str | `""` in all 827 layers that have it; **absent in the `1021` file** | Points at another layer used as a distortion mesh — the most likely storage hook for Smart Warp. See [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp). |
 | `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`/`0`, defaults | "Follow path" rigging. **Correction (fix round 1):** an earlier revision of this document claimed `follow_curve` is `-1` in every sampled document with no exception — that is wrong. A direct scan of all 76 corpus documents found `follow_curve` takes **two** values, `{-1, 0}`, not one: it is `0` on layers in `Gathered-00intro.mohoproj`, `Gathered-01Intro2.mohoproj`, `Gathered-02Wire2.mohoproj` and four `metamorphosis/Scene *.moho` files. In particular, the layer in `Gathered-01Intro2.mohoproj` that actually carries a real `follow_layer_uuid` (`layers[7]/layers[1]`, name `Butter`, uuid `b9d35e03-0404-4672-9719-d213e82fad57`, targeting `870b500e-c8f6-45b9-ab17-38db1de3b6b9`) has `follow_curve = 0`, NOT `-1` — so this is not confirmed to be an inert/feature-disabled configuration; whether `0` is a real curve selection or a different "unset" sentinel is unresolved, not ruled out. The `follow_layer_uuid`/`follow_bending`/`following` probes in this milestone were run on `Bandit.mohoproj`, where `follow_curve` genuinely is `-1` on every layer, so those specific inert results stand on their own terms — but the broader claim that no corpus document could exercise the feature does not hold, and `Gathered-01Intro2.mohoproj` remains an open candidate for a follow-up probe. `rotate_to_follow` was not probed. |
-| `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | constant/default on every sample document | 2D rigid-body physics simulation (Layer Settings > Physics tab, manual ch. 12.14, Pro only — a different subsystem from `Bone.gravity`/`.wind`, the wind/gravity SPRING dynamics covered under "Physics/dynamics" in [§ 9](#9-bones-and-skinning)). **M1.5 batch 2 (2026-08-20):** never exercised at rest by any of the 76 corpus documents (`enable_physics` constant `false` on all 615 sites across the 68 documents that carry it; every field of the per-layer `physics` object — `$defs/Physics` in `schema/layer.schema.json` — likewise constant, `enabled`/`static` aside, which are already `MODELLED`), but genuinely LIVE once switched on: forcing `enable_physics` alone from `false` to `true` (no other field touched) already **AFFECTS RENDER**, confirmed independently on two documents (`Bandit.mohoproj`, `WhatIsBone.animeproj`) — Moho's headless single-frame `-f PNG` renderer re-simulates the whole rigid-body physics state for whatever frame is asked, not merely a keyframe interpolation. With `enable_physics` forced `true` as a precondition, `use_baked_physics`, `sleeping`, `pivot` and `force_field` each independently **AFFECT RENDER** too; `friction`/`restitution`/`respawn` are inert under the same precondition (a real, non-confounded negative, since sibling fields in the identical fixture do show an effect — plausibly because this fixture's bones never collide with anything, so there is nothing for contact-only fields to act on); `enable_motor`/`motor_speed`/`motor_torque` are inert under `enable_physics` alone but **AFFECT RENDER** once `pivot` (a fixed hinge to motor around) is added as a further precondition; `force_field_vector` stays inert even with `force_field` forced on and its own vector reversed — one of this codebase's other switch-fires/parameter-doesn't findings (`motion_blur.alpha_start`/`.alpha_end`, above). All ten `$defs/Physics` fields plus `enable_physics`/`use_baked_physics` are now `EDITABLE` — see each field's own entry in `schema/layer.schema.json` for the exact probe rows and preconditions. |
+| `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | constant/default on every sample document | 2D rigid-body physics simulation (Layer Settings > Physics tab, manual ch. 12.14, Pro only — a different subsystem from `Bone.gravity`/`.wind`, the wind/gravity SPRING dynamics covered under "Physics/dynamics" in [§ 9](#9-bones-and-skinning)). **M1.5 batch 2 (2026-08-20):** never exercised at rest by any of the 76 corpus documents (`enable_physics` constant `false` on all 615 sites across the 68 documents that carry it; every field of the per-layer `physics` object — `$defs/Physics` in `schema/layer.schema.json` — likewise constant, `enabled`/`static` aside, which are already `MODELLED`), but genuinely LIVE once switched on: forcing `enable_physics` alone from `false` to `true` (no other field touched) already **AFFECTS RENDER**, confirmed independently on two documents (`Bandit.mohoproj`, `WhatIsBone.animeproj`) — Moho's headless single-frame `-f PNG` renderer re-simulates the whole rigid-body physics state for whatever frame is asked, not merely a keyframe interpolation. With `enable_physics` forced `true` as a precondition, `use_baked_physics`, `sleeping`, `pivot` and `force_field` each independently **AFFECT RENDER** too; `friction`/`restitution`/`respawn` are inert under the same precondition (a real, non-confounded negative, since sibling fields in the identical fixture do show an effect — plausibly because this fixture's bones never collide with anything, so there is nothing for contact-only fields to act on); `enable_motor`/`motor_speed`/`motor_torque` are inert under `enable_physics` alone but **AFFECT RENDER** once `pivot` (a fixed hinge to motor around) is added as a further precondition; `force_field_vector` stays inert even with `force_field` forced on and its own vector reversed — one of this codebase's other switch-fires/parameter-doesn't findings (`motion_blur.alpha_start`/`.alpha_end`, above). All ten `$defs/Physics` fields plus `enable_physics`/`use_baked_physics` are now `EDITABLE` — see each field's own entry in `schema/layer.schema.json` for the exact probe rows and preconditions. **M1.5 batch 3:** the remaining two fields this object declares, `velocity`/`density` (both left `UNKNOWN` by batch 2), are now `EDITABLE` too — both AFFECT RENDER under the same `enable_physics` precondition on `WhatIsBone.animeproj`. Both names are ALSO declared under a second, unrelated owner each (`ParticleLayer.velocity`, `Crayon.density`) — see [§ 6.1](#61-layer-types)'s own `ParticleLayer` note for the two-owner resolution, following the `through_alpha`/[§ 8.4](#84-gradients) precedent. Every field of `$defs/Physics` is now registered. |
 | `scale_compensation`, `scale_normalization` | bool/float | defaults | How a layer's stroke width reacts to scaling. Relevant to [§ 7.6](#76-stroke-width) if ever non-default. Both probed inert on Bandit.mohoproj, whose ancestor scale is 1.0 throughout — neither was retested under an actual non-1.0 ancestor scale. |
 | `layer_ordering` | `String` channel | `""` | Animated child reordering (with `animated_layer_order` on `BoneLayer`). Would change draw order per frame. |
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |

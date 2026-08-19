@@ -261,3 +261,26 @@ row.
 | `scale_damping_force` | `20.0` | 44 | Cocon.mohoproj | 60 | `bone_dynamics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x44, `scale_dynamics=true` x44 | **AFFECTS RENDER** |
 | `scale_torque_force` | `20.0` | 44 | Cocon.mohoproj | 60 | `bone_dynamics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x44, `scale_dynamics=true` x44 | **AFFECTS RENDER** |
 | `scale_weight` | `5.0` | 44 | Cocon.mohoproj | 60 | `bone_dynamics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x44, `scale_dynamics=true` x44 | **AFFECTS RENDER** |
+| `num_particles` | `50` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `accel_angle` | `0.0` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `accel_rate` | `0.0` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `damping` | `2.0` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `free_floating` | `false` | 1 | Gathered-01Intro2.mohoproj | 210 | none | inert |
+| `orient_particles` | `false` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `evenly_spaced` | `true` | 1 | 01 opening.moho | 60 | none | **AFFECTS RENDER** |
+| `preview_particles` | `50` | 1 | Gathered-01Intro2.mohoproj | 210 | none | inert |
+| `random_start_time` | `true` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `seed` | `916190` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `start_dir` | `4.537856` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `start_full` | `false` | 1 | Gathered-01Intro2.mohoproj | 210 | none | inert |
+| `particle_lifetime` | `24` | 1 | 01 opening.moho | 60 | none | **AFFECTS RENDER** |
+| `source_shape` | `{"x":5.0,"y":0.1,"z":2.0}` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `start_spread` | `0.174533` | 1 | 01 opening.moho | 60 | none | **AFFECTS RENDER** |
+| `use_base_as_source` | `true` | 1 | Gathered-01Intro2.mohoproj | 210 | none | inert |
+| `velocity_spread` | `0.0` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `particle_activation` | `{"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [false], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | Gathered-01Intro2.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `velocity` | `10.0` | 1 | .probe_isolate_particlevel.mohoproj | 210 | none | **AFFECTS RENDER** |
+| `density` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.2], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 19 | .probe_isolate_crayondensity.animeproj | 60 | none | inert |
+| `density` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.01], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 19 | .probe_isolate_crayondensity.animeproj | 60 | none | inert |
+| `velocity` | `{"x":500.0,"y":-500.0}` | 140 | WhatIsBone.animeproj | 60 | `enable_physics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x29 | **AFFECTS RENDER** |
+| `density` | `1000.0` | 140 | WhatIsBone.animeproj | 60 | `enable_physics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x29 | **AFFECTS RENDER** |
