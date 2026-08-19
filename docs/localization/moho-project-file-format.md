@@ -348,7 +348,29 @@ Các số đếm dưới đây là khắp 19 tài liệu được mẫu.
 | `SwitchLayer` | 17 | Các con là các phương án thay thế; chỉ một cái hiển thị tại một thời điểm. | **có** |
 | `ImageLayer` | 15 | **(Phát hiện từ 19 file, không có trong mẫu 5-file ban đầu.)** Một layer ảnh raster/phim/import PSD — xem [§ 6.5](#65-imagelayer-phát-hiện-từ-19-file). | **không** — bị bỏ âm thầm |
 | `PatchLayer` | 12 | Không có mesh riêng — tái dùng mesh của một layer khác ([§ 12](#12-patch-layers)). | **có**, được phân giải |
-| bất cứ thứ gì khác | 0 trong 19 file này | Audio, particle, note, 3D layers v.v. không được mô hình hóa. | không |
+| bất cứ thứ gì khác | 0 trong 19 file này | Audio, particle, note, 3D layers v.v. không được mô hình hóa — xem bên dưới về số đếm riêng của `ParticleLayer` trong kho ngữ liệu 76-tài-liệu đầy đủ. | không |
+
+**`ParticleLayer` (phát hiện M1.5 batch 3, kho ngữ liệu 76 tài liệu).** Vắng
+mặt trong mẫu 19-file ban đầu, nhưng có thật ở nơi khác: 39 đối tượng trên 24
+tài liệu (`Gathered-01Intro2.mohoproj`, `Gathered-02Wire2.mohoproj`, 19 trong
+22 tập `Snow_wars/*.moho`, `TheNutcrackerBallet/The Nutcracker Ballet.moho`,
+`metamorphosis/Scene 2.moho`, `metamorphosis/Scene 5.moho`) — điều chỉnh
+"Hiếm nhưng có thật: 2 thực thể" trước đây trong `schema/layer.schema.json`.
+Vẫn **không được render bởi cả hai exporter**, nhưng 18 trường sở hữu-đơn của
+nó cộng với `velocity` riêng của nó nay đều là `EDITABLE` — mỗi trường được
+probe trực tiếp với bản render headless của Moho 14.4 (`tools/probe_field.py`),
+15/19 AFFECTS RENDER và 4 trường (`free_floating`, `preview_particles`,
+`start_full`, `use_base_as_source`) inert. Ba lần thử (`num_particles=300`,
+`particle_lifetime=4`, `evenly_spaced=true` trên `Gathered-01Intro2.mohoproj`)
+từng làm Moho crash (`SIGSEGV`) MỘT LẦN trong lúc probe của batch này, nhưng
+thử lại độc lập sau đó lại chạy sạch mỗi lần — nên đây chỉ là một lần crash
+quan sát được, KHÔNG phải một lỗi tái lập đã xác nhận (môi trường phát triển
+này có ghi nhận crash Moho không liên quan riêng biệt); cả ba trường vẫn được
+đo thành công bằng cách dùng tài liệu thực tế thứ hai. Chi tiết đầy đủ (bảng
+kết quả từng trường, cách xử lý `velocity`/`density` là hai key trùng tên ở
+hai `$defs` khác nhau theo tiền lệ `through_alpha`) nằm trong bản gốc tiếng
+Anh, [`docs/moho-project-file-format.md`](../moho-project-file-format.md)
+§ 6.1 và § 6.3 (dòng `physics`/`gravity`/`wind`) — bản dịch này chỉ tóm tắt.
 
 ### 6.2 Các trường chung ảnh hưởng render và **được dùng**
 

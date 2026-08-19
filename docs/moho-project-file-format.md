@@ -373,12 +373,15 @@ RENDER and 4 (`free_floating`, `preview_particles`, `start_full`,
 `schema/layer.schema.json`'s `ParticleLayer` for the exact probe row and, for
 the inert ones, the plausible (not fully confirmed) reason. Forcing
 `num_particles` to `300` or `particle_lifetime` to `4` or `evenly_spaced` to
-`true` on `Gathered-01Intro2.mohoproj` each **reproducibly crashed Moho's own
-headless renderer** (`SIGSEGV`) — a real defect in Moho itself on that
-specific document/value combination, not a probe artefact; all three fields
-were still measured cleanly by retrying on a second real-usage document
-(`Snow_wars/01 opening.moho` for the latter two, a milder `50` for
-`num_particles`). Two fields — `source_shape` and `particle_activation` — were
+`true` on `Gathered-01Intro2.mohoproj` each crashed Moho's own headless
+renderer (`SIGSEGV`) **once**, during this batch's own probing — a later
+independent retry of all three exact combinations rendered cleanly every
+time, so this is recorded as a single observed crash per combination, **not**
+a confirmed reproducible defect (this environment separately logs occasional
+unrelated Moho crashes; see `docs/moho-field-probes.md`'s own note). All
+three fields were still measured cleanly regardless, by using a second
+real-usage document (`Snow_wars/01 opening.moho` for the latter two, a milder
+`50` for `num_particles`). Two fields — `source_shape` and `particle_activation` — were
 wrongly described by an earlier plan as constant/single-valued; a corpus scan
 found 8 and 4 distinct values respectively (`particle_activation` is
 genuinely animated on 3 of the 24 documents, not always a static "on").

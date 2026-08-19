@@ -40,6 +40,21 @@ trustworthy as its `Document`/`Frame` choice having actually exercised the
 field -- this is recorded as a standing risk, not solved, since a manually
 chosen frame gives the tool no way to know what should have been visible.
 
+**This development environment's Moho install occasionally crashes on its
+own, unrelated to any specific field.** `~/Library/Logs/DiagnosticReports/`
+holds several Moho crash logs from sessions that touched none of this
+project's probing code. This matters here because M1.5 batch 3's own report
+originally described three `ParticleLayer` field/value combinations
+(`num_particles=300`, `particle_lifetime=4`, `evenly_spaced=true`, all on
+`Gathered-01Intro2.mohoproj`) as "reproducibly" crashing Moho with `SIGSEGV`
+-- a later independent retry of the exact same three combinations rendered
+cleanly every time, so that language overstated what a SINGLE observed crash
+during one probing run actually established. Treat any one-off crash
+observed while probing as a possible instance of this environment's own
+background flakiness unless it is independently reproduced on retry -- see
+the affected fields' own entries in `schema/layer.schema.json`'s
+`ParticleLayer` for the corrected wording.
+
 | Field | Value tried | Sites | Document | Frame | Preconditions | Result |
 |---|---|---|---|---|---|---|
 | `line_width` | `0.05` | 124 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
