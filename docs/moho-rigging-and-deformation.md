@@ -191,7 +191,7 @@ files at 1021/1038 carry a single force triple and a single switch.
 **Editor state (not used)**
 
 `selected`, `hidden`, `shy`, `bone_label_showing`, `bone_tags`,
-`angle_weight`, `pos_weight`, `scale_weight`.
+`angle_weight`.
 
 **`flip_h` / `flip_v` — used (correcting an earlier "editor state" claim)**
 
