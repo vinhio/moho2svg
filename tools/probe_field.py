@@ -47,6 +47,24 @@ site holds, so the two twins are identical in the one respect the row would
 claim they differ -- see the no-op guard below. All non-zero exits write no
 row.
 
+BARE-SCALAR TRAP FOR CHANNEL-TYPED FIELDS (M1.5 batch 5 finding). A
+`--value` for a `ValChannel`/`BoolChannel`-typed field must be the FULL
+`{type, ref, mute, when, val, interp}` channel object, never a bare scalar
+(`0.05` in place of the channel dict) -- writing a bare scalar over
+`halo_radius` (a `ValChannel`) corrupted the document, Moho's own loader
+reporting "Error (108): Unable to load document (corrupt)" at LOAD time, not
+a render difference, reproduced twice at two different magnitudes before
+concluding it was the shape, not the value, that broke it. This is the same
+class of loader intolerance `tools/check_roundtrip.py:32` documents for
+`project_data.noise_grain` (a plain int silently written as a bool) --
+Moho's own JSON reader is stricter about a field's exact shape than this
+tool's --value flag lets a careless caller notice. Not every channel-shaped
+field is this strict: a bare boolean and a bare `{r,g,b,a}` dict both loaded
+and rendered fine in place of `halo_only`'s `BoolChannel`/`halo_color`'s
+`ColorChannel`, so the tolerance is field-shape-specific, not universal --
+when in doubt, always pass the full channel object rather than assuming a
+bare value is safe.
+
 NO-OP GUARD (fix round 1, Finding A). Presence is not enough: if every site
 `--key` touches already holds the exact value being written -- the same JSON
 value, or a numerically equal one of a different type, e.g. writing `5` where
