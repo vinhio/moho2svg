@@ -816,9 +816,9 @@ the sample documents leaves the SVGs byte-identical.
 | `id` | int | shape identity, referenced by `mesh.shape_order` | **yes** |
 | `combo_mode` | int | **only present in the `1045` document** (112 shapes): `0`×96, `1`×2, `3`×14 | **yes** — see [§ 7.8](#78-boolean-shape-combination) |
 | `effect_scale` / `effect_rotation` | `Val` channels | `1.0`/`0.0` on ~895 shapes, varying on the rest | **yes** — but only to place a gradient |
-| `effect_offset` | `Vec2` channel | mostly `{0,0}` | no |
-| `fill_allowed` | bool | `true` 1,801, `false` 859 (19-file totals) | no — presumably "this shape may be filled at all", distinct from `has_fill` |
-| `combo_blend_anim` | `Val` channel | `0.0`, `1045` only | no — presumably animates a soft boolean blend |
+| `effect_offset` | `Vec2` channel | mostly `{0,0}`, but non-zero on 276 of 22,144 occurrences across 30 of the 76-document corpus (**corrected, M1.3** — an earlier revision of this row claimed nothing observed supplies a non-zero value) | not read by `moho2svg.py`, but confirmed to move pixels in real Moho — see [§ 8.4](#84-gradients) |
+| `fill_allowed` | bool | `true` 1,801, `false` 859 (19-file totals) | no — presumably "this shape may be filled at all", distinct from `has_fill`; forcing it `false` everywhere on Bandit.mohoproj (a mix of stored `true`/`false`, not a no-op) left the render byte-identical, including on shapes with `has_fill = true` (M1.3 probe) |
+| `combo_blend_anim` | `Val` channel | `0.0`, `1045` only | no — presumably animates a soft boolean blend; forcing it to `0.7` on Bandit.mohoproj was inert (M1.3 probe) |
 | `3d_thickness` | `Val` channel | `0.125` on all 2,660 shapes (19-file total) | no |
 | `name` | str | `""` or `"S1"`, `"S2"`, … | no |
 | `selected` | bool | editor state | no |
@@ -1064,12 +1064,22 @@ number that matters for how much of the picture is wrong.
 | `SS_Texture2` | 10 | `fill_style2` | 12 | 12 | — | no — in all 12 occurrences both path fields are empty, so no sampled document resolves a texture file |
 | `SS_Shadow` | 11 | `line_style` | 3 | 3 | — | no — a per-shape drop shadow on the stroke, distinct from `SS_Shaded` and from the layer-level `layer_shadow` in [§ 6.3](#63-common-fields-that-affect-rendering-and-are-not-used) |
 
-**`*_style_id` is decoded.** Each slot has a parallel integer field
-(`fill_style_id`, `line_style_id`, `fill_style2_id`) whose value is simply the
-effect *kind*, per the second column above. It agrees with the effect object's
-own `type` string in **all 2,003 instances across the 46 files, with no
-exceptions**, so it is redundant with `type` rather than the "arbitrary
-internal reference id" earlier revisions of this document called it.
+**`*_style_id` is decoded, and — for `fill_style_id` — confirmed NOT
+redundant to Moho's own renderer (M1.3).** Each slot has a parallel integer
+field (`fill_style_id`, `line_style_id`, `fill_style2_id`) whose value is
+simply the effect *kind*, per the second column above. It agrees with the
+effect object's own `type` string in **all 2,003 instances across the 46
+files, with no exceptions**, so no sampled document ever has the two
+disagree. But that is not the same as Moho *ignoring* this field: probing
+`fill_style_id` on `SketchBone.animeproj` — forcing every occurrence from its
+stored `9` (`SS_Gradient2`) to `4` (`SS_Halo`), with `type` and every other
+style field left untouched — changed the frame-0 render. Moho reads this
+integer separately from `type` to decide how to draw the effect, at least in
+some circumstances; which one wins when a real (non-probe) document manages
+to make them disagree is not established, since none does. `line_style_id`
+and `fill_style2_id` were not probed (out of scope for M1.3 — see
+`schema/style.schema.json`), so whether the same holds for those two slots is
+untested.
 
 **Where effects live.** Both on named styles and inline on a shape's own
 `style` object — 1,160 vs 652 `fill_style` objects respectively. This was
@@ -1129,8 +1139,36 @@ than `"SS_Gradient2"` with a warning.
 A shape opts into a gradient fill by leaving `define_fill_color` false and
 inheriting a style that carries `fill_style`. Placement (centre and radius)
 is derived from the shape's bounding box, scaled and rotated by the shape's
-own `effect_scale` / `effect_rotation` — **approximate, not pixel-matched** to
-Moho's own differently-parameterised placement.
+own `effect_scale` / `effect_rotation`, and offset by `effect_offset`, a
+`Vec2` channel on the *shape* (`mesh.schema.json`, not this style object) —
+**approximate, not pixel-matched** to Moho's own differently-parameterised
+placement.
+
+**`effect_offset` is a real, currently-unread gradient offset (M1.3
+correction).** An earlier revision of this document claimed nothing observed
+ever supplies a non-zero value; a 76-document corpus scan contradicts that —
+30 of the 76 documents carry a non-zero `effect_offset` somewhere, 276 of
+22,144 total occurrences, up to `{x: 0.178785, y: -0.092586}`
+(`SketchBone.animeproj`). It is not one of the fields `Shape.__init__`
+extracts by name (dropped along with `fill_allowed`/`combo_blend_anim`/
+`selected`/`3d_thickness`/the inherited-style pair — see that class's own
+docstring), so `moho2svg.py` never applies it, but forcing it to `{x: 0.3, y:
+0.3}` on every occurrence in `SketchBone.animeproj` (which has real gradient
+fills, unlike `Bandit.mohoproj`) visibly moved the gradient at frame 0 in
+real Moho.
+
+**`through_alpha` (this owner) is confirmed inert, at least on this
+document.** Declared `false` on every one of `SketchBone.animeproj`'s 83
+`SS_Gradient2` occurrences; forcing all of them to `true` left frame 0
+byte-identical. `Texture2`'s own `through_alpha` (`schema/style.schema.json`)
+shares the flat field name but is a genuinely different owner — real files
+carry the key under both `SS_Gradient2` and `SS_Texture2` objects — and has
+no writer in either exporter, so it was not probed and stays a separate,
+unresolved question (M1.3; see that schema entry).
+
+**`fill_allowed` and `combo_blend_anim` (Shape-level, [§ 7.4](#74-shapes-and-edges))
+were also probed as part of this pass and found inert on `Bandit.mohoproj`** —
+see that table's own notes.
 
 ### 8.5 Brush styles
 
@@ -1151,6 +1189,29 @@ Moho's own per-dab randomisation is not recoverable from the saved document,
 so this tool seeds its jitter deterministically per shape instead. See the
 module docstring's BRUSH STROKES section, and `docs/moho-exporting-svg.md` § 7 for
 the three render paths and their performance.
+
+**Ten more brush fields, all confirmed inert on the one document tested
+(M1.3).** Alongside `brush_name`/`brush_jitter`/`brush_spacing`/
+`brush_align`/`brush_tint` above, a real style also carries
+`brush_randomize`, `brush_rand_order`, `brush_merged_alpha`,
+`brush_angle_drift`, `brush_random_interval`, `brush_size_amp`,
+`brush_size_scale`, `brush_hue_drift`, `brush_sat_drift`, and
+`brush_val_drift` — plain values, never channels, same as the five above.
+Each was forced to a differing value on all 124 occurrences in
+`Bandit.mohoproj` (a document with real, non-empty `brush_name` textures on
+the touched shapes, so this is not an untested no-brush frame) and rendered
+frame 25 byte-identical to the original in every case, including
+`brush_size_amp` retried with `brush_randomize=true` set as an explicit
+precondition (in case the per-dab size variance it presumably scales is
+gated behind that switch — still inert). None of these ten is read by either
+`moho2svg.py` or `moho2lottie.py` (comment-only mentions in
+`moho2svg.py`'s own module docstring and a size-variation note near
+`Exporter._brush_library_defaults`, never an actual field access) — see
+`schema/style.schema.json`'s own entries and `docs/moho-field-probes.md` for
+the full probe rows. This result is document-scoped, not a corpus-wide claim
+that Moho itself never applies these fields under any brush/configuration —
+only that this one set of real brush strokes did not visibly react to any of
+them.
 
 ### 8.6 Resolving a `brush_name` to a file
 
@@ -1796,7 +1857,7 @@ Ranked by how visible the difference should be:
 7. `channel.interp` — non-linear timing on `pose`/`anim_*`; exact at keyframes, off between them. Only matters for a `--frame N` that is not a keyframe. ([§ 5.3](#53-the-interp-entries))
 8. `bone.scaling_mode: 2` — 242 bones; possibly related to the preserved asymmetric bone scale. ([§ 9](#9-bones-and-skinning))
 9. `mesh.curve_interpretation: 0` — 2 meshes differ from the rest. ([§ 7.1](#71-the-mesh-object))
-10. `shape.fill_allowed: false` — 859 shapes (19-file total, up from 229 in the original sample). Interaction with `has_fill` undecoded. ([§ 7.4](#74-shapes-and-edges))
+10. `shape.fill_allowed: false` — 859 shapes (19-file total, up from 229 in the original sample). Interaction with `has_fill` undecoded — forcing it `false` everywhere on `Bandit.mohoproj` (M1.3 probe) did not visibly remove a fill there, but that is one document's negative result, not a settled interaction rule. ([§ 7.4](#74-shapes-and-edges))
 11. `style.line_caps: 0` — 765 styles (3 documents) use butt caps instead of the round caps the original 5-file sample exclusively showed. **(19-file finding.)** Whether `LINE_CAP_NAMES`' `0` mapping is actually correct is unverified. ([§ 8.1](#81-named-styles-docstyles))
 
 A masking==2 sibling's own stroke staying visible on top of whatever it masks
