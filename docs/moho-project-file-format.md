@@ -1148,13 +1148,16 @@ placement.
 correction).** An earlier revision of this document claimed nothing observed
 ever supplies a non-zero value; a 76-document corpus scan contradicts that —
 30 of the 76 documents carry a non-zero `effect_offset` somewhere, 276 of
-22,144 total occurrences, up to `{x: 0.178785, y: -0.092586}`
-(`SketchBone.animeproj`). It is not one of the fields `Shape.__init__`
+22,144 total occurrences, with the corpus-wide maximum `{x: 0.020666, y:
+1.386204}` in `Snow-girl/Snow-girl-cut10.mohoproj` (a real animated `Vec2`
+channel keyframe there — a different document from the one this milestone
+probed). It is not one of the fields `Shape.__init__`
 extracts by name (dropped along with `fill_allowed`/`combo_blend_anim`/
 `selected`/`3d_thickness`/the inherited-style pair — see that class's own
 docstring), so `moho2svg.py` never applies it, but forcing it to `{x: 0.3, y:
-0.3}` on every occurrence in `SketchBone.animeproj` (which has real gradient
-fills, unlike `Bandit.mohoproj`) visibly moved the gradient at frame 0 in
+0.3}` on every occurrence in `SketchBone.animeproj` (a document with real
+gradient fills to move, unlike `Bandit.mohoproj`, though not the corpus's
+largest stored value — see above) visibly moved the gradient at frame 0 in
 real Moho.
 
 **`through_alpha` (this owner) is confirmed inert, at least on this
