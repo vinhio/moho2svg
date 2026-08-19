@@ -623,14 +623,57 @@ to raster images, not reverse-engineered), plus its own fields:
 | `image_path` / `image_fileref` | The source image/movie file. |
 | `width` / `height` | Plain (not channels) pixel dimensions. |
 | `image_cropped` | Whether the image is cropped to a sub-region. |
-| `psd_layer` / `psd_layerid` | Which PSD layer this instance came from. Present on most, not all, sampled instances. |
-| `psd_layer_bounds` | `{top, left, right, bottom}` — the PSD layer's bounding box. |
+| `psd_layer` / `psd_layerid` | Which PSD layer this instance came from. Present on most, not all, sampled instances (244/332 `ImageLayer` instances across the 76-document corpus, in 13 of the 76 documents). |
+| `psd_layer_bounds` | `{top, left, right, bottom}` — the PSD layer's bounding box within the source PSD canvas. |
 | `avi_alpha`, `movie_looping`, `interpreted_fps`, `persist_first_frame` / `_last_frame`, `premultiplied_movie`, `reverse_movie` | Embedded-movie playback settings. |
 | `sampling_mode`, `quality_level` | Image resampling settings. |
 | `toon_effect`, `toon_black_threshold`, `toon_gray_threshold`, `toon_lightness`, `toon_saturation`, `toon_quantize`, `toon_min_edge_threshold`, `toon_max_edge_threshold` | A cel-shading post-process filter over the raster image. |
 
-None of the above is read by `moho2svg.py`. See `schema/layer.schema.json`'s
-`ImageLayer` for the full field list with per-field descriptions.
+None of the above is read by `moho2svg.py`, but `lottie2moho.py`'s
+`_image_layer_template` already writes all of them (except `images`, below)
+at real-file-correct values on every `ImageLayer` it emits, which is what let
+M1.2 of `docs/moho-field-coverage-plan.md` register them `EDITABLE` without
+decoding anything new. That milestone also probed each one for a render
+effect with `tools/probe_field.py` — one document,
+`moho/Snow_wars/04 snow man construction.moho` (28 `ImageLayer` instances, a
+PNG-background + PSD-cutout snowman-building scene), since **the PSD/PNG
+source assets `moho/Boar.mohoproj` and `moho/Clay_Crocodile.mohoproj`
+reference are not present in this checkout** (`Images/` does not exist next
+to either file) — both render every `ImageLayer` as Moho's own
+broken-image placeholder, which produces a misleadingly clean "inert" result
+for anything probed against them (see the stray `toon_effect`/`Boar.mohoproj`
+row in `docs/moho-field-probes.md`, superseded by the same key's row against
+the working Snow_wars document). Findings, all at frame 0 of that one
+document, so read as "true there," not "true everywhere":
+
+- **AFFECTS RENDER:** `psd_layer` (forced to an out-of-range value on every
+  occurrence — not a purely cosmetic identifier, Moho reads it back to pick
+  the source PSD layer's pixel data), `sampling_mode`, `quality_level`,
+  `toon_effect`, and all seven `toon_*`/edge-threshold fields once
+  `toon_effect=true` was forced as a precondition first.
+- **Inert** on this document: the seven embedded-movie fields (`avi_alpha`,
+  `movie_looping`, `interpreted_fps`, `persist_first_frame`,
+  `persist_last_frame`, `premultiplied_movie`, `reverse_movie` — expected,
+  since every image on this document is a still, not a movie), `image_cropped`
+  (weakly — the 4 sites whose value actually changed all carried a
+  degenerate all-zero `psd_layer_bounds`, so a non-degenerate crop was never
+  exercised), and `psd_layer_bounds` itself (forced to a shared, non-degenerate
+  rectangle on every occurrence — read as import-time metadata that Moho does
+  not re-consult at render time, since actual on-canvas placement/size tracks
+  `width`/`height`/`transforms`/`origin` instead).
+
+A 21st field, `images` (a `FileRef` array for a movie imported as a numbered
+image sequence rather than one file — see its own schema entry), is matched
+by the same M1.2 classifier pattern but turned out **not to be written by
+`lottie2moho.py` at all**: the plan's writer-location citation
+(`lottie2moho.py:1914`) pointed at an unrelated local variable named
+`"images"` (an output directory path), not a dict key. It stays `UNKNOWN` —
+present in only 1 of the 76 corpus documents (`metamorphosis/Scene 3.moho`,
+121 entries) — pending the observe-then-probe recipe a field with no writer
+needs.
+
+See `schema/layer.schema.json`'s `ImageLayer` for the full field list with
+per-field descriptions and probe evidence.
 
 ### 6.6 `blend_mode`
 
