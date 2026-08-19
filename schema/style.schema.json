@@ -10,19 +10,19 @@
       "description": "The exact same object shape is used both for doc.styles[] (a document-wide named style) and for shape.style (a shape's own, usually-partial style). A shape's own style additionally carries the inherited_style*_uuid/name fields shown on Shape (mesh.schema.json) - both locations (on the shape itself, or inside the shape's own style object) are observed in real files and both must be checked.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "Style" },
-        "name": { "type": "string", "description": "Empty on a shape's own inline style; a real name (e.g. \"yanak\") on a document-wide named style." },
-        "uuid": { "type": "string", "description": "Lookup key used by Shape.inherited_style_uuid / inherited_style2_uuid." },
+        "type": { "const": "Style" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "name": { "type": "string", "description": "Empty on a shape's own inline style; a real name (e.g. \"yanak\") on a document-wide named style." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "uuid": { "type": "string", "description": "Lookup key used by Shape.inherited_style_uuid / inherited_style2_uuid." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2679 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
 
-        "define_fill_color": { "type": "boolean", "description": "If true on a NAMED style and false on the shape's own style, the named style's fill_color overrides the shape's own - see the resolution rule in docs/moho-project-file-format.md §8.2." },
-        "define_line_col": { "type": "boolean" },
-        "define_line_width": { "type": "boolean", "description": "Also gates whether line_caps and the brush_* fields are inherited from the named style (they ride on this same flag, since a brush only ever styles the line)." },
+        "define_fill_color": { "type": "boolean", "description": "If true on a NAMED style and false on the shape's own style, the named style's fill_color overrides the shape's own - see the resolution rule in docs/moho-project-file-format.md §8.2." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2616 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "define_line_col": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2616 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "define_line_width": { "type": "boolean", "description": "Also gates whether line_caps and the brush_* fields are inherited from the named style (they ride on this same flag, since a brush only ever styles the line)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2616 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
 
-        "fill_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "line_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
+        "fill_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2617 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "line_color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2617 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
 
-        "line_width": { "type": "number", "description": "PLAIN float (not a channel) - Moho does not animate line width. Observed as a handful of quantised values per document (e.g. 0.0028-0.092)." },
-        "line_caps": { "type": "integer", "enum": [0, 1, 2], "description": "0 = butt, 1 = round, 2 = square. Only 1 (round) observed across the entire sample set, but 0/2 are named in moho2svg.py's own LINE_CAP_NAMES mapping." },
+        "line_width": { "type": "number", "description": "PLAIN float (not a channel) - Moho does not animate line width. Observed as a handful of quantised values per document (e.g. 0.0028-0.092)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2617 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "line_caps": { "type": "integer", "enum": [0, 1, 2], "description": "0 = butt, 1 = round, 2 = square. Only 1 (round) observed across the entire sample set, but 0/2 are named in moho2svg.py's own LINE_CAP_NAMES mapping." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2638 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
 
         "fill_style": {
           "oneOf": [
@@ -32,8 +32,8 @@
             { "$ref": "#/$defs/Shaded" },
             { "$ref": "#/$defs/SoftStyle" }
           ],
-          "description": "A styled fill effect. Present BOTH on a named style AND inline on a shape's own style object; neither is rare (1160 named-style vs 652 inline across the 46-file sample set). Five variants observed as a fill: SS_Gradient2 (1401), SS_Halo (198), SS_Shaded (96), SS_Soft (91) and SS_Crayon (26). moho2svg.py only renders SS_Gradient2; every other variant emits a per-shape stderr warning and falls back to the shape's flat fill_color." },
-        "fill_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect KIND, as an integer parallel to the effect object's own `type` string: 0 = SS_Shaded, 2 = SS_Soft, 4 = SS_Halo, 9 = SS_Gradient2, 10 = SS_Texture2, 11 = SS_Shadow, 12 = SS_Crayon. Confirmed to agree with `type` in all 2003 effect instances across the sample set, with no exceptions - so it is redundant with `type` rather than an independent reference id (an earlier revision of this schema recorded it as \"not decoded\"). The enum lists every kind seen in ANY of the three slots, not just this one." },
+          "description": "A styled fill effect. Present BOTH on a named style AND inline on a shape's own style object; neither is rare (1160 named-style vs 652 inline across the 46-file sample set). Five variants observed as a fill: SS_Gradient2 (1401), SS_Halo (198), SS_Shaded (96), SS_Soft (91) and SS_Crayon (26). moho2svg.py only renders SS_Gradient2; every other variant emits a per-shape stderr warning and falls back to the shape's flat fill_color." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2632 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "fill_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect KIND, as an integer parallel to the effect object's own `type` string: 0 = SS_Shaded, 2 = SS_Soft, 4 = SS_Halo, 9 = SS_Gradient2, 10 = SS_Texture2, 11 = SS_Shadow, 12 = SS_Crayon. Confirmed to agree with `type` in all 2003 effect instances across the sample set, with no exceptions - so it is redundant with `type` rather than an independent reference id (an earlier revision of this schema recorded it as \"not decoded\"). The enum lists every kind seen in ANY of the three slots, not just this one." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "line_style": {
           "oneOf": [
             { "$ref": "#/$defs/Gradient" },
@@ -41,32 +41,33 @@
             { "$ref": "#/$defs/Shaded" },
             { "$ref": "#/$defs/ShadowStyle" }
           ],
-          "description": "A styled STROKE effect rather than a fill. Four variants observed as a line: SS_Gradient2 (116 occurrences across 16 files), SS_Soft (40), SS_Shaded (18) and SS_Shadow (3). Unlike fill_style, every one of these sits on a NAMED style; none is inline on a shape. moho2svg.py reads this slot and renders SS_Gradient2 as a real paint server on the outline (`stroke` for a uniform-width outline, `fill` for a tapered one); the other three warn and draw a flat stroke. One caveat worth knowing: a gradient outline on a BRUSH stroke is also warned and drawn flat, because a brush tints image pixels rather than painting with a paint server - and all 6 drawn gradient outlines in the sample set are brush strokes." },
-        "line_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." },
+          "description": "A styled STROKE effect rather than a fill. Four variants observed as a line: SS_Gradient2 (116 occurrences across 16 files), SS_Soft (40), SS_Shaded (18) and SS_Shadow (3). Unlike fill_style, every one of these sits on a NAMED style; none is inline on a shape. moho2svg.py reads this slot and renders SS_Gradient2 as a real paint server on the outline (`stroke` for a uniform-width outline, `fill` for a tapered one); the other three warn and draw a flat stroke. One caveat worth knowing: a gradient outline on a BRUSH stroke is also warned and drawn flat, because a brush tints image pixels rather than painting with a paint server - and all 6 drawn gradient outlines in the sample set are brush strokes." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2636 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "line_style_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "fill_style2": {
           "oneOf": [
             { "$ref": "#/$defs/Texture2" },
-            { "$ref": "#/$defs/SoftStyle" }
+            { "$ref": "#/$defs/SoftStyle" },
+            { "$ref": "#/$defs/Gradient" }
           ],
-          "description": "A SECOND fill effect slot, layered on top of `fill_style`. Two variants observed: SS_Texture2 (12 occurrences across 3 files) and SS_Soft (2, in DarkMan.mohoproj). Not rendered by moho2svg.py, which warns per shape and exports without the second effect."
-        },
-        "fill_style2_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." },
+          "description": "A SECOND fill effect slot, layered on top of `fill_style`. Three variants observed: SS_Texture2 (12 occurrences across 3 files), SS_Soft (2, in DarkMan.mohoproj), and SS_Gradient2 - a 76-document-census finding (Snow_wars/01 opening.moho, inside a `.moho` archive, absent from the earlier 46-bare-file sample). Not rendered by moho2svg.py, which warns per shape and exports without the second effect."
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2634 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "fill_style2_id": { "type": "integer", "enum": [0, 2, 4, 9, 10, 11, 12], "description": "The effect kind - same enum and same confirmation as fill_style_id." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
 
-        "brush_name": { "type": "string", "description": "Identifies a brush texture asset by name, possibly with an old-style numeric suffix baked in (e.g. Brush567_0_20_50.png names the file Brush567.png) - see docs/moho-project-file-format.md §8.5 for the full resolution algorithm. Empty string means no brush (plain uniform stroke)." },
-        "brush_jitter": { "type": "number", "description": "Random rotation spread per dab, in RADIANS." },
-        "brush_spacing": { "type": "number", "description": "Dab spacing, as a fraction of the dab's own diameter." },
-        "brush_align": { "type": "boolean", "description": "Whether each dab rotates to the local path tangent." },
-        "brush_tint": { "type": "boolean", "description": "Whether the (greyscale) texture is recoloured to line_color, or used with its own native multi-colour pixels as-is." },
-        "brush_randomize": { "type": "boolean", "description": "Per-dab size variance. Read by moho2svg.py but not applied when rendering." },
-        "brush_rand_order": { "type": "boolean", "description": "Read by moho2svg.py but not applied - randomOrder is instead read from the brush's own .mohobrush archive (see docs/moho-project-file-format.md §8.5)." },
-        "brush_merged_alpha": { "type": "boolean", "description": "Whether overlapping dabs cap combined opacity instead of compounding. Read but not applied - overlapping dabs always compound via ordinary SVG alpha blending." },
-        "brush_angle_drift": { "type": "number", "description": "Read but not applied." },
-        "brush_random_interval": { "type": "integer", "description": "Observed only in newer-generation documents, always 1." },
-        "brush_size_amp": { "type": "number", "description": "Observed only in newer-generation documents." },
-        "brush_size_scale": { "type": "number", "description": "Observed only in newer-generation documents." },
-        "brush_hue_drift": { "type": "number", "description": "Observed only in newer-generation documents, always 0.0." },
-        "brush_sat_drift": { "type": "number" },
-        "brush_val_drift": { "type": "number" }
+        "brush_name": { "type": "string", "description": "Identifies a brush texture asset by name, possibly with an old-style numeric suffix baked in (e.g. Brush567_0_20_50.png names the file Brush567.png) - see docs/moho-project-file-format.md §8.5 for the full resolution algorithm. Empty string means no brush (plain uniform stroke)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2645 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "brush_jitter": { "type": "number", "description": "Random rotation spread per dab, in RADIANS." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2648 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "brush_spacing": { "type": "number", "description": "Dab spacing, as a fraction of the dab's own diameter." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2648 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "brush_align": { "type": "boolean", "description": "Whether each dab rotates to the local path tangent." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2648 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "brush_tint": { "type": "boolean", "description": "Whether the (greyscale) texture is recoloured to line_color, or used with its own native multi-colour pixels as-is." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2648 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "brush_randomize": { "type": "boolean", "description": "Per-dab size variance. Read by moho2svg.py but not applied when rendering." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_rand_order": { "type": "boolean", "description": "Read by moho2svg.py but not applied - randomOrder is instead read from the brush's own .mohobrush archive (see docs/moho-project-file-format.md §8.5)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_merged_alpha": { "type": "boolean", "description": "Whether overlapping dabs cap combined opacity instead of compounding. Read but not applied - overlapping dabs always compound via ordinary SVG alpha blending." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_angle_drift": { "type": "number", "description": "Read but not applied." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_random_interval": { "type": "integer", "description": "Observed only in newer-generation documents, always 1." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_size_amp": { "type": "number", "description": "Observed only in newer-generation documents." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_size_scale": { "type": "number", "description": "Observed only in newer-generation documents." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_hue_drift": { "type": "number", "description": "Observed only in newer-generation documents, always 0.0." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_sat_drift": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "brush_val_drift": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -76,9 +77,9 @@
       "description": "A gradient fill (or, rarely, stroke) specification. Placement (centre/radius) as computed by moho2svg.py is approximate, not pixel-matched to Moho's own differently-parameterised placement - see docs/moho-project-file-format.md §8.3.",
       "required": ["type", "gradient_type", "gradients"],
       "properties": {
-        "type": { "const": "SS_Gradient2", "description": "Only this literal type is understood; any other value is rejected by moho2svg.py with a warning (and the flat fill colour is used instead)." },
-        "gradient_type": { "type": "integer", "enum": [0, 1], "description": "0 = linear, 1 = radial." },
-        "through_alpha": { "type": "boolean", "description": "Not read by moho2svg.py." },
+        "type": { "const": "SS_Gradient2", "description": "Only this literal type is understood; any other value is rejected by moho2svg.py with a warning (and the flat fill colour is used instead)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "gradient_type": { "type": "integer", "enum": [0, 1, 2], "description": "0 = linear, 1 = radial. 2 is a 76-document-census finding (Snow_wars/01 opening.moho, only reachable by opening the `.moho` archives - absent from the earlier 46-bare-file sample, which is why an earlier revision of this schema declared the enum as just [0, 1] and rejected this real document). moho2svg.py only branches on `== 1`; every other value, this one included, falls through to the linear path - not confirmed correct for gradient_type 2, only confirmed not to crash." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7283 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "through_alpha": { "type": "boolean", "description": "Not read by moho2svg.py." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "gradients": {
           "type": "array",
           "description": "Gradient stops, each with its own animatable position and colour.",
@@ -86,12 +87,12 @@
             "type": "object",
             "required": ["location", "color"],
             "properties": {
-              "location": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Stop position, 0.0-1.0." },
-              "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" }
+              "location": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Stop position, 0.0-1.0." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7272 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+              "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"}
             },
             "additionalProperties": true
           }
-        }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7271 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -101,12 +102,12 @@
       "description": "A textured, crayon-like fill effect. Not decoded - not read by moho2svg.py, which falls back to the shape's flat fill_color.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Crayon" },
-        "line_width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Despite the name, this styles the crayon texture's own stroke-like density, not the shape's line_width." },
-        "density": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "clear_background": { "type": "boolean" },
-        "reduce_randomization": { "type": "boolean" },
-        "rand_seed": { "type": "integer" }
+        "type": { "const": "SS_Crayon" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "line_width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Despite the name, this styles the crayon texture's own stroke-like density, not the shape's line_width." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2617 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "density": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "clear_background": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "reduce_randomization": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "rand_seed": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -116,9 +117,9 @@
       "description": "The \"Soft Edge\" effect (manual ch. 13.02): blurs the edge of whatever it styles. Usable in all three slots, and most often a FILL - 91 fill_style vs 40 line_style vs 2 fill_style2 occurrences (an earlier revision of this schema described it as line-only, before the sample set grew). Not rendered by moho2svg.py, which warns per shape and draws the plain colour underneath.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Soft" },
-        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - how soft the edge is." },
-        "threshold": { "type": "boolean", "description": "Observed as a plain boolean here (not wrapped in a channel), unlike LayerShadow/LayerShading/PerspectiveShadow's own threshold field which IS a BoolChannel - confirmed by direct inspection (TargetBone.animeproj). Manual: applied after the blur, to smooth corners." }
+        "type": { "const": "SS_Soft" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - how soft the edge is." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "threshold": { "type": "boolean", "description": "Observed as a plain boolean here (not wrapped in a channel), unlike LayerShadow/LayerShading/PerspectiveShadow's own threshold field which IS a BoolChannel - confirmed by direct inspection (TargetBone.animeproj). Manual: applied after the blur, to smooth corners." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -128,11 +129,11 @@
       "description": "The \"Halo\" fill effect (manual ch. 13.02): a coloured, blurred rim inside the edge of the fill. Observed only as a fill_style - 198 occurrences across 10 files, which makes it the most-used effect in the sample set after SS_Gradient2. Not rendered by moho2svg.py, which warns per shape and draws the flat fill_color instead. Field names below are matched to the manual's own dialog labels.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Halo" },
-        "halo_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Inset Radius\" - the radius of the inner area. In Moho space units (observed 0.002778)." },
-        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - the softness around the halo." },
-        "halo_color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Halo Color\"." },
-        "halo_only": { "type": "boolean", "description": "Manual: \"Halo Only\" - draw the halo without the fill underneath it." }
+        "type": { "const": "SS_Halo" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "halo_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Inset Radius\" - the radius of the inner area. In Moho space units (observed 0.002778)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "blur_radius": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur Radius\" - the softness around the halo." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "halo_color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Halo Color\"." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "halo_only": { "type": "boolean", "description": "Manual: \"Halo Only\" - draw the halo without the fill underneath it." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -142,13 +143,13 @@
       "description": "The \"Shaded\" fill effect (manual ch. 13.02): an inner drop shadow cast within the shape by a directional light. 96 fill_style and 18 line_style occurrences across 10 files. Distinct from ShadowStyle (SS_Shadow), which is a different effect with a different field set, and from the LAYER-level shadow in layer.schema.json. Not rendered by moho2svg.py, which warns per shape. Field names below are matched to the manual's own dialog labels.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Shaded" },
-        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Light Angle\", in radians, zero at the BOTTOM of the dial (observed 2.356194 = 135 degrees)." },
-        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Offset\" - how far the shadow is offset from the filled area, in Moho space units." },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur\" - the softness of the shadow." },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Shadow Color\" (observed black at alpha 0.07451 - these are subtle by default)." },
-        "shadow_only": { "type": "boolean", "description": "Manual: \"Shadow Only\" - draw the shadow without the fill underneath it." },
-        "threshold": { "type": "boolean", "description": "Manual: applied after the blur, to smooth corners. A plain boolean, like SoftStyle's own." }
+        "type": { "const": "SS_Shaded" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Light Angle\", in radians, zero at the BOTTOM of the dial (observed 2.356194 = 135 degrees)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Offset\" - how far the shadow is offset from the filled area, in Moho space units." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2981 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Manual: \"Blur\" - the softness of the shadow." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Manual: \"Shadow Color\" (observed black at alpha 0.07451 - these are subtle by default)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "shadow_only": { "type": "boolean", "description": "Manual: \"Shadow Only\" - draw the shadow without the fill underneath it." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "threshold": { "type": "boolean", "description": "Manual: applied after the blur, to smooth corners. A plain boolean, like SoftStyle's own." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -158,11 +159,11 @@
       "description": "An image-texture fill, referenced from a style's `fill_style2` slot. Not decoded - not read by moho2svg.py. Note that in all 12 sampled occurrences both the `path` string and the fileref's own path are EMPTY, so no sampled document actually resolves to a texture file; the shape of a populated instance is therefore inferred from the field names, not confirmed.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Texture2" },
-        "path": { "type": "string", "description": "Texture image path. Empty in every sample." },
-        "SS_Texture2FileRef": { "$ref": "layer.schema.json#/$defs/FileRef", "description": "The same {relativeTo, path} shape used by every other file reference in the format. Observed {relativeTo: \"Absolute\", path: \"\"}." },
-        "fill_mode": { "type": "integer", "description": "Presumably tile/stretch/centre. Observed constant 0; other values not sampled, so the value set is unknown." },
-        "through_alpha": { "type": "boolean", "description": "Same field name as Gradient.through_alpha. Observed constant false." }
+        "type": { "const": "SS_Texture2" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "path": { "type": "string", "description": "Texture image path. Empty in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "SS_Texture2FileRef": { "$ref": "layer.schema.json#/$defs/FileRef", "description": "The same {relativeTo, path} shape used by every other file reference in the format. Observed {relativeTo: \"Absolute\", path: \"\"}." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "fill_mode": { "type": "integer", "description": "Presumably tile/stretch/centre. Observed constant 0; other values not sampled, so the value set is unknown." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "through_alpha": { "type": "boolean", "description": "Same field name as Gradient.through_alpha. Observed constant false." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -172,12 +173,12 @@
       "description": "A per-shape drop-shadow effect on the stroke, used only as a line_style. Distinct from the LAYER-level shadow (LayerShadow in layer.schema.json), which has a different field set. Not decoded - not read by moho2svg.py.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "SS_Shadow" },
-        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow direction in radians (observed 2.432966)." },
-        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow distance in Moho space units (observed 0.001786 - very small)." },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Observed as opaque black {0,0,0,1}." },
-        "threshold": { "type": "boolean", "description": "Plain boolean, same as SS_Soft's own threshold field." }
+        "type": { "const": "SS_Shadow" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow direction in radians (observed 2.432966)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Shadow distance in Moho space units (observed 0.001786 - very small)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2981 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel", "description": "Observed as opaque black {0,0,0,1}." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "threshold": { "type": "boolean", "description": "Plain boolean, same as SS_Soft's own threshold field." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     }

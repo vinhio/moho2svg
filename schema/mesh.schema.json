@@ -9,25 +9,29 @@
       "type": "object",
       "required": ["type", "points", "curves", "shapes"],
       "properties": {
-        "type": { "const": "Mesh" },
-        "points": { "type": "array", "items": { "$ref": "#/$defs/MeshPoint" } },
-        "curves": { "type": "array", "items": { "$ref": "#/$defs/Curve" } },
-        "shapes": { "type": "array", "items": { "$ref": "#/$defs/Shape" } },
+        "type": { "const": "Mesh" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "points": { "type": "array", "items": { "$ref": "#/$defs/MeshPoint" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4526 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "curves": { "type": "array", "items": { "$ref": "#/$defs/Curve" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4527 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "shapes": { "type": "array", "items": { "$ref": "#/$defs/Shape" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4528 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "groups": {
           "type": "array",
           "description": "Named point groups (an editor selection convenience, e.g. \"Right Hand\", \"top lip\") - not read by moho2svg.py. Distinct from a layer's flexi_bone_subset, which names BONE indices, not point indices.",
           "items": { "$ref": "#/$defs/PointGroup" }
-        },
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "shape_order": {
           "$ref": "channel.schema.json#/$defs/StringChannel",
-          "description": "A \"|\"-joined ascending id registry of shape.id values - NOT a z-order, despite the name. The real z-order (back to front) is simply the order shapes already appear in `shapes`. Not read by moho2svg.py. See docs/moho-project-file-format.md §7.9."
-        },
-        "anim_shape_order": { "type": "boolean", "description": "Observed false in every sample. Presumably enables keyframing shape_order." },
-        "next_shape_id": { "type": "integer", "description": "The id allocator's next value. Not semantically meaningful for a reader." },
+          "description": "A \"|\"-joined ascending id registry of shape.id values - NOT a z-order, despite the name. The real z-order (back to front) is simply the order shapes already appear in `shapes`. Read into the model (Mesh._build), but never applied - Mesh.draw_order() deliberately returns `shapes` unchanged and ignores this field, on three pieces of evidence (ascending-ID signature on 47/49 disagreeing meshes, breaks combo_mode adjacency if trusted, matches an earlier docstring experiment); see that method's own docstring. See docs/moho-project-file-format.md §7.9."
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4529 in Mesh._build; deliberately not applied by Mesh.draw_order (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "anim_shape_order": { "type": "boolean", "description": "Observed false in every sample. Presumably enables keyframing shape_order." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "next_shape_id": { "type": "integer", "description": "The id allocator's next value. Not semantically meaningful for a reader." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "curve_interpretation": {
           "type": "integer",
           "description": "Observed values: 1 (overwhelming majority), 0 (rare). Meaning not decoded; moho2svg.py does not branch on it."
-        }
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "skia_scaling": {
+          "type": "number",
+          "description": "Observed constant -1.0 across every sampled mesh. Presumably a cached scale factor for Moho's internal Skia-based rasterizer (a sentinel meaning \"not yet computed\"), not a document-authored value. Not read by moho2svg.py."
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -36,28 +40,28 @@
       "type": "object",
       "required": ["type", "position", "width"],
       "properties": {
-        "type": { "const": "Point", "description": "Literally \"Point\", NOT \"MeshPoint\" - confirmed against every sampled document. The $def is named MeshPoint here only to disambiguate from Curve's own \"point\" (int, an index) and CurvePoint's own \"point\" field." },
-        "position": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "The point's position, in the layer's own local coordinate space (2 Moho units span the canvas height - see docs/moho-project-file-format.md §4)." },
-        "width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Per-point stroke-width multiplier. Normally 1.0; a shape whose points do NOT all share one width renders as a tapered (filled-outline) stroke instead of a plain <path stroke>. See §7.6-7.7." },
+        "type": { "const": "Point", "description": "Literally \"Point\", NOT \"MeshPoint\" - confirmed against every sampled document. The $def is named MeshPoint here only to disambiguate from Curve's own \"point\" (int, an index) and CurvePoint's own \"point\" field." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "position": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "The point's position, in the layer's own local coordinate space (2 Moho units span the canvas height - see docs/moho-project-file-format.md §4)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4390 in MeshPoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "width": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Per-point stroke-width multiplier. Normally 1.0; a shape whose points do NOT all share one width renders as a tapered (filled-outline) stroke instead of a plain <path stroke>. See §7.6-7.7." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4390 in MeshPoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "curves": {
           "type": "array",
-          "description": "The curves that pass through this point, as {curve, curve_points} pairs (NOT a plain array of curve indices, despite the field name). Not read by moho2svg.py - the reverse mapping is rebuilt from `curves` instead.",
+          "description": "The curves that pass through this point, as {curve, curve_points} pairs (NOT a plain array of curve indices, despite the field name). This SPECIFIC field is not read by moho2svg.py - the reverse mapping is rebuilt from Mesh.curves instead. Its own x-moho-disposition below is MODELLED anyway: the registry is keyed by property NAME, not by path (see check_field_coverage.load_registry), and the name `curves` is genuinely read for Mesh's own top-level curves array one level up. Flat-by-name collision, diagnosed and waived - see x-moho-contradiction-waived.",
           "items": {
             "type": "object",
             "properties": {
-              "curve": { "type": "integer", "description": "Index into mesh.curves." },
-              "curve_points": { "type": "integer", "description": "Index into that curve's own points array." }
+              "curve": { "type": "integer", "description": "Index into mesh.curves." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4435 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+              "curve_points": { "type": "integer", "description": "Index into that curve's own points array." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
             },
             "additionalProperties": true
           }
-        },
-        "parent": { "type": "integer", "description": "Point-level parenting. Not read by moho2svg.py." },
-        "colored": { "type": "boolean", "description": "Whether per-point vertex colour (the `color` channel) is active. Observed false on every sampled point - this tool's disregard of `color`/`color_strength` is untested against a document with `colored: true`." },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "color_strength": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "color_drift": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation (version 1045-era) documents." },
-        "opacity": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation documents." },
-        "selected": { "type": "boolean", "description": "Editor state." }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4527 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py) -- NOTE: this evidence is for the KEY NAME `curves`, genuinely read as Mesh's own top-level array, not for this MeshPoint occurrence; see x-moho-contradiction-waived", "x-moho-contradiction-waived": "MeshPoint._build reads only position/width/parent (moho2svg.py:4388-4390) - it never touches this array. The disposition is kept MODELLED only because the registry is flat by key name and the same name `curves` genuinely is read one level up as Mesh's own top-level array (see docs/moho-field-coverage-plan.md Task 8 fix round 1, Finding A)."},
+        "parent": { "type": "integer", "description": "Point-level bone binding (\"link points to bone\"): a bone index this point follows rigidly, overriding its layer's own binding. -2/-1 both mean \"use the layer's binding\"; a real bone index appears on ~4,000 points across 119 meshes in the sample set. Read unconditionally into the model (MeshPoint._build) and APPLIED by Exporter._deformed_point_mapper when RenderSettings.point_bone_binding is set (--point-bones, off by default) - see the module docstring's 2026-08 re-measurement. CORRECTS an earlier revision of this schema, which wrongly claimed this field is unconsumed by moho2svg.py." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4391 in MeshPoint._build, applied by Exporter._deformed_point_mapper behind --point-bones (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "colored": { "type": "boolean", "description": "Whether per-point vertex colour (the `color` channel) is active. Observed false on every sampled point - this tool's disregard of `color`/`color_strength` is untested against a document with `colored: true`." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "color_strength": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color_drift": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation (version 1045-era) documents." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "opacity": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed only in newer-generation documents." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "selected": { "type": "boolean", "description": "Editor state." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
       },
       "additionalProperties": true
     },
@@ -66,16 +70,16 @@
       "type": "object",
       "required": ["type", "closed", "points"],
       "properties": {
-        "type": { "const": "Curve" },
-        "closed": { "type": "boolean", "description": "Closed: one segment per point, last wraps to first. Open: one fewer segment than points." },
-        "points": { "type": "array", "items": { "$ref": "#/$defs/CurvePoint" } },
-        "num_points": { "type": "integer", "description": "Redundant with len(points)." },
-        "start_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Trims the drawn start of the curve as a fraction of its length. Observed constant -0.1 (slightly past the true start) in every sample - not read by moho2svg.py, which would draw the whole curve regardless of a keyframed value here (e.g. Moho's \"line draws itself on\" effect)." },
-        "end_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "As start_percent, trimming the end. Observed constant 1.1 in every sample." },
-        "profile_layer_uuid": { "type": "string", "description": "A \"curve profile\" that repeats another curve's shape along this one. Empty in every sample; not read by moho2svg.py." },
-        "profile_curve_id": { "type": "integer", "description": "Observed constant -1 (unset) in every sample." },
-        "profile_repeat": { "type": "integer", "description": "Observed constant 16 in every sample where profile is unset." },
-        "profile_offset": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+        "type": { "const": "Curve" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "closed": { "type": "boolean", "description": "Closed: one segment per point, last wraps to first. Open: one fewer segment than points." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4356 in Curve._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "points": { "type": "array", "items": { "$ref": "#/$defs/CurvePoint" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4526 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "num_points": { "type": "integer", "description": "Redundant with len(points)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "start_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Moho's \"Stroke Exposure\" tool (AS 7.0, channel id CHANNEL_CURVEEXP): trims the drawn start of the curve's OUTLINE as a fraction of ARC LENGTH, leaving any fill whole. DECODED AND APPLIED (Exporter._stroke_trims, corrected from an earlier revision that called this unread) - confirmed against Moho's own render on a purpose-built TransformBoneTool.animeproj variant (end_percent forced to 0.5/0.75 on a filled+outlined closed curve: the fill stayed whole in both, the outline's tail was dropped). Observed constant -0.1 (Moho's untrimmed sentinel, clamped into [0,1]) in every naturally-occurring sample; the one corpus document that DOES trim (FoxAndGhost.animeproj, 24 curves) draws those layers nowhere reachable, so this decode rests on the purpose-built probe, not corpus reach." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4357 in Curve._build, applied by Exporter._stroke_trims (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "end_percent": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "As start_percent, trimming the outline's end. Observed constant 1.1 (Moho's untrimmed sentinel) in every naturally-occurring sample." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4357 in Curve._build, applied by Exporter._stroke_trims (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "profile_layer_uuid": { "type": "string", "description": "A \"curve profile\" that repeats another curve's shape along this one. Empty in every sample; not read by moho2svg.py." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "profile_curve_id": { "type": "integer", "description": "Observed constant -1 (unset) in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "profile_repeat": { "type": "integer", "description": "Observed constant 16 in every sample where profile is unset." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "profile_offset": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -85,16 +89,21 @@
       "description": "One vertex of a Curve, referencing a MeshPoint by index plus the curvature data used to reconstruct explicit Bezier handles (see docs/moho-project-file-format.md §7.5: handle length = distance_to_neighbour * smoothness * weight, confirmed exact against 209 reference handles; handle direction is a chord-length-weighted blend of the two neighbouring chords, NOT a simple normalize(next-prev)). weight_in/weight_out/offset_in/offset_out are OPTIONAL - an older sampled document (format version 1021) carries only point/smoothness/segments_on on every curve point, with no weight or offset fields at all (presumably a simpler, symmetric-handle-only curve representation predating the asymmetric weight/offset feature).",
       "required": ["point", "smoothness", "segments_on"],
       "properties": {
-        "point": { "type": "integer", "description": "Index into the mesh's `points` array." },
-        "smoothness": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Curvature; 0 = sharp corner (handles collapse onto the point)." },
-        "weight_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "How far the incoming handle reaches toward its neighbour, as a fraction of the distance to it." },
-        "weight_out": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "offset_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "A small rotation in radians, producing asymmetric curves." },
-        "offset_out": { "$ref": "channel.schema.json#/$defs/ValChannel" },
+        "point": { "type": "integer", "description": "Index into the mesh's `points` array." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4321 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "smoothness": {
+          "$ref": "channel.schema.json#/$defs/ValChannel",
+          "description": "Curvature; 0 = sharp corner (handles collapse onto the point).",
+          "x-moho-disposition": "MODELLED",
+          "x-moho-evidence": "moho2svg.py BezierReconstructor; handle length = distance_to_neighbour * smoothness * weight, confirmed exact against 209 reference handles (docs/moho-project-file-format.md §7.5)"
+        },
+        "weight_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "How far the incoming handle reaches toward its neighbour, as a fraction of the distance to it." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4323 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "weight_out": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4324 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "offset_in": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "A small rotation in radians, producing asymmetric curves." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4325 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "offset_out": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4326 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "segments_on": {
           "type": "boolean",
           "description": "Whether the segment LEAVING this point is drawn at all. false creates a real, deliberate gap in the outline (confirmed: an umbrella panel that only shows part of its boundary as a drawn line). For a combo_mode==3 (intersect) shape specifically, a false segment can instead mark a piece of curve Moho's own boolean solver replaced with a computed crossing edge - moho2svg.py handles that case by NOT dropping the segment and relying on the intersect-clip to cut it correctly (see Shape.combo_mode below and the module docstring's BOOLEAN SHAPE COMBINATIONS section)."
-        }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4327 in CurvePoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -104,9 +113,9 @@
       "description": "A shape's boundary as an UNORDERED set of curve segments - three parallel arrays, always equal length. NOT reliably a walk in list order, and `flag` is NOT a reliable direction bit (real files exist where segment order is strictly descending with flag 0 throughout). Must be re-traced as an undirected graph keyed by rounded endpoint coordinates - see docs/moho-project-file-format.md §7.9 and the module docstring's PathTracer.",
       "required": ["curve", "segment", "flag"],
       "properties": {
-        "curve": { "type": "array", "items": { "type": "integer" }, "description": "Index into mesh.curves for each edge." },
-        "segment": { "type": "array", "items": { "type": "integer" }, "description": "Index into that curve's segment list (segment i runs from curve_point[i] to curve_point[i+1])." },
-        "flag": { "type": "array", "items": { "type": "integer" }, "description": "Observed 0 (majority) or 1. NOT a reliable direction bit - do not trust it for path-walk order." }
+        "curve": { "type": "array", "items": { "type": "integer" }, "description": "Index into mesh.curves for each edge." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4435 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "segment": { "type": "array", "items": { "type": "integer" }, "description": "Index into that curve's segment list (segment i runs from curve_point[i] to curve_point[i+1])." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4435 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "flag": { "type": "array", "items": { "type": "integer" }, "description": "Observed 0 (majority) or 1. NOT a reliable direction bit - do not trust it for path-walk order." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4435 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -116,29 +125,29 @@
       "description": "One filled/stroked region of a mesh. See docs/moho-project-file-format.md §7.4/§7.8 and the module docstring's BOOLEAN SHAPE COMBINATIONS section.",
       "required": ["type", "id", "has_fill", "has_outline", "edges", "style"],
       "properties": {
-        "type": { "const": "Shape" },
-        "id": { "type": "integer", "description": "Shape identity, referenced by mesh.shape_order (an id registry, not a z-order)." },
-        "name": { "type": "string", "description": "Editor label, e.g. \"S1\", or \"\" (empty is a real value Moho itself writes, e.g. for a TextLayer glyph's synthesised shapes - distinct from the key being entirely absent)." },
-        "has_fill": { "type": "boolean" },
-        "has_outline": { "type": "boolean" },
+        "type": { "const": "Shape" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "id": { "type": "integer", "description": "Shape identity, referenced by mesh.shape_order (an id registry, not a z-order)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4437 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "name": { "type": "string", "description": "Editor label, e.g. \"S1\", or \"\" (empty is a real value Moho itself writes, e.g. for a TextLayer glyph's synthesised shapes - distinct from the key being entirely absent)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "has_fill": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4443 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "has_outline": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4444 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "combo_mode": {
           "type": "integer",
           "description": "How this shape combines with the shape(s) immediately before it in the same layer. 0 = normal (starts a new independent group). 1 = union (merged into the current group; the shared boundary disappears; the combined outline is stroked using the group's FIRST/base member's own styling, not its own - confirmed: a union member's own line_width is absent from Moho's export). 3 = intersect (clipped to the union of the group's solid (0 or 1) members so far - moho2svg.py approximates this via SVG masking, not a true geometric path intersection, which can leave a gap in a member's own outline where Moho's real boolean solver would substitute a computed crossing edge - fixed for the plain-stroke case by not dropping segments_on==false segments on an intersect member and letting the clip cut them). 2 has been reported in real files but its effect has not been reverse-engineered (absent from every document censused so far). ABSENT from the shape entirely in older-generation (version 1038-era) documents - treat a missing combo_mode as 0.",
           "enum": [0, 1, 2, 3]
-        },
-        "edges": { "$ref": "#/$defs/Edges" },
-        "style": { "$ref": "style.schema.json#/$defs/Style", "description": "The shape's own style values (same shape as a top-level named Style, see style.schema.json). May be fully populated (newer-generation documents) or left with every define_* flag false and real values kept in a document-wide named style referenced by inherited_style_uuid/name (older-generation documents) - see docs/moho-project-file-format.md §8.2." },
-        "inherited_style_uuid": { "type": "string" },
-        "inherited_style_name": { "type": "string" },
-        "inherited_style2_uuid": { "type": "string" },
-        "inherited_style2_name": { "type": "string" },
-        "effect_scale": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient scale (fill_style placement), default 1.0." },
-        "effect_rotation": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient rotation in radians, default 0.0. Only affects a LINEAR gradient - a radial gradient ignores rotation entirely (see docs/moho-export-pipeline.md §7.4)." },
-        "effect_offset": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "A gradient centre offset. The formula supports it but nothing observed supplies a non-zero value." },
-        "fill_allowed": { "type": "boolean", "description": "Presumably \"this shape may be filled at all\", distinct from has_fill. Interaction with has_fill is undecoded." },
-        "combo_blend_anim": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Presumably animates a soft boolean-combination blend. Observed only in newer-generation documents, always 0.0." },
-        "3d_thickness": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed constant 0.125 in every sample." },
-        "selected": { "type": "boolean", "description": "Editor state." }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4445 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "edges": { "$ref": "#/$defs/Edges" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4434 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "style": { "$ref": "style.schema.json#/$defs/Style", "description": "The shape's own style values (same shape as a top-level named Style, see style.schema.json). May be fully populated (newer-generation documents) or left with every define_* flag false and real values kept in a document-wide named style referenced by inherited_style_uuid/name (older-generation documents) - see docs/moho-project-file-format.md §8.2." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2605 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "inherited_style_uuid": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2609 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "inherited_style_name": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2609 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "inherited_style2_uuid": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2609 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "inherited_style2_name": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2609 in ResolvedStyle.resolve (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "effect_scale": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient scale (fill_style placement), default 1.0." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4448 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "effect_rotation": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Gradient rotation in radians, default 0.0. Only affects a LINEAR gradient - a radial gradient ignores rotation entirely (see docs/moho-export-pipeline.md §7.4)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4449 in Shape._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "effect_offset": { "$ref": "channel.schema.json#/$defs/Vec2Channel", "description": "A gradient centre offset. The formula supports it but nothing observed supplies a non-zero value." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "fill_allowed": { "type": "boolean", "description": "Presumably \"this shape may be filled at all\", distinct from has_fill. Interaction with has_fill is undecoded." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "combo_blend_anim": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Presumably animates a soft boolean-combination blend. Observed only in newer-generation documents, always 0.0." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_thickness": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed constant 0.125 in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "selected": { "type": "boolean", "description": "Editor state." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
       },
       "additionalProperties": true
     },
@@ -147,9 +156,9 @@
       "type": "object",
       "required": ["type", "name", "points"],
       "properties": {
-        "type": { "const": "PointGroup" },
-        "name": { "type": "string" },
-        "points": { "type": "array", "items": { "type": "integer" } }
+        "type": { "const": "PointGroup" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "name": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "points": { "type": "array", "items": { "type": "integer" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4526 in Mesh._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     }

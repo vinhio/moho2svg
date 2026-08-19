@@ -13,26 +13,31 @@
         "t": {
           "type": "integer",
           "description": "NOT the interpolation type - that is `im`. Observed 0 on 1,871,969 of 1,873,377 entries, with 2, 3, 4, 5, 6, 256, 259 and 260 in the remainder, almost exclusively on pose/anim_pos/anim_angle/anim_scale/physics_motor_speed. Most likely the keyframe's LABEL COLOUR (manual ch. 16.13 lists a Label among a keyframe's settings and offers eleven colours); still not confirmed. An earlier revision of this schema called this the interpolation type, which is what sent moho2svg.py looking for the easing enum in the wrong field."
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "im": {
+          "type": "integer",
+          "description": "The INTERPOLATION METHOD for the segment leaving this keyframe (manual ch. 16.06 names the methods; ch. 16.13's keyframe dialog is what maps them onto this entry's fields). An ENUM, not a bitfield. Decoded by rendering a controlled two-keyframe motion with Moho's own CLI at each value and reading the curve back: 0 = Linear (exact), 1 = Smooth (exact; Moho's default and 88.4% of all keyframes), 3 = Step (exact), 5 = Cycle, 6 = also exactly linear, 9 = Bezier (confirmed by a 1:1 match with the `b` block - 238 of 238 entries carrying one have im=9). 2, 4, 7, 8, 10 and 11 have measured curves that are not yet reproduced. Corpus distribution: 1 (1,656,205), 3 (151,483), 0 (54,456), 5 (3,136), 11 (2,916), 2 (2,582), 6 (1,495), 10 (798), 9 (238), 8 (34), 7 (27), 4 (7).",
+          "x-moho-disposition": "MODELLED",
+          "x-moho-evidence": "moho2svg.py Channel._segment dispatches Linear/Smooth/Step/Pose exactly, the other 7 values fall back to an inferred cubic; measured against Moho's own rendered curves, see docs/moho-project-file-format.md §5.3"
         },
-        "im": { "type": "integer", "description": "The INTERPOLATION METHOD for the segment leaving this keyframe (manual ch. 16.06 names the methods; ch. 16.13's keyframe dialog is what maps them onto this entry's fields). An ENUM, not a bitfield. Decoded by rendering a controlled two-keyframe motion with Moho's own CLI at each value and reading the curve back: 0 = Linear (exact), 1 = Smooth (exact; Moho's default and 88.4% of all keyframes), 3 = Step (exact), 5 = Cycle, 6 = also exactly linear, 9 = Bezier (confirmed by a 1:1 match with the `b` block - 238 of 238 entries carrying one have im=9). 2, 4, 7, 8, 10 and 11 have measured curves that are not yet reproduced. Corpus distribution: 1 (1,656,205), 3 (151,483), 0 (54,456), 5 (3,136), 11 (2,916), 2 (2,582), 6 (1,495), 10 (798), 9 (238), 8 (34), 7 (27), 4 (7)." },
-        "in": { "type": "integer", "description": "Almost certainly the keyframe's ANIMATION INTERVAL (manual ch. 16.07: interpolation is recomputed only every n-th frame, n between 1 and 6). Observed 1 (1,851,737), 0 (19,650), 3 (1,348), 2 (634), 8 (8). Not applied." },
-        "s": { "type": "boolean", "description": "Almost certainly the keyframe's STAGGER checkbox (manual ch. 16.13), which adds a stairstep to whatever interpolation is selected. False in all 1,873,377 corpus entries, so never exercised." },
-        "h": { "type": "integer", "description": "Almost certainly the keyframe's HOLD DURATION in frames (manual ch. 16.13). 0 in all 1,873,377 corpus entries, so never exercised." },
-        "v1": { "type": "number", "description": "A general-purpose slot whose meaning depends on `im`. For im=5 (Cycle) it is the RELATIVE cycle length in frames when >= 0. Otherwise it holds the untouched default 0.1, or a -1 / -1000000 sentinel. See Channel._parse_cycles." },
-        "v2": { "type": "number", "description": "The second general-purpose slot. For im=5 (Cycle) it is the ABSOLUTE frame to resume at, used when v1 < 0. Otherwise the default 0.5, or a -1 / -1000000 sentinel. See Channel._parse_cycles." },
+        "in": { "type": "integer", "description": "Almost certainly the keyframe's ANIMATION INTERVAL (manual ch. 16.07: interpolation is recomputed only every n-th frame, n between 1 and 6). Observed 1 (1,851,737), 0 (19,650), 3 (1,348), 2 (634), 8 (8). Not applied." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "s": { "type": "boolean", "description": "Almost certainly the keyframe's STAGGER checkbox (manual ch. 16.13), which adds a stairstep to whatever interpolation is selected. False in all 1,873,377 corpus entries, so never exercised." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "h": { "type": "integer", "description": "Almost certainly the keyframe's HOLD DURATION in frames (manual ch. 16.13). 0 in all 1,873,377 corpus entries, so never exercised." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "v1": { "type": "number", "description": "A general-purpose slot whose meaning depends on `im`. For im=5 (Cycle) it is the RELATIVE cycle length in frames when >= 0. Otherwise it holds the untouched default 0.1, or a -1 / -1000000 sentinel. See Channel._parse_cycles." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1958 in Channel._parse_cycles (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "v2": { "type": "number", "description": "The second general-purpose slot. For im=5 (Cycle) it is the ABSOLUTE frame to resume at, used when v1 < 0. Otherwise the default 0.5, or a -1 / -1000000 sentinel. See Channel._parse_cycles." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1958 in Channel._parse_cycles (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "b": {
           "type": "array",
-          "description": "Explicit Bezier handles for the timing curve itself, one object per control point. Present on exactly 238 entries, and EVERY one of them has im == 9 - which is what identifies im=9 as Bezier interpolation. Not read by moho2svg.py, so an im=9 keyframe falls back to the generic curve. (An earlier revision said these appear only alongside t==4; the correlation is with `im`, not `t`.)",
+          "description": "Explicit Bezier handles for the timing curve itself, one object per control point. Present on exactly 238 entries, and EVERY one of them has im == 9 - which is what identifies im=9 as Bezier interpolation. Not read by moho2svg.py, so an im=9 keyframe falls back to the generic curve. (An earlier revision said these appear only alongside t==4; the correlation is with `im`, not `t`.) NOTE: an earlier seeding pass mis-annotated this MODELLED, citing Color.from_raw as evidence - that function reads an UNRELATED field, ColorValue's own `b` (the blue channel), which merely shares this name; the flat-by-name registry borrowed its true claim for this one. Caught by check_field_coverage.py's rule 4 (a MODELLED key whose own description asserts no read at all) - see docs/moho-field-coverage-plan.md Task 8 fix round 1. FOLLOW-UP: correcting this field's OWN disposition back to UNKNOWN left it declared FIRST in this file, still shadowing ColorValue.b/PlainRGBA.b (both genuinely MODELLED) under load_registry's first-occurrence-wins - the flat corpus key `b` flipped from a false MODELLED claim to a false UNCOVERED one. Fixed generally, not by reordering this pair: check_field_coverage.py's rule 5 (find_disposition_conflicts) now fails on any such cross-occurrence disagreement unless waived, and effective_disposition() scores a flat key as covered when ANY of its occurrences is MODELLED/EDITABLE - see ColorValue.b's own x-moho-registry-conflict-waived and docs/moho-field-coverage-plan.md Task 8 fix round 4.",
           "items": {
             "type": "object",
             "properties": {
-              "ao": { "type": "number" },
-              "ai": { "type": "number" },
-              "po": { "type": "number" },
-              "pi": { "type": "number" }
+              "ao": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+              "ai": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+              "po": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+              "pi": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
             }
           }
-        }
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "genuinely not read by moho2svg.py - the ao/ai/po/pi handle data sits in the file but nothing consumes it; an im=9 keyframe falls back to the generic curve instead"}
       },
       "additionalProperties": true
     },
@@ -45,8 +50,8 @@
         "name": {
           "type": "string",
           "description": "An action name, matched against a registry on some ancestor BoneLayer's own `actions` list. If this name also matches a bone's own name in the same skeleton, that bone is the \"dial\" whose angle drives this override; otherwise this pose is dormant (this tool only activates the dial kind)."
-        },
-        "pose": { "$ref": "#/$defs/Channel" }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "pose": { "$ref": "#/$defs/Channel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1853 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -56,27 +61,27 @@
       "description": "Fields common to every channel regardless of `type`. `when`, `val`, and `interp` are always exactly the same length (verified with zero exceptions across the entire sample set).",
       "required": ["type", "when", "val", "interp"],
       "properties": {
-        "ref": { "type": "boolean", "description": "Marks a channel whose keyframes come from an action inserted BY REFERENCE rather than by copy - manual ch. 17.02: \"Moho will insert a special keyframe in the Mainline that refers back to the action you used ... changes will automatically be reflected in the mainline\", as against Insert Copy, which just copies the keyframes in. NOT read by either exporter. An earlier revision of this schema recorded it as \"false on every sampled channel\", which was a 19-file artefact: across the 46-file set it is true on 1,431 channels in 5 documents (Bandit, BoneStrengthTool, FoxAndGhost, Gathered-02Wire2, OffsetBoneTool). Whether ignoring it changes any rendered pixel is UNMEASURED." },
-        "mute": { "type": "boolean", "description": "Disables the channel when true. Observed false on every sampled channel - untested whether this tool's evaluator (which ignores it) would misbehave on a genuinely muted channel." },
+        "ref": { "type": "boolean", "description": "Marks a channel whose keyframes come from an action inserted BY REFERENCE rather than by copy - manual ch. 17.02: \"Moho will insert a special keyframe in the Mainline that refers back to the action you used ... changes will automatically be reflected in the mainline\", as against Insert Copy, which just copies the keyframes in. NOT read by either exporter. An earlier revision of this schema recorded it as \"false on every sampled channel\", which was a 19-file artefact: across the 46-file set it is true on 1,431 channels in 5 documents (Bandit, BoneStrengthTool, FoxAndGhost, Gathered-02Wire2, OffsetBoneTool). Whether ignoring it changes any rendered pixel is UNMEASURED." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "mute": { "type": "boolean", "description": "Disables the channel when true. Observed false on every sampled channel - untested whether this tool's evaluator (which ignores it) would misbehave on a genuinely muted channel." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "when": {
           "type": "array",
           "description": "Keyframe frame numbers, ascending. Length always equals val's and interp's.",
           "items": { "type": "number" }
-        },
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "interp": {
           "type": "array",
           "items": { "$ref": "#/$defs/InterpEntry" }
-        },
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1855 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "actions": {
           "type": "array",
           "description": "Smart Bone action overrides for this channel. Present on a small minority of channels (observed ~2% of all channels in the sample set, concentrated on mesh point positions and bone transforms).",
           "items": { "$ref": "#/$defs/ActionRef" }
-        },
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1854 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "split": {
           "type": "array",
           "description": "Vec2/Vec3 channels only, and rare (observed exactly once in the reverse-engineering sample set). One independent Val sub-channel per axis (Moho's \"separate the x/y curves\" feature). moho2svg.py does not read this - it evaluates the parent Vec2/Vec3 arrays directly, which could go stale if an axis is keyframed differently from its parent. See docs/moho-project-file-format.md §5.4.",
           "items": { "$ref": "#/$defs/Channel" }
-        }
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -87,8 +92,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "Val" },
-            "val": { "type": "array", "items": { "type": "number" } }
+            "type": { "const": "Val" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "type": "number" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],
@@ -101,8 +106,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "Color" },
-            "val": { "type": "array", "items": { "$ref": "#/$defs/ColorValue" } }
+            "type": { "const": "Color" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "$ref": "#/$defs/ColorValue" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],
@@ -113,10 +118,10 @@
       "type": "object",
       "required": ["r", "g", "b", "a"],
       "properties": {
-        "r": { "type": "number", "minimum": 0, "maximum": 1 },
-        "g": { "type": "number", "minimum": 0, "maximum": 1 },
-        "b": { "type": "number", "minimum": 0, "maximum": 1 },
-        "a": { "type": "number", "minimum": 0, "maximum": 1 }
+        "r": { "type": "number", "minimum": 0, "maximum": 1 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "g": { "type": "number", "minimum": 0, "maximum": 1 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "b": { "type": "number", "minimum": 0, "maximum": 1 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)", "x-moho-registry-conflict-waived": "Flat-by-name collision with InterpEntry.b (this same file, the Bezier-handle array), genuinely UNKNOWN and declared earlier, plus PlainRGBA.b in layer.schema.json (also genuinely MODELLED, same Color.from_raw evidence). ColorValue's own `b` (this field, the blue channel) IS read; InterpEntry's `b` is not. check_field_coverage.py's effective_disposition() scores the flat corpus key `b` as MODELLED via this occurrence, which is correct: the corpus key is read for at least one of its meanings. See docs/moho-field-coverage-plan.md Task 8 fix round 4 and check_field_coverage.py's rule 5 (find_disposition_conflicts)."},
+        "a": { "type": "number", "minimum": 0, "maximum": 1 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2492 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": false
     },
@@ -127,8 +132,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "Vec2" },
-            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec2Value" } }
+            "type": { "const": "Vec2" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec2Value" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],
@@ -139,8 +144,8 @@
       "type": "object",
       "required": ["x", "y"],
       "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" }
+        "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": false
     },
@@ -151,8 +156,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "Vec3" },
-            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec3Value" } }
+            "type": { "const": "Vec3" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "$ref": "#/$defs/Vec3Value" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],
@@ -163,9 +168,9 @@
       "type": "object",
       "required": ["x", "y", "z"],
       "properties": {
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "z": { "type": "number" }
+        "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "z": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:6730 in CameraView.at (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": false
     },
@@ -176,8 +181,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "Bool" },
-            "val": { "type": "array", "items": { "type": "boolean" } }
+            "type": { "const": "Bool" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "type": "boolean" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],
@@ -190,8 +195,8 @@
         {
           "type": "object",
           "properties": {
-            "type": { "const": "String" },
-            "val": { "type": "array", "items": { "type": "string" } }
+            "type": { "const": "String" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "val": { "type": "array", "items": { "type": "string" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1847 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ],

@@ -20,6 +20,15 @@ help:
 	@echo '                                        see moho2svg.py --image-dir'
 	@echo '  make check-lottie                      verify lottie output (no player needed)'
 	@echo '  make check-reference                   compare geometry vs Moho 14.4 exports'
+	@echo '  make check-export                      byte-level SVG export regression gate'
+	@echo '  make check-roundtrip                   assert Document construction leaves the raw JSON tree untouched,'
+	@echo '                                        keeps it reachable on every model object below Layer, and that'
+	@echo '                                        a CHANGED document survives a save (Moho render check needs Moho.app)'
+	@echo '  make check-coverage                    score field coverage against the schema/ disposition registry'
+	@echo '                                        (rebuilds the census and the runtime trace first - see'
+	@echo '                                        docs/moho-field-coverage-plan.md Task 8)'
+	@echo '  make check-integrity                   assert every moho/ document has no dangling positional index'
+	@echo '                                        or layer-uuid reference (mohoedit.check_integrity)'
 	@echo '  make format                            pretty-print every moho/ project'
 	@echo ''
 	@echo 'Setup:'
@@ -264,6 +273,63 @@ check-lottie: out/lottie/Bandit.json out/lottie/SketchBone.json out/lottie/WhatI
 # and skips any that is absent rather than failing.
 check-reference:
 	$(PYTHON) tools/check_reference_frames.py
+
+# Byte-level export regression gate. Re-exports five documents and compares
+# their SHA-256 against tools/export_hashes.txt. Runs after every task in
+# docs/moho-field-coverage-plan.md, so it stays deliberately small and fast.
+# Regenerate the hashes with `make check-export-update` ONLY when an output
+# change is intended.
+check-export:
+	$(PYTHON) tools/check_export_stability.py
+
+check-export-update:
+	$(PYTHON) tools/check_export_stability.py --update
+
+# Asserts that constructing a Document never modifies the raw parsed JSON -
+# an invariant an editor (loading, changing and saving a file) depends on.
+# Currently checks only the PatchLayer raw-dict mutation fixed in Task 2 of
+# docs/moho-field-coverage-plan.md; later tasks in that plan append their
+# own raw-mutation checks here rather than adding a new target, so the name
+# stays "check-roundtrip" even though today it covers one mutation.
+# check_model_raw.py (Task 5) joined the same target: it asserts the OTHER
+# half of "an editor can trust this model" - that every document-model
+# object below Layer still exposes the dict it was built from, not just
+# that Document construction leaves the source tree untouched.
+# check_edit_roundtrip.py (Task 6) is the stronger claim these first three
+# cannot make: not just that an UNTOUCHED document survives a save, but that
+# a CHANGED one does too, and that Moho itself renders the change - the one
+# check here whose second half needs Moho.app and is skipped, loudly and by
+# name in its own summary line, when Moho is not installed.
+check-roundtrip:
+	$(PYTHON) tools/check_no_raw_mutation.py
+	$(PYTHON) tools/check_roundtrip.py
+	$(PYTHON) tools/check_model_raw.py
+	$(PYTHON) tools/check_edit_roundtrip.py
+
+# Field coverage against the disposition registry embedded in schema/.
+# Rebuilds the inputs first: the census walks moho/ (all 76 documents,
+# archives included - see mohoedit.read_document) and the trace runs both
+# exporters over it (tools/trace_fields.py). Uses $(PYTHON), i.e. the
+# repository's own .venv when one exists, same as every check-* target above
+# - this one especially needs it, since a trace taken without Pillow/
+# psd-tools/pyclipper importable fails check_field_coverage.py's own
+# environment rule (see that script's module docstring). See
+# docs/moho-field-coverage-plan.md Task 8 for what the two remaining
+# fail-closed rules assert.
+check-coverage:
+	$(PYTHON) tools/check_field_coverage.py --census-build
+	$(PYTHON) tools/trace_fields.py
+	$(PYTHON) tools/check_field_coverage.py
+
+# Reference-integrity gate (Task 9 of docs/moho-field-coverage-plan.md):
+# asserts every moho/ document is internally consistent under the six
+# positional-index and layer-uuid reference classes mohoedit.check_integrity
+# checks. See that function's own docstring for the four related reference
+# classes it deliberately does NOT check yet (parent_bone, switch_keys,
+# mesh.points[].parent, flexi_bone_subset) and the measured counts behind
+# leaving them to M2.1/M2 instead of guessing at a matching rule here.
+check-integrity:
+	$(PYTHON) tools/check_integrity.py
 
 # Pretty-print the project under moho/ matching the target stem to a .json
 # file - format one with e.g. `make format/moho/Bandit` (writes

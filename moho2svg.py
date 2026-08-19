@@ -1453,6 +1453,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence, Union
 
+# Local, not third-party: the container reader shared with mohoedit.py's own
+# editing/saving responsibilities, so a .moho ZIP archive reads here the same
+# way it does everywhere else in the repo, in one place.
+import mohoedit
+
 try:
     # Optional: only used to pre-tint brush textures once per (brush, colour)
     # at export time instead of masking+filtering every dab at render time -
@@ -2817,6 +2822,12 @@ class Bone:
     # sits elsewhere without re-binding the artwork that follows it.  Applied
     # in Skeleton._solve - see its NOTE ON OFFSET.
     offset: Any = None
+    # The dict this Bone was built from. Kept because the extraction above
+    # drops roughly 26 of a real bone's ~61 keys - an editor has to reach
+    # them. None only for a Bone never built from JSON (there is no such
+    # construction site today, but the field stays defaulted so nothing
+    # depending on Bone's positional/keyword signature breaks).
+    raw: dict = None
 
     def dynamics_on(self, frame: float, exporter: "Exporter") -> bool:
         """Whether this bone's ANGLE dynamics is switched on at `frame`.
@@ -2968,6 +2979,7 @@ class Bone:
             scale_control_delay=raw.get("scale_control_delay", 0) or 0,
             fixed_angle=bool(raw.get("fixed_angle", False)),
             offset=raw.get("offset") or {"x": 0.0, "y": 0.0},
+            raw=raw,
         )
 
 
@@ -2977,7 +2989,7 @@ class Skeleton:
     relative to a frame, hence world_matrices() rather than a precomputed
     property."""
 
-    def __init__(self, bones: list[Bone], bones_groups: list):
+    def __init__(self, bones: list[Bone], bones_groups: list, raw: dict = None):
         self.bones = bones
         # Raw passthrough, NOT parsed - see docs/moho-rigging-and-deformation.md's
         # Vitruvian Bones section: presumed (from Moho's own scripting API,
@@ -2993,6 +3005,10 @@ class Skeleton:
         # {active-action context: per-bone rest world angle} - see
         # _rest_orient_angles, which is the only reader.
         self._rest_orient_cache: dict[tuple, list[float]] = {}
+        # The dict this Skeleton was built from (the BoneLayer's own
+        # `skeleton` object) - kept beside `bones`/`bones_groups` so an
+        # editor can reach whatever else lives on it.
+        self.raw = raw
 
     # VITRUVIAN BONES (`bones_groups`) - shape decoded, semantics NOT, and an
     # implementation attempt was measured and rejected.  See
@@ -3026,7 +3042,8 @@ class Skeleton:
     def _build(raw: Optional[dict]) -> Optional["Skeleton"]:
         if not raw or not raw.get("bones"):
             return None
-        return Skeleton([Bone._build(b) for b in raw["bones"]], raw.get("bones_groups") or [])
+        return Skeleton([Bone._build(b) for b in raw["bones"]],
+                         raw.get("bones_groups") or [], raw=raw)
 
     def world_matrices(self, frame: float, exporter: "Exporter",
                        bind_rest: bool = False) -> list[Mat2D]:
@@ -4273,6 +4290,11 @@ class CurvePoint:
     offset_in: Any
     offset_out: Any
     segments_on: bool
+    # The dict this CurvePoint was built from - the `1021` format's shorter
+    # three-key form is stored here exactly as read, unpadded, so an editor
+    # can tell it apart from a `1038`/`1045` point that merely happens to
+    # hold the same defaults.
+    raw: dict = None
 
     # Neutral handle shape, used when the `1021` format omits these fields.
     # weight 1.0 makes handle_length collapse to distance * smoothness, and
@@ -4303,6 +4325,7 @@ class CurvePoint:
             offset_in=raw.get("offset_in", CurvePoint.DEFAULT_OFFSET),
             offset_out=raw.get("offset_out", CurvePoint.DEFAULT_OFFSET),
             segments_on=bool(raw["segments_on"]),
+            raw=raw,
         )
 
 
@@ -4312,7 +4335,8 @@ class Curve:
     points."""
 
     def __init__(self, closed: bool, points: list[CurvePoint],
-                  start_percent: Any = None, end_percent: Any = None):
+                  start_percent: Any = None, end_percent: Any = None,
+                  raw: dict = None):
         self.closed = closed
         self.points = points
         # Moho's "Stroke Exposure" (manual ch. 3.xx's Curve Exposure tool,
@@ -4323,11 +4347,14 @@ class Curve:
         # neither field.
         self.start_percent = start_percent
         self.end_percent = end_percent
+        # The dict this Curve was built from - kept beside `points` etc. so
+        # an editor can reach whatever else lives on it.
+        self.raw = raw
 
     @staticmethod
     def _build(raw: dict) -> "Curve":
         return Curve(bool(raw["closed"]), [CurvePoint._build(p) for p in raw["points"]],
-                      raw.get("start_percent"), raw.get("end_percent"))
+                      raw.get("start_percent"), raw.get("end_percent"), raw=raw)
 
     def segment_count(self) -> int:
         n = len(self.points)
@@ -4354,11 +4381,14 @@ class MeshPoint:
     position: Any
     width: Any
     parent: int = -2
+    # The dict this MeshPoint was built from. Kept because the extraction
+    # above drops 8 of a real point's 11 keys - an editor has to reach them.
+    raw: dict = None
 
     @staticmethod
     def _build(raw: dict) -> "MeshPoint":
         return MeshPoint(position=raw["position"], width=raw["width"],
-                          parent=raw.get("parent", -2))
+                          parent=raw.get("parent", -2), raw=raw)
 
 
 @dataclass(frozen=True)
@@ -4379,7 +4409,7 @@ class Shape:
 
     def __init__(self, shape_id: int, name: str, has_fill: bool, has_outline: bool,
                  combo_mode: int, edges: list[Edge], style: ResolvedStyle,
-                 effect_scale: Any, effect_rotation: Any):
+                 effect_scale: Any, effect_rotation: Any, raw: dict = None):
         self.id = shape_id
         self.name = name
         self.has_fill = has_fill
@@ -4389,6 +4419,15 @@ class Shape:
         self.style = style
         self.effect_scale = effect_scale       # channel; gradient scale, default 1.0
         self.effect_rotation = effect_rotation  # channel; gradient rotation, default 0.0
+        # The dict this Shape was built from. Kept because the extraction
+        # above drops eight of the seventeen keys a real shape carries -
+        # selected, fill_allowed, combo_blend_anim, effect_offset,
+        # 3d_thickness and the inherited_style pair - and an editor has to
+        # reach them. Also the only way to reach the shape's own `edges`
+        # arrays undecoded: `Edge` is a frozen dataclass built by zipping
+        # three parallel lists, so it has no single source dict of its own
+        # to keep, and `raw["edges"]` is where those lists still live.
+        self.raw = raw
 
     @staticmethod
     def _build(raw: dict, styles: StyleTable) -> "Shape":
@@ -4408,6 +4447,7 @@ class Shape:
             style=ResolvedStyle.resolve(raw, styles),
             effect_scale=raw.get("effect_scale", 1.0),
             effect_rotation=raw.get("effect_rotation", 0.0),
+            raw=raw,
         )
 
 
@@ -4417,7 +4457,7 @@ class Mesh:
     docstring for how curves/shapes relate."""
 
     def __init__(self, points: list[MeshPoint], curves: list[Curve], shapes: list[Shape],
-                 shape_order: Any = None):
+                 shape_order: Any = None, raw: dict = None):
         self.points = points
         self.curves = curves
         self.shapes = shapes
@@ -4425,6 +4465,14 @@ class Mesh:
         # or None when the field is absent - see draw_order().
         self.shape_order = shape_order
         self._has_point_bones: Optional[bool] = None   # see has_point_bones
+        # The dict this Mesh was built from - kept beside `points`/`curves`/
+        # `shapes` so an editor can reach whatever else lives on it.
+        # EDITING NOTE: a resolved PatchLayer's `layer.mesh` is this exact
+        # object BORROWED from its target layer (a PatchLayer carries no
+        # mesh of its own) - writing through `layer.mesh.raw[...]` there
+        # edits the target's mesh, which is shared on purpose. See
+        # Document._resolve_patch_layers ("ALIASING, NOT COPYING").
+        self.raw = raw
 
     @property
     def has_point_bones(self) -> bool:
@@ -4484,6 +4532,7 @@ class Mesh:
             curves=[Curve._build(c) for c in raw["curves"]],
             shapes=[Shape._build(s, styles) for s in raw["shapes"]],
             shape_order=raw.get("shape_order"),
+            raw=raw,
         )
 
 
@@ -4497,6 +4546,14 @@ class Transform:
         self.rotation_z = raw["rotation_z"]
         self.flip_h = raw["flip_h"]
         self.flip_v = raw["flip_v"]
+        # The dict this Transform was built from (a layer's own
+        # `transforms` object). Kept because the extraction above reads
+        # only these five channels. EDITING NOTE: for a resolved
+        # PatchLayer, `layer.transform` is not this layer's own Transform at
+        # all - it is aliased to its target layer's, so writing through
+        # `layer.transform.raw[...]` there rewrites the TARGET's transform.
+        # See Document._resolve_patch_layers ("ALIASING, NOT COPYING").
+        self.raw = raw
 
 
 class Layer:
@@ -4512,6 +4569,13 @@ class Layer:
                  children: list["Layer"], mesh: Optional[Mesh],
                  skeleton: Optional[Skeleton], is_container: bool):
         self._raw = raw
+        # Set on a PatchLayer only, by Document._resolve_patch_layers: the
+        # target layer's parent_bone/flexi_bone_subset/origin, borrowed so the
+        # patch draws its reused mesh in the right place WITHOUT writing those
+        # values into `self._raw` - the patch's own transform is its clip
+        # region (see patch_clip below), not junk to overwrite. None on every
+        # other layer, and on a PatchLayer whose target has not resolved yet.
+        self._patch_substitute: Optional[dict] = None
         self.kind = kind
         self.type_name = type_name      # the raw JSON string, for display/`--list`
         self.children = children
@@ -4520,6 +4584,12 @@ class Layer:
         # tree exists, by Document._resolve_patch_layers - see the module
         # docstring's PATCH LAYERS section.  `mesh` is a plain attribute
         # (not read-only) specifically so that late assignment works.
+        # WARNING for an editing caller: once resolved, a PatchLayer's `mesh`
+        # is not its own - it is the SAME `Mesh` object as its target
+        # layer's, aliased there by Document._resolve_patch_layers for
+        # rendering. See that assignment's own comment (search
+        # "ALIASING, NOT COPYING") before writing through `layer.mesh` on
+        # any layer that might be a PatchLayer.
         self.mesh = mesh
         self.skeleton = skeleton
         # Whether the raw JSON has a "layers" key AT ALL (even as an empty
@@ -4529,6 +4599,12 @@ class Layer:
         # which is what `is_container` distinguishes, and remains correct
         # for a PatchLayer whose target never resolves to real geometry.
         self.is_container = is_container
+        # WARNING for an editing caller: for a resolved PatchLayer, this
+        # attribute is overwritten below to ALIAS its target layer's own
+        # `Transform` object, not the patch's own (see the same
+        # "ALIASING, NOT COPYING" comment in Document._resolve_patch_layers).
+        # The patch's own transform - what actually places its clip region -
+        # lives at `patch_clip.transform` instead, once resolved.
         self.transform = Transform(raw["transforms"])
         # Set on a PatchLayer only, by Document._resolve_patch_layers: a
         # standalone Layer holding the patch's OWN transform and bone binding,
@@ -4754,12 +4830,23 @@ class Layer:
     def parent_bone(self) -> int:
         """Bone index this layer is *rigidly* bound to, or -1 for flexible
         ("region") binding across its skeleton (or its flexi_bone_subset, if
-        narrower).  See the module docstring's BONE DEFORMATION section."""
+        narrower).  See the module docstring's BONE DEFORMATION section.
+
+        A PatchLayer reports its TARGET's value here (via
+        `_patch_substitute`, set by Document._resolve_patch_layers) rather
+        than its own raw field - see that method's docstring."""
+        if self._patch_substitute is not None:
+            return self._patch_substitute["parent_bone"]
         return self._raw.get("parent_bone", -1)
 
     @property
     def origin(self) -> Vec2:
-        o = self._raw.get("origin") or {}
+        """See parent_bone above for why a PatchLayer reports its target's
+        value (via `_patch_substitute`) instead of its own raw field."""
+        if self._patch_substitute is not None:
+            o = self._patch_substitute["origin"] or {}
+        else:
+            o = self._raw.get("origin") or {}
         return Vec2(o.get("x", 0.0), o.get("y", 0.0))
 
     @property
@@ -4835,7 +4922,12 @@ class Layer:
 
     @property
     def flexi_bone_subset(self) -> list[int]:
-        raw = self._raw.get("flexi_bone_subset") or ""
+        """See parent_bone above for why a PatchLayer reports its target's
+        value (via `_patch_substitute`) instead of its own raw field."""
+        if self._patch_substitute is not None:
+            raw = self._patch_substitute["flexi_bone_subset"] or ""
+        else:
+            raw = self._raw.get("flexi_bone_subset") or ""
         return [int(i) for i in str(raw).split("|") if i != ""]
 
     @property
@@ -5070,6 +5162,13 @@ class Document:
                   start_frame=pd.get("start_frame", 0),
                   end_frame=pd.get("end_frame", 0),
                   animated_values=raw.get("animated_values"))
+        # The whole parsed root dict, kept beside the extracted fields above
+        # so an editor can reach anything Document itself does not model
+        # (e.g. project_data keys never read here). Set on the instance
+        # rather than threaded through __init__, since every other
+        # construction site of Document (there are none today outside this
+        # method) would otherwise need updating too.
+        doc.raw = raw
         doc._resolve_patch_layers()
         return doc
 
@@ -5123,18 +5222,96 @@ class Document:
                     if target is not None and target.mesh is not None:
                         # The patch's OWN rigging is not junk to be discarded -
                         # it positions the patch's clip region.  Snapshot it as
-                        # a standalone Layer BEFORE the target's rigging is
-                        # copied over the top, so build_deform_chain can be run
+                        # a standalone Layer so build_deform_chain can be run
                         # against it later exactly as against any other layer.
-                        # See Layer.patch_clip and Exporter._patch_clip_path.
+                        # Ordering no longer matters here: `layer._raw` is
+                        # never written (the target's values live only on
+                        # `layer._patch_substitute`, set below), and the fresh
+                        # Layer this constructs gets its own independent
+                        # `_patch_substitute = None`.  The `dict(layer._raw)`
+                        # shallow copy is therefore purely defensive (so
+                        # nothing accidentally shares a dict with `layer`
+                        # itself) rather than protection against a mutation
+                        # that no longer happens. See Layer.patch_clip and
+                        # Exporter._patch_clip_path.
                         layer.patch_clip = Layer(
                             dict(layer._raw), layer.kind, layer.type_name,
                             [], None, None, False)
+                        # ALIASING, NOT COPYING: `layer.mesh` and
+                        # `layer.transform` become the SAME `Mesh`/`Transform`
+                        # OBJECTS as `target.mesh`/`target.transform` -
+                        # sharing `target`'s underlying raw dicts too, since
+                        # both classes just wrap `raw` (see Mesh.raw and
+                        # Transform.raw). That is deliberate and must not
+                        # change: it is what lets ShapeGroupRenderer and
+                        # build_deform_chain draw the patch's borrowed
+                        # artwork with the target's own rigging, and any
+                        # deduplication/copy here would only cost memory for
+                        # no behavioural gain since nothing mutates them
+                        # during export.
+                        #
+                        # EDITING HAZARD (Task 5 made `.raw` a first-class
+                        # write surface, which this predates): a future
+                        # script that does
+                        # `patch_layer.transform.raw["scale"] = [...]`
+                        # expecting to move THIS patch's clip region will
+                        # instead silently rewrite `target`'s transform,
+                        # because `patch_layer.transform IS target.transform`
+                        # after this line runs - the attribute name reads as
+                        # "this layer's own transform" but is not, for a
+                        # resolved PatchLayer. The patch's OWN transform (the
+                        # one that actually places its clip disc - see
+                        # Exporter._patch_clip_path and
+                        # docs/moho-project-file-format.md 12.1) lives at
+                        # `layer.patch_clip.transform` instead - the fresh
+                        # Layer built two lines above, whose `_raw` is a
+                        # shallow copy of THIS patch's own pre-aliasing raw
+                        # dict, taken before `layer.transform` is overwritten
+                        # below. `layer.mesh` has no equivalent "own" version
+                        # to redirect to: a PatchLayer genuinely carries no
+                        # mesh of its own (`patch_clip`'s own `mesh` argument
+                        # above is `None`) - a caller wanting to change what
+                        # a patch DRAWS has to edit `target.mesh` directly,
+                        # with the explicit understanding that this changes
+                        # the target layer's own artwork too, since they are
+                        # the same object on purpose. A real editing API
+                        # should give a PatchLayer separate
+                        # `own_transform`/`borrowed_transform` (and
+                        # `borrowed_mesh`) accessors instead of overloading
+                        # one name for two different objects depending on
+                        # layer kind; not done here because de-aliasing
+                        # `.transform`/`.mesh` themselves would change what
+                        # `check-export`'s byte-level baseline renders.
                         layer.mesh = target.mesh
                         layer.transform = target.transform
-                        layer._raw["parent_bone"] = target._raw.get("parent_bone", -1)
-                        layer._raw["flexi_bone_subset"] = target._raw.get("flexi_bone_subset", "")
-                        layer._raw["origin"] = target._raw.get("origin")
+                        # A patch reuses its target's MESH, so it must also
+                        # borrow the target's binding to draw that mesh in the
+                        # right place -- but its OWN transform is its clip
+                        # region (docs/moho-project-file-format.md 12.1), so
+                        # the borrowed values must never be written back into
+                        # the raw tree. Keeping them beside it lets an editor
+                        # load, change and save a document without destroying
+                        # the patch's own rigging.
+                        #
+                        # `source` is `target._patch_substitute` rather than
+                        # `target._raw` when the target is ITSELF an
+                        # already-resolved PatchLayer (the "iterating until
+                        # nothing new resolves" case above) - its `_raw` still
+                        # carries its own never-used rigging, and the values
+                        # this patch must borrow are the ones on its
+                        # `_patch_substitute` instead. Before this raw-dict
+                        # mutation was removed, `target._raw` itself carried
+                        # the borrowed values in that case (they had been
+                        # written in place by the earlier iteration), so this
+                        # keeps that chained lookup working. The two dicts use
+                        # identical key names/formats, so `source.get(...)`
+                        # is correct either way.
+                        source = target._patch_substitute if target._patch_substitute is not None else target._raw
+                        layer._patch_substitute = {
+                            "parent_bone": source.get("parent_bone", -1),
+                            "flexi_bone_subset": source.get("flexi_bone_subset", ""),
+                            "origin": source.get("origin"),
+                        }
                         resolved_any = True
 
     def walk(self) -> Iterator[tuple[tuple[Layer, ...], Layer]]:
@@ -9382,13 +9559,20 @@ class ShapeGroupRenderer:
 # ============================================================================
 
 def load_document(path: str) -> Document:
-    """Read and parse a .mohoproj/.animeproj file.  Kept separate from
+    """Read and parse a .mohoproj/.animeproj/.moho file.  Kept separate from
     Document.from_raw so the document model itself has no file I/O in it -
     handy for testing, and mirrors how a Go port would likely separate
     `os.ReadFile` + `json.Unmarshal` (main.go) from decoding into the typed
-    model (document.go)."""
-    with open(path, encoding="utf-8") as f:
-        raw = json.load(f)
+    model (document.go).
+
+    Delegates the actual read to `mohoedit.read_document`, which also handles
+    `.moho` (a ZIP holding `Project.mohoproj` plus an optional `preview.jpg`)
+    - 30 of the 76 sample documents are packaged that way, and before this
+    call existed nothing in this repo could open them. The `Container` half
+    of that return value is dropped here: this exporter only ever reads a
+    document to draw it, never to save one back, so it has no use for the
+    packaging information `mohoedit.write_document` (a later tool) needs."""
+    raw, _container = mohoedit.read_document(path)
     return Document.from_raw(raw)
 
 

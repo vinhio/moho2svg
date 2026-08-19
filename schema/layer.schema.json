@@ -8,8 +8,8 @@
     "FileRef": {
       "type": "object",
       "properties": {
-        "path": { "type": "string" },
-        "relativeTo": { "type": "string", "description": "Observed values include \"Project\" and \"Absolute\"." }
+        "path": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "relativeTo": { "type": "string", "description": "Observed values include \"Project\" and \"Absolute\"." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -18,13 +18,13 @@
       "type": "object",
       "description": "Per-layer image effects. All of them EXCEPT `visibility` are at their default/off values in every sample and are not applied; `visibility` is genuinely used (190 layers across 14 files) and IS applied - see its own description.",
       "properties": {
-        "alpha": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "The layer's own OPACITY, keyframeable, from the General tab's Compositing Effects group. MEASURED as a plain linear blend: rendering a layer at 0.5 lands on the exact midpoint of its 1.0 and 0.0 renders (mean error 0.13/255). 139 LEAF layers across 15 of the 46 sample files set it to something other than 1, and 11 of those animate it; APPLIED by both exporters (SVG `opacity`, Lottie transform `o`). A CONTAINER's own alpha is NOT applied - three candidate models were measured and the best still scored worse than ignoring it, so moho2svg.py warns instead (5 layers corpus-wide). A layer faded to 0 also contributes nothing to a mask." },
-        "visibility": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "ANIMATED show/hide, and - the manual is explicit about this (ch. 12.02) - \"totally independent of the visibility box displayed in the layer list\": the list flag is an editing convenience, this one is what the render honours. A layer draws only when BOTH are true. Non-trivial on 190 layers across 14 of the 46 sample files; APPLIED by both exporters via Layer.visible_at. (An earlier revision of this schema recorded it as \"true everywhere\", which was a 19-file artefact.)" },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "noise": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "pixelation": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "threshold": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "ambient_occlusion": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+        "alpha": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "The layer's own OPACITY, keyframeable, from the General tab's Compositing Effects group. MEASURED as a plain linear blend: rendering a layer at 0.5 lands on the exact midpoint of its 1.0 and 0.0 renders (mean error 0.13/255). 139 LEAF layers across 15 of the 46 sample files set it to something other than 1, and 11 of those animate it; APPLIED by both exporters (SVG `opacity`, Lottie transform `o`). A CONTAINER's own alpha is NOT applied - three candidate models were measured and the best still scored worse than ignoring it, so moho2svg.py warns instead (5 layers corpus-wide). A layer faded to 0 also contributes nothing to a mask." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4675 in Layer.effect_alpha (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "visibility": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "ANIMATED show/hide, and - the manual is explicit about this (ch. 12.02) - \"totally independent of the visibility box displayed in the layer list\": the list flag is an editing convenience, this one is what the render honours. A layer draws only when BOTH are true. Non-trivial on 190 layers across 14 of the 46 sample files; APPLIED by both exporters via Layer.visible_at. (An earlier revision of this schema recorded it as \"true everywhere\", which was a 19-file artefact.)" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4646 in Layer.effect_visibility (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "noise": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "pixelation": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "threshold": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "ambient_occlusion": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -33,9 +33,9 @@
       "type": "object",
       "description": "An extra outline stroked around the whole layer's silhouette. Off in every sample.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "width": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "width": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4390 in MeshPoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -44,8 +44,8 @@
       "type": "object",
       "description": "A flat colour override for the whole layer. Off in every sample.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": true
     },
@@ -54,16 +54,16 @@
       "type": "object",
       "description": "Drop shadow. Off in every sample. Note: `threshold` here is a BOOL channel, not numeric, despite the name.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "expansion": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "clip_to_group": { "type": "boolean", "description": "Plain (not a channel)." }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2981 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "expansion": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "clip_to_group": { "type": "boolean", "description": "Plain (not a channel)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -72,15 +72,15 @@
       "type": "object",
       "description": "Inner shading. Off in every sample. Note: `threshold` here is a BOOL channel, not numeric.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "contraction": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "angle": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "offset": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2981 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "contraction": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "noise_amp": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "noise_scale": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -89,12 +89,12 @@
       "type": "object",
       "description": "Off in every sample. Note: `threshold` here is a BOOL channel, not numeric.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "scale": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "shear": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" },
-        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "blur": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "scale": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4540 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "shear": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "color": { "$ref": "channel.schema.json#/$defs/ColorChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:7273 in Exporter._build_gradient (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "threshold": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -103,15 +103,15 @@
       "type": "object",
       "description": "Off in every sample; not meaningful for a flat single-frame export anyway. An older-generation variant omits extended_frames/frame_percentage/sub_frames.",
       "properties": {
-        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "frames": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "skip": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "alpha_start": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "alpha_end": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "radius": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "frame_percentage": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "extended_frames": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "sub_frames": { "$ref": "channel.schema.json#/$defs/BoolChannel" }
+        "on": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "frames": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "skip": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "alpha_start": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "alpha_end": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "radius": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "frame_percentage": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "extended_frames": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "sub_frames": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -120,20 +120,20 @@
       "type": "object",
       "description": "2D physics simulation parameters. Disabled in every sample; not applied by moho2svg.py.",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "static": { "type": "boolean" },
-        "sleeping": { "type": "boolean" },
-        "respawn": { "type": "integer" },
-        "velocity": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
-        "density": { "type": "number" },
-        "friction": { "type": "number" },
-        "restitution": { "type": "number" },
-        "pivot": { "type": "boolean" },
-        "enable_motor": { "type": "boolean" },
-        "motor_speed": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "motor_torque": { "type": "number" },
-        "force_field": { "type": "boolean" },
-        "force_field_vector": { "$ref": "channel.schema.json#/$defs/Vec2Channel" }
+        "enabled": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5025 in Layer.physics_dynamic (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "static": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5025 in Layer.physics_dynamic (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "sleeping": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "respawn": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "velocity": { "type": "object", "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"} } , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "density": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "friction": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "restitution": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "pivot": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "enable_motor": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "motor_speed": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "motor_torque": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "force_field": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "force_field_vector": { "$ref": "channel.schema.json#/$defs/Vec2Channel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -142,16 +142,16 @@
       "type": "object",
       "description": "A layer's local transform. Rotation and scale pivot on the layer's own `origin`, not local (0,0). Only translation/scale (Vec3, though the z component is ignored by this 2D-only reverse-engineering)/rotation_z/flip_h/flip_v are applied by moho2svg.py; rotation_x/rotation_y (3D) and shear are read but never applied.",
       "properties": {
-        "translation": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
-        "scale": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
-        "shear": { "$ref": "channel.schema.json#/$defs/Vec3Channel" },
-        "rotation_z": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "rotation_x": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "rotation_y": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-        "flip_h": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "flip_v": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-        "following": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Path-following offset." },
-        "physics_nudge": { "$ref": "channel.schema.json#/$defs/Vec2Channel" }
+        "translation": { "$ref": "channel.schema.json#/$defs/Vec3Channel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4539 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "scale": { "$ref": "channel.schema.json#/$defs/Vec3Channel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4540 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "shear": { "$ref": "channel.schema.json#/$defs/Vec3Channel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "rotation_z": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4541 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "rotation_x": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "rotation_y": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "flip_h": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4542 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "flip_v": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4543 in Transform.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "following": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Path-following offset." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "physics_nudge": { "$ref": "channel.schema.json#/$defs/Vec2Channel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -161,8 +161,23 @@
       "description": "An entry of a layer's own `actions` list - a document-wide action-NAME REGISTRY replicated on nearly every layer, not a per-layer list of that layer's own actions (confirmed: a BoneLayer with zero bones can carry the exact same action names as a 157-bone skeleton elsewhere in the same document). `pose` is always the literal integer 0 here - the REAL pose data lives on individual channels' own `actions[]` entries (see channel.schema.json ActionRef), keyed by the same `name`. See docs/moho-project-file-format.md §11.",
       "required": ["name"],
       "properties": {
-        "name": { "type": "string" },
-        "pose": { "const": 0 }
+        "name": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "pose": { "const": 0 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1853 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}
+      },
+      "additionalProperties": true
+    },
+
+    "MaskingPoint": {
+      "type": "object",
+      "description": "One entry of a layer's masking_points array - a \"magic wand\"-style auto-mask seed. Not read by moho2svg.py.",
+      "properties": {
+        "seed_point": {
+          "type": "object",
+          "description": "Plain (not a channel) - where the wand was clicked, in the layer's own local coordinate space.",
+          "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"} }
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "tolerance": { "type": "integer", "description": "Colour-similarity threshold for the flood fill from seed_point. Observed 106 and 7 in the one sampled document." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "reverse_mask": { "type": "boolean", "description": "Observed false in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -172,89 +187,104 @@
       "description": "Fields observed on every layer type regardless of `type`. Container-only fields (layers[], group_mask, expanded, skeleton, ...) are NOT here - see the per-type schemas below.",
       "required": ["type", "name", "uuid", "visible"],
       "properties": {
-        "type": { "type": "string" },
-        "name": { "type": "string" },
-        "uuid": { "type": "string" },
-        "visible": { "type": "boolean" },
-        "edit_only": { "type": "boolean", "description": "Kept for editing convenience, never rendered - Moho's own SVG export defines an empty <g> for such a layer rather than drawing its shapes." },
+        "type": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "name": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2681 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "uuid": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2679 in StyleTable.build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "visible": { "type": "boolean" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4630 in Layer.visible (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "edit_only": { "type": "boolean", "description": "Kept for editing convenience, never rendered - Moho's own SVG export defines an empty <g> for such a layer rather than drawing its shapes." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4710 in Layer.edit_only (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "origin": {
           "type": "object",
           "description": "Plain (not a channel) - the pivot point for `transforms`.",
-          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
-        },
+          "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"} }
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4828 in Layer.origin (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "parent_bone": {
           "type": "integer",
-          "description": "Index into the enclosing BoneLayer's skeleton.bones, or -1 for flexible (\"region\") binding across the whole skeleton (or flexi_bone_subset, if narrower). -1 is overwhelmingly the most common value. -3 has also been observed, exclusively on ImageLayer instances that also carry a non-trivial flexi_bone_subset - presumably a distinct binding mode specific to raster/bone-warped images; not decoded, and NOT handled by moho2svg.py (which only distinguishes -1 from >=0)."
+          "description": "Index into the enclosing BoneLayer's skeleton.bones, or -1 for flexible (\"region\") binding across the whole skeleton (or flexi_bone_subset, if narrower). -1 is overwhelmingly the most common value. -3 has also been observed, exclusively on ImageLayer instances that also carry a non-trivial flexi_bone_subset - presumably a distinct binding mode specific to raster/bone-warped images; not decoded, and NOT handled by moho2svg.py (which only distinguishes -1 from >=0).",
+          "x-moho-disposition": "MODELLED",
+          "x-moho-evidence": "moho2svg.py build_deform_chain / Skinner.build dispatches rigid (>=0) vs flexible (-1) binding; -3 is unhandled and is a recorded gap, not a false claim"
         },
         "flexi_bone_subset": {
           "type": "string",
           "description": "A \"|\"-joined list of BONE INDICES (not names), e.g. \"1|2\", restricting flexible binding to those bones. \"\" means all bones in the skeleton (or, per the -3 finding above, some other full-skeleton default). Distinct from mesh.groups' PointGroup, which names point indices, not bone indices."
-        },
+        , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4909 in Layer.flexi_bone_subset (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "masking": {
           "type": "integer",
           "enum": [0, 1, 2, 3, 4, 5, 6, 7],
-          "description": "This layer's role within its parent's mask, when the parent container has group_mask active. An eight-value ENUM, one per entry of the manual's own Layer Masking menu (ch. 12.05), decoded twice over and in agreement - by the declaration order of MM_* in Moho's own scripting header, and independently by rendering every value with Moho itself (see docs/moho-project-file-format.md section 10 for the measurement tables). 0 = clipped to the mask AS IT STANDS at this point in the draw order; 1 = \"don't mask this layer\"; 2 = add this layer to the mask; 3 = subtract it; 4 = add it but keep the layer invisible; 5 = subtract it, keeping the layer invisible; 6 = clear the mask, then add this layer; 7 = clear, add, and keep it invisible. Every non-zero mode DRAWS UNCLIPPED (measured). The whole field is INERT when the container's group_mask is 0 - even the invisible modes do not hide the layer then (also measured). APPLIED in full by moho2svg.py via Exporter._mask_plan, which builds the mask incrementally rather than once per container."
+          "description": "This layer's role within its parent's mask, when the parent container has group_mask active. An eight-value ENUM, one per entry of the manual's own Layer Masking menu (ch. 12.05), decoded twice over and in agreement - by the declaration order of MM_* in Moho's own scripting header, and independently by rendering every value with Moho itself (see docs/moho-project-file-format.md section 10 for the measurement tables). 0 = clipped to the mask AS IT STANDS at this point in the draw order; 1 = \"don't mask this layer\"; 2 = add this layer to the mask; 3 = subtract it; 4 = add it but keep the layer invisible; 5 = subtract it, keeping the layer invisible; 6 = clear the mask, then add this layer; 7 = clear, add, and keep it invisible. Every non-zero mode DRAWS UNCLIPPED (measured). The whole field is INERT when the container's group_mask is 0 - even the invisible modes do not hide the layer then (also measured). APPLIED in full by moho2svg.py via Exporter._mask_plan, which builds the mask incrementally rather than once per container.",
+          "x-moho-disposition": "MODELLED",
+          "x-moho-evidence": "moho2svg.py Exporter._mask_plan; eight-value enum decoded from Moho's own MM_* scripting header order and confirmed by rendering every value (docs/moho-project-file-format.md §10)"
         },
-        "transforms": { "$ref": "#/$defs/Transforms" },
-        "actions": { "type": "array", "items": { "$ref": "#/$defs/ActionRegistryEntry" } },
+        "transforms": { "$ref": "#/$defs/Transforms" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4587 in Layer.__init__ (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/ActionRegistryEntry" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1854 in Channel.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "masking_points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MaskingPoint" },
+          "description": "\"Magic wand\"-style auto-mask seed points (one instance observed, Boar.mohoproj, a leaf layer with 2 entries). Not read by moho2svg.py."
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
 
-        "layer_color": { "$ref": "#/$defs/LayerColor" },
-        "layer_effects": { "$ref": "#/$defs/LayerEffects" },
-        "layer_outline": { "$ref": "#/$defs/LayerOutline" },
-        "layer_shadow": { "$ref": "#/$defs/LayerShadow" },
-        "layer_shading": { "$ref": "#/$defs/LayerShading" },
-        "perspective_shadow": { "$ref": "#/$defs/PerspectiveShadow" },
-        "motion_blur": { "$ref": "#/$defs/MotionBlur" },
-        "physics": { "$ref": "#/$defs/Physics" },
+        "layer_color": { "$ref": "#/$defs/LayerColor" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_effects": { "$ref": "#/$defs/LayerEffects" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4646 in Layer.effect_visibility (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "layer_outline": { "$ref": "#/$defs/LayerOutline" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_shadow": { "$ref": "#/$defs/LayerShadow" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_shading": { "$ref": "#/$defs/LayerShading" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "perspective_shadow": { "$ref": "#/$defs/PerspectiveShadow" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "motion_blur": { "$ref": "#/$defs/MotionBlur" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "physics": { "$ref": "#/$defs/Physics" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5024 in Layer.physics_dynamic (trace: out/traced_keys.json, see tools/trace_fields.py)"},
 
-        "blend_mode": { "type": "integer", "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "description": "How this layer composites against what is drawn beneath it: 0 = Normal, 1 = Multiply, 2 = Screen, 3 = Overlay, 4 = Add, 5 = Difference, 6 = Hue, 7 = Saturation, 8 = Color, 9 = Luminosity, 10 = Soft Light, 11 = Color Dodge, 12 = Color Burn, 13 = PSD Linear Dodge (Add). The manual names these modes but never numbers them; the ordering is the one the Moho 14.4 binary itself uses when it builds that menu. Distribution across the sample set: 0 on 3794 layers, 1 on 117, 2 on 49, 3 on 2 - so 1/2/3 are the only values with any evidence behind them, and they are confirmed by rendering (see moho2svg.py's own LAYER BLEND MODES section); 4-13 are NOT verified. Both exporters now apply this: moho2svg.py as a CSS mix-blend-mode plus isolation on the containing group, moho2lottie.py as a layer `bm` (which cannot reproduce the per-container isolation, since it flattens the tree)." },
-        "quality_flags": { "type": "integer", "description": "A bit field of per-layer render toggles. Not decoded. Observed values include 4092, 4094, 45052, 45054, 2044." },
-        "label_col": { "type": "integer", "description": "Editor tab colour." },
-        "random_num": { "type": "integer" },
-        "camera_immune": { "type": "boolean", "description": "Manual ch. 12.02, \"Immune to camera movements\": this layer ignores the document camera and stays put on screen while the camera moves - meant for backgrounds, titles and logos. True on 6 layers across 3 files. APPLIED by both exporters (the layer projects through the default camera instead), and inherited by descendants." },
-        "dof_immune": { "type": "boolean" },
-        "face_camera": { "type": "boolean" },
-        "face_camera_mode": { "type": "integer", "description": "Observed constant 2 in every sample." },
-        "flexi_bone_elbow": { "type": "boolean" },
-        "follow_bending": { "type": "boolean" },
-        "follow_curve": { "type": "integer", "description": "Observed constant -1 in every sample." },
-        "follow_layer_uuid": { "type": "string" },
-        "distortion_layer_uuid": { "type": "string", "description": "UUID of another layer used as a distortion mesh - the most likely storage hook for Moho's Smart Warp feature. Empty in all 827 layers that carry the field; absent from the 1021 format generation. Now also matched at the MECHANISM level (not the serialization level - still not confirmed as the same field) by Moho's own scripting API, MohoLayer::SetWarpLayer(MohoLayer*)/GetWarpLayer() - a plain MeshLayer, marked via MarkAsWarpLayer(bool, target)/IsWarpLayer()/IsCurver(), pointing at the layer it deforms. Not read by moho2svg.py, which does not even warn about it. See docs/moho-rigging-and-deformation.md section 5 (5.1b for the API finding)." },
-        "rotate_to_follow": { "type": "boolean" },
-        "scale_compensation": { "type": "boolean", "description": "How a layer's stroke width reacts to ancestor scaling." },
-        "scale_normalization": { "type": "number" },
-        "render_only": { "type": "boolean" },
-        "shown_in_timeline": { "type": "boolean" },
-        "timing_offset": { "type": "integer", "description": "Shifts this layer's whole timeline. Observed constant 0 in every sample - a non-zero value would desync the frame moho2svg.py evaluates, since it is not applied." },
-        "timeline_markers": { "$ref": "channel.schema.json#/$defs/StringChannel" },
-        "layer_ref_fileref": { "$ref": "#/$defs/FileRef" },
-        "layer_ref_mod_date": { "type": "integer" },
-        "layer_ref_path": { "type": "string" },
-        "layer_ref_same_doc": { "type": "boolean" },
-        "layer_ref_uuid": { "type": "string" },
-        "layer_user_comments": { "type": "string" },
-        "layer_user_tags": { "type": "string" },
-        "consolidated_channels": { "type": "boolean" },
-        "animated_layer_effects": { "type": "boolean" },
-        "mask_expansion": { "type": "boolean", "description": "Presumably grows/shrinks the mask edge. Observed false in every sample; not used by moho2svg.py." },
-        "ignored_by_layer_picker": { "type": "boolean" },
-        "metadata": { "$ref": "#/$defs/LayerMetadata" },
-        "script_data": { "$ref": "#/$defs/ScriptData" }
+        "blend_mode": { "type": "integer", "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "description": "How this layer composites against what is drawn beneath it: 0 = Normal, 1 = Multiply, 2 = Screen, 3 = Overlay, 4 = Add, 5 = Difference, 6 = Hue, 7 = Saturation, 8 = Color, 9 = Luminosity, 10 = Soft Light, 11 = Color Dodge, 12 = Color Burn, 13 = PSD Linear Dodge (Add). The manual names these modes but never numbers them; the ordering is the one the Moho 14.4 binary itself uses when it builds that menu. Distribution across the sample set: 0 on 3794 layers, 1 on 117, 2 on 49, 3 on 2 - so 1/2/3 are the only values with any evidence behind them, and they are confirmed by rendering (see moho2svg.py's own LAYER BLEND MODES section); 4-13 are NOT verified. Both exporters now apply this: moho2svg.py as a CSS mix-blend-mode plus isolation on the containing group, moho2lottie.py as a layer `bm` (which cannot reproduce the per-container isolation, since it flattens the tree)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4806 in Layer.blend_mode (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "quality_flags": { "type": "integer", "description": "A bit field of per-layer render toggles. Not decoded. Observed values include 4092, 4094, 45052, 45054, 2044." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "label_col": { "type": "integer", "description": "Editor tab colour." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "random_num": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "camera_immune": { "type": "boolean", "description": "Manual ch. 12.02, \"Immune to camera movements\": this layer ignores the document camera and stays put on screen while the camera moves - meant for backgrounds, titles and logos. True on 6 layers across 3 files. APPLIED by both exporters (the layer projects through the default camera instead), and inherited by descendants." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4798 in Layer.camera_immune (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "dof_immune": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "face_camera": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "face_camera_mode": { "type": "integer", "description": "Observed constant 2 in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "flexi_bone_elbow": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "follow_bending": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "follow_curve": { "type": "integer", "description": "Observed constant -1 in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "follow_layer_uuid": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "distortion_layer_uuid": { "type": "string", "description": "UUID of another layer used as a distortion mesh - the most likely storage hook for Moho's Smart Warp feature. Empty in all 827 layers that carry the field; absent from the 1021 format generation. Now also matched at the MECHANISM level (not the serialization level - still not confirmed as the same field) by Moho's own scripting API, MohoLayer::SetWarpLayer(MohoLayer*)/GetWarpLayer() - a plain MeshLayer, marked via MarkAsWarpLayer(bool, target)/IsWarpLayer()/IsCurver(), pointing at the layer it deforms. Read (Layer.distortion_layer_uuid), and NOT resolved or applied - Smart Warp itself is not implemented - but the read is not idle: it exists so walk_render_tree can at least WARN when a document likely uses the feature, instead of silently exporting undeformed artwork. CORRECTS an earlier revision of this schema, which claimed this field goes entirely unread. See docs/moho-rigging-and-deformation.md section 5 (5.1b for the API finding)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4619 in Layer.distortion_layer_uuid, read to drive a walk_render_tree warning (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "rotate_to_follow": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "scale_compensation": { "type": "boolean", "description": "How a layer's stroke width reacts to ancestor scaling." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "scale_normalization": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "render_only": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "shown_in_timeline": { "type": "boolean" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "timing_offset": { "type": "integer", "description": "Shifts this layer's whole timeline. Observed constant 0 in every sample. Read into the model (Layer.timing_offset), but never applied - moho2svg.py evaluates every layer at the SAME document frame, so a non-zero value here would desync which frame this layer is drawn at, and nothing does that adjustment; see moho2lottie.py's own \"timing_offset\" warning for the same gap on that side." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4937 in Layer.timing_offset (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "timeline_markers": { "$ref": "channel.schema.json#/$defs/StringChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_ref_fileref": { "$ref": "#/$defs/FileRef" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_ref_mod_date": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_ref_path": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_ref_same_doc": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_ref_uuid": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "layer_user_comments": { "type": "string" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "layer_user_tags": { "type": "string" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "consolidated_channels": { "type": "boolean" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "animated_layer_effects": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "mask_expansion": { "type": "boolean", "description": "Moho's \"Expand mask by a pixel\" checkbox on a mask source (manual ch. 12.05). APPLIED, corrected from an earlier revision that called it unused: only honoured on an \"add\"-mode mask source, where Exporter._mask_element paints a 2px-wide white stroke along that op's own path (moho2lottie.py sets the Lottie mask's native `x`/\"Expand\" property to 1 instead). Measured against Moho's own render: forcing it false on SketchBone.mohoproj's 8 flagged layers moves 650 px at frame 1 (0.07% of a 1280x720 frame, along the eye/mouth mask edges) - small, but real." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4790 in Layer.mask_expansion, applied by Exporter._mask_element (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "ignored_by_layer_picker": { "type": "boolean" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "metadata": { "$ref": "#/$defs/LayerMetadata" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "script_data": { "$ref": "#/$defs/ScriptData" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
 
     "LayerMetadata": {
       "type": "object",
-      "description": "Small per-layer key/value bag written by Moho's editor and by layer scripts. Observed on MeshLayer, BoneLayer and SwitchLayer instances. Purely editor bookkeeping - not read by moho2svg.py. Left open (additionalProperties) because the key set is tool/script dependent, but every key seen across the 19 sampled documents is enumerated below.",
+      "description": "Small per-layer key/value bag written by Moho's editor and by layer scripts. Observed on MeshLayer, BoneLayer and SwitchLayer instances. Purely editor bookkeeping - not read by moho2svg.py. Left open (additionalProperties) because the key set is tool/script dependent, but every key seen across the 76-document census is enumerated below.",
       "properties": {
-        "what": { "type": "integer", "description": "Observed constant 0. Meaning unknown - the same key appears in the document-level `metadata` bag." },
-        "NewLayerScript": { "type": "boolean", "description": "Set by Moho's \"new layer\" script hook." },
-        "LM_GrandpaBones": { "type": "boolean", "description": "Observed only on SwitchLayer instances (ReparentBone.animeproj). Presumably the same feature as BoneLayer.grandpa_bone." },
-        "psd_layers": { "type": "string", "description": "A \"|\"-joined list of PSD layer indices, e.g. \"24|12|7|23|...\". Observed on the BoneLayer wrapping a PSD cutout-puppet import (BoneStrengthTool.animeproj), recording which PSD layers became ImageLayer children." }
+        "what": { "type": "integer", "description": "Observed constant 0. Meaning unknown - the same key appears in the document-level `metadata` bag." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "NewLayerScript": { "type": "boolean", "description": "Set by Moho's \"new layer\" script hook." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "LM_GrandpaBones": { "type": "boolean", "description": "Observed only on SwitchLayer instances (ReparentBone.animeproj). Presumably the same feature as BoneLayer.grandpa_bone." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "psd_layers": { "type": "string", "description": "A \"|\"-joined list of PSD layer indices, e.g. \"24|12|7|23|...\". Observed on the BoneLayer wrapping a PSD cutout-puppet import (BoneStrengthTool.animeproj), recording which PSD layers became ImageLayer children." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "audio_file_sec": { "type": "string", "description": "Observed \"\" (empty) in every sample, found only in the 30 `.moho` archives. Named alongside image_sec/hsv_image_sec/fill_texture_sec/line_texture_sec/layer_script_sec - a \"_sec\" family that looks like a per-asset security/signature stub Moho reserves but never populates in this corpus." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "image_sec": { "type": "string", "description": "See audio_file_sec - same \"_sec\" family, observed \"\" everywhere." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "hsv_image_sec": { "type": "string", "description": "See audio_file_sec - same \"_sec\" family, observed \"\" everywhere." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "fill_texture_sec": { "type": "string", "description": "See audio_file_sec - same \"_sec\" family, observed \"\" everywhere." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "line_texture_sec": { "type": "string", "description": "See audio_file_sec - same \"_sec\" family, observed \"\" everywhere." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "layer_script_sec": { "type": "string", "description": "See audio_file_sec - same \"_sec\" family, observed \"\" everywhere." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
       },
       "patternProperties": {
-        "^g_[0-9]+$": { "type": "boolean", "description": "Numbered editor toggles (g_10000, g_10001, g_10002, g_10031, g_10033, g_10056, g_10069, g_10082 observed). Not decoded." }
+        "^g_[0-9]+$": { "type": "boolean", "description": "Numbered editor toggles (g_10000, g_10001, g_10002, g_10031, g_10033, g_10056, g_10069, g_10082 observed). Not decoded." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
       },
       "additionalProperties": true
     },
@@ -263,8 +293,8 @@
       "type": "object",
       "description": "Per-layer data written by a Moho layer script. Rare (2 BoneLayer instances, WhatIsBone.animeproj). Not read by moho2svg.py.",
       "properties": {
-        "what": { "type": "integer", "description": "Observed constant 0." },
-        "NewLayerScript": { "type": "boolean" }
+        "what": { "type": "integer", "description": "Observed constant 0." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "NewLayerScript": { "type": "boolean" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
       },
       "additionalProperties": true
     },
@@ -273,15 +303,15 @@
       "type": "object",
       "description": "Fields shared by every layer type that HOLDS other layers (BoneLayer, GroupLayer, SwitchLayer). Kept separate from LayerCommon because a leaf layer (MeshLayer, ImageLayer, PatchLayer, TextLayer) never carries them. Note `depth_sort`/`distance_sort`/`layer_ordering`/`animated_layer_order` were observed on BoneLayer and GroupLayer only, never on SwitchLayer - they are declared here as optional rather than duplicated per type.\n\nDELIBERATELY NOT HERE: the `layers` array itself. Reaching the recursive `$ref: Layer` through this extra `$ref` hop - inside an allOf, inside the recursive Layer oneOf - costs about 11x in wall-clock validation time (measured: SketchBone.animeproj 16.6s -> 182.8s) for exactly the same semantics. Each of the three container types therefore declares `layers` in its own branch. Do not \"tidy\" it in here.",
       "properties": {
-        "group_mask": { "type": "integer", "enum": [0, 1, 2], "description": "Whether this layer, as a mask CONTAINER, masks its children, and what the mask STARTS as (see LayerCommon.masking on the children). 0 = no masking in this group; 1 = \"Reveal all\", the mask starts FULL so every child is visible until something subtracts; 2 = \"Hide all\", the mask starts EMPTY (the common case). Measured against Moho's own renders and agreeing with the GROUP_MASK_* comment in Moho's own scripting header (\"0=none, 1=all visible, 2=all invisible\"). Observed: 0 in 42 files, 2 in 34, 1 in 4."},
-        "expanded": { "type": "boolean", "description": "Editor UI state (tree expanded/collapsed)." },
-        "depth_sort": { "type": "boolean", "description": "Sort children by depth instead of list order. Observed false everywhere; NOT implemented by moho2svg.py, which always uses list order." },
-        "distance_sort": { "type": "boolean", "description": "Observed false everywhere; not implemented by moho2svg.py." },
+        "group_mask": { "type": "integer", "enum": [0, 1, 2], "description": "Whether this layer, as a mask CONTAINER, masks its children, and what the mask STARTS as (see LayerCommon.masking on the children). 0 = no masking in this group; 1 = \"Reveal all\", the mask starts FULL so every child is visible until something subtracts; 2 = \"Hide all\", the mask starts EMPTY (the common case). Measured against Moho's own renders and agreeing with the GROUP_MASK_* comment in Moho's own scripting header (\"0=none, 1=all visible, 2=all invisible\"). Observed: 0 in 42 files, 2 in 34, 1 in 4.", "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4729 in Layer.group_mask (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "expanded": { "type": "boolean", "description": "Editor UI state (tree expanded/collapsed)." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+        "depth_sort": { "type": "boolean", "description": "Sort children by depth instead of list order. Observed false everywhere; NOT implemented by moho2svg.py, which always uses list order." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "distance_sort": { "type": "boolean", "description": "Observed false everywhere; not implemented by moho2svg.py." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
         "layer_ordering": {
           "$ref": "channel.schema.json#/$defs/StringChannel",
           "description": "An animated child draw-order override. Present on effectively every container (150 instances), but with an EMPTY string value in all of them - so no sampled document actually reorders its children over time. Not read by moho2svg.py: a document that does use it would export with the wrong stacking order."
-        },
-        "animated_layer_order": { "type": "boolean", "description": "Whether `layer_ordering` above is active. Observed true on exactly 2 containers across the sample set (ControlBones.animeproj, SketchBone.animeproj) - and even there the paired layer_ordering channel is empty." }
+        , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "animated_layer_order": { "type": "boolean", "description": "Whether `layer_ordering` above is active. Observed true on exactly 2 containers across the sample set (ControlBones.animeproj, SketchBone.animeproj) - and even there the paired layer_ordering channel is empty." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -293,28 +323,28 @@
           "type": "object",
           "required": ["type", "mesh"],
           "properties": {
-            "type": { "const": "MeshLayer" },
-            "mesh": { "$ref": "mesh.schema.json#/$defs/Mesh" },
-            "3d_mode": { "type": "integer", "description": "Observed constant 0 in every sample." },
-            "3d_options": { "$ref": "#/$defs/Mesh3DOptions" },
-            "antialiasing": { "type": "boolean" },
-            "animated_noise": { "type": "boolean" },
-            "noise_amp": { "type": "number" },
-            "noise_scale": { "type": "number" },
-            "noise_interval": { "type": "integer", "description": "Observed 1 (majority) or 2." },
-            "noisy_lines": { "type": "boolean" },
-            "noisy_shapes": { "type": "boolean" },
-            "extra_lines": { "type": "integer", "description": "Observed constant 0 except on a real minority of layers with extra_sketchy=true, where it is 5 - a confirmed, currently-visible output difference (repeated jittered strokes are not drawn)." },
-            "extra_sketchy": { "type": "boolean" },
-            "gap_filling": { "type": "boolean" },
-            "exclude_lines_from_mask": { "type": "boolean" },
-            "fill_texture_path": { "type": "string" },
-            "fill_texture_fileref": { "$ref": "#/$defs/FileRef" },
-            "line_texture_path": { "type": "string" },
-            "line_texture_fileref": { "$ref": "#/$defs/FileRef" },
-            "squashable_deformer": { "type": "boolean", "description": "Deformer flag, present only in the 1045 format generation (all 21 MeshLayers of the one 1045 document; absent from 1038 and 1021). false in every sample. Meaning not decoded - see docs/moho-rigging-and-deformation.md section 5.2." },
-            "triangulated": { "type": "boolean", "description": "Deformer flag, 1045-only, false in every sample. A triangulated mesh is what a deformation mesh needs and a drawing mesh does not - see docs/moho-rigging-and-deformation.md section 5.2." },
-            "frame_zero_deformer": { "type": "boolean", "description": "Deformer flag, 1045-only, true in every sample. Presumably 'this deformer is defined at frame 0', matching the rest-pose-at-frame-0 convention bones already use. Not decoded." }
+            "type": { "const": "MeshLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "mesh": { "$ref": "mesh.schema.json#/$defs/Mesh" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5093 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "3d_mode": { "type": "integer", "description": "Observed constant 0 in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "3d_options": { "$ref": "#/$defs/Mesh3DOptions" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "antialiasing": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "animated_noise": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "noise_amp": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "noise_scale": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "noise_interval": { "type": "integer", "description": "Observed 1 (majority) or 2." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "noisy_lines": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "noisy_shapes": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "extra_lines": { "type": "integer", "description": "Observed constant 0 except on a real minority of layers with extra_sketchy=true, where it is 5 - a confirmed, currently-visible output difference (repeated jittered strokes are not drawn)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "extra_sketchy": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "gap_filling": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "exclude_lines_from_mask": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "fill_texture_path": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "fill_texture_fileref": { "$ref": "#/$defs/FileRef" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "line_texture_path": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "line_texture_fileref": { "$ref": "#/$defs/FileRef" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "squashable_deformer": { "type": "boolean", "description": "Deformer flag, present only in the 1045 format generation (all 21 MeshLayers of the one 1045 document; absent from 1038 and 1021). false in every sample. Meaning not decoded - see docs/moho-rigging-and-deformation.md section 5.2." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4626 in Layer.squashable_deformer (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "triangulated": { "type": "boolean", "description": "Deformer flag, 1045-only, false in every sample. A triangulated mesh is what a deformation mesh needs and a drawing mesh does not - see docs/moho-rigging-and-deformation.md section 5.2." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "frame_zero_deformer": { "type": "boolean", "description": "Deformer flag, 1045-only, true in every sample. Presumably 'this deformer is defined at frame 0', matching the rest-pose-at-frame-0 convention bones already use. Not decoded." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
           }
         }
       ]
@@ -325,17 +355,17 @@
       "description": "Settings for Moho's 3D-mesh-extrusion rendering of a MeshLayer, gated by the sibling `3d_mode` field. Present on EVERY sampled MeshLayer (648 instances across all three format generations, including the MeshLayer nested inside a TextLayer), always with identical default values, and always inert because `3d_mode` is 0 everywhere. Not read by moho2svg.py, which exports flat 2D geometry only - a document that actually enables 3d_mode would export without any extrusion or 3D shading.",
       "required": ["type"],
       "properties": {
-        "type": { "const": "Mesh3DOptions" },
-        "3d_shading_mode": { "type": "integer", "description": "Observed constant 1." },
-        "3d_shading_density": { "type": "integer", "description": "Observed constant 50." },
-        "3d_shading_color": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour. Observed constant {64, 64, 64, 255}." },
-        "3d_silhouette_edges": { "type": "boolean", "description": "Observed constant true." },
-        "3d_material_edges": { "type": "boolean", "description": "Observed constant true." },
-        "3d_crease_edges": { "type": "boolean", "description": "Observed constant true." },
-        "3d_crease_angle": { "type": "number", "description": "Radians. Observed constant 1.047198 (= pi/3, i.e. 60 degrees)." },
-        "3d_edge_extension": { "type": "number", "description": "Observed constant 0.0." },
-        "3d_backface_removal": { "type": "boolean", "description": "Observed constant false." },
-        "3d_reset_z": { "type": "boolean", "description": "Observed constant false." }
+        "type": { "const": "Mesh3DOptions" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "3d_shading_mode": { "type": "integer", "description": "Observed constant 1." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_shading_density": { "type": "integer", "description": "Observed constant 50." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_shading_color": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour. Observed constant {64, 64, 64, 255}." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_silhouette_edges": { "type": "boolean", "description": "Observed constant true." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_material_edges": { "type": "boolean", "description": "Observed constant true." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_crease_edges": { "type": "boolean", "description": "Observed constant true." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_crease_angle": { "type": "number", "description": "Radians. Observed constant 1.047198 (= pi/3, i.e. 60 degrees)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_edge_extension": { "type": "number", "description": "Observed constant 0.0." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_backface_removal": { "type": "boolean", "description": "Observed constant false." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "3d_reset_z": { "type": "boolean", "description": "Observed constant false." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
       },
       "additionalProperties": true
     },
@@ -348,30 +378,30 @@
           "type": "object",
           "required": ["type", "skeleton"],
           "properties": {
-            "type": { "const": "BoneLayer" },
-            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there. NOTE: Moho's own Layer Pool panel lists children in the REVERSE of this order (topmost-drawn first) - the JSON order IS the draw order and needs no reversal." },
-            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton" },
-            "grandpa_bone": { "type": "boolean", "description": "Lets bones in this skeleton also bind layers nested deeper than its own direct children." },
+            "type": { "const": "BoneLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there. NOTE: Moho's own Layer Pool panel lists children in the REVERSE of this order (topmost-drawn first) - the JSON order IS the draw order and needs no reversal." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5137 in Document.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5094 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "grandpa_bone": { "type": "boolean", "description": "Lets bones in this skeleton also bind layers nested deeper than its own direct children." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
             "gravity": {
               "type": "object",
-              "description": "Bone-physics gravity. Rare - observed on exactly one BoneLayer across the whole sample set (Bandit.mohoproj, version 1045). Note the shape differs from GroupLayer's own `gravity` field in BOTH key names and value type: {direction,strength} as CHANNELS here, vs {x,y} as plain floats there. Not read by moho2svg.py.",
+              "description": "Bone-physics gravity. Rare - observed on exactly one BoneLayer across the whole sample set (Bandit.mohoproj, version 1045). Note the shape differs from GroupLayer's own `gravity` field in BOTH key names and value type: {direction,strength} as CHANNELS here, vs {x,y} as plain floats there. Read (Layer.physics_dynamic's _any_nonzero helper checks this object's own `strength.val` for non-zero, as one of three preconditions for reporting a bone as wind/gravity-driven), but never applied to any deformation - moho2svg.py does not simulate the physics; the read only gates a stderr warning (moho2lottie.py's own \"physics_dynamic\" check) that this bone's motion may look different from Moho's damped result.",
               "properties": {
-                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Angle in radians (observed 4.712389 = 3*pi/2, i.e. straight down)." },
-                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Angle in radians (observed 4.712389 = 3*pi/2, i.e. straight down)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2955 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
               },
               "additionalProperties": true
-            },
+            , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5029 in Layer.physics_dynamic.<locals>._any_nonzero, gating a warning only (trace: out/traced_keys.json, see tools/trace_fields.py)"},
             "wind": {
               "type": "object",
-              "description": "Bone-physics wind. Same rarity and same channel-wrapped value convention as `gravity` above. Not read by moho2svg.py.",
+              "description": "Bone-physics wind. Same rarity and same channel-wrapped value convention as `gravity` above. Read the same way (Layer.physics_dynamic's _any_nonzero checks this object's own `strength.val`), and never applied for the same reason - see `gravity`'s own description immediately above.",
               "properties": {
-                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-                "turbulence_amplitude": { "$ref": "channel.schema.json#/$defs/ValChannel" },
-                "turbulence_frequency": { "$ref": "channel.schema.json#/$defs/ValChannel" }
+                "direction": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "strength": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2955 in Bone._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+                "turbulence_amplitude": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "turbulence_frequency": { "$ref": "channel.schema.json#/$defs/ValChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
               },
               "additionalProperties": true
-            }
+            , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5029 in Layer.physics_dynamic.<locals>._any_nonzero, gating a warning only (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ]
@@ -385,17 +415,17 @@
           "type": "object",
           "required": ["type", "layers"],
           "properties": {
-            "type": { "const": "GroupLayer" },
-            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there." },
-            "enable_physics": { "$ref": "channel.schema.json#/$defs/BoolChannel" },
-            "use_baked_physics": { "type": "boolean" },
+            "type": { "const": "GroupLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "Child layers, in draw order (back to front). Declared here rather than in LayerContainer for the performance reason documented there." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5137 in Document.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "enable_physics": { "$ref": "channel.schema.json#/$defs/BoolChannel" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "use_baked_physics": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
             "gravity": {
               "type": "object",
-              "description": "Group-physics gravity as a plain 2D vector. Note the shape differs from BoneLayer's own `gravity` field in BOTH key names and value type: {x,y} as plain floats here, vs {direction,strength} as channels there. Observed on 16 GroupLayers across all three format generations (1021/1038/1045). Not read by moho2svg.py.",
-              "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+              "description": "Group-physics gravity as a plain 2D vector. Note the shape differs from BoneLayer's own `gravity` field in BOTH key names and value type: {x,y} as plain floats here, vs {direction,strength} as channels there. Observed on 16 GroupLayers across all three format generations (1021/1038/1045). GENUINELY not read by moho2svg.py for THIS occurrence: Layer.physics_dynamic - the only code that ever looks up the key `gravity` - returns False unconditionally whenever `self.skeleton is None` (checked before the lookup), which is always true for a GroupLayer. The key NAME `gravity` is nonetheless traced, via the sibling BoneLayer.gravity object a few lines above, which genuinely is reachable (a BoneLayer has a skeleton). Flat-by-name collision, diagnosed and waived - see x-moho-contradiction-waived.",
+              "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"} },
               "additionalProperties": true
-            },
-            "modification_date": { "type": "integer" }
+            , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5029 in Layer.physics_dynamic.<locals>._any_nonzero (trace: out/traced_keys.json, see tools/trace_fields.py) -- NOTE: this evidence is for the KEY NAME `gravity`, genuinely reached via BoneLayer, not for this GroupLayer occurrence; see x-moho-contradiction-waived", "x-moho-contradiction-waived": "Layer.physics_dynamic short-circuits to False before reading `gravity` whenever self.skeleton is None (moho2svg.py:5029), and a GroupLayer never has a skeleton - confirmed by grepping moho2svg.py/moho2lottie.py for the literal string \"gravity\": it appears nowhere else. This occurrence's own object is never read; the disposition is kept MODELLED only because the registry is flat by key name and the same name genuinely is read via BoneLayer.gravity (see docs/moho-field-coverage-plan.md Task 8 fix round 1, Finding A)."},
+            "modification_date": { "type": "integer" , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
           }
         }
       ]
@@ -409,14 +439,14 @@
           "type": "object",
           "required": ["type", "layers", "switch_keys"],
           "properties": {
-            "type": { "const": "SwitchLayer" },
-            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "The alternatives; exactly one is shown at a time, selected by switch_keys." },
-            "switch_keys": { "$ref": "channel.schema.json#/$defs/StringChannel", "description": "An animated string naming the currently-active CHILD LAYER NAME (not an index). The recorded name can go stale if that child was later renamed - moho2svg.py falls back to the first child, matching Moho's own behaviour." },
-            "switch_data": { "type": "string", "description": "Observed empty in every sample." },
-            "switch_interpolation": { "type": "boolean" },
-            "frame_by_frame": { "type": "boolean" },
-            "previewAlignment": { "type": "integer", "description": "Observed constant 0 in every sample." },
-            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton", "description": "Present but with an empty bones list in every sample - do not mistake a SwitchLayer for a BoneLayer." }
+            "type": { "const": "SwitchLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "description": "The alternatives; exactly one is shown at a time, selected by switch_keys." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5137 in Document.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "switch_keys": { "$ref": "channel.schema.json#/$defs/StringChannel", "description": "An animated string naming the currently-active CHILD LAYER NAME (not an index). The recorded name can go stale if that child was later renamed - moho2svg.py falls back to the first child, matching Moho's own behaviour." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4916 in Layer.switch_keys (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "switch_data": { "type": "string", "description": "Observed empty in every sample." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "switch_interpolation": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "frame_by_frame": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "previewAlignment": { "type": "integer", "description": "Observed constant 0 in every sample." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."},
+            "skeleton": { "$ref": "skeleton.schema.json#/$defs/Skeleton", "description": "Present but with an empty bones list in every sample - do not mistake a SwitchLayer for a BoneLayer." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5094 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ]
@@ -429,9 +459,9 @@
           "type": "object",
           "required": ["type", "target_layer_uuid"],
           "properties": {
-            "type": { "const": "PatchLayer" },
-            "target_layer_uuid": { "type": "string", "description": "Names another layer elsewhere in the document (in every sample, a sibling within the same group) whose mesh this patch reuses, redrawn at this patch's own draw-order position." },
-            "target_layer_id": { "type": "integer", "description": "Present alongside target_layer_uuid in every sample; observed values include 0, 1, 2, 3, 7. Purpose beyond the uuid is unknown." }
+            "type": { "const": "PatchLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "target_layer_uuid": { "type": "string", "description": "Names another layer elsewhere in the document (in every sample, a sibling within the same group) whose mesh this patch reuses, redrawn at this patch's own draw-order position." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4607 in Layer.target_layer_uuid (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "target_layer_id": { "type": "integer", "description": "Present alongside target_layer_uuid in every sample; observed values include 0, 1, 2, 3, 7. Purpose beyond the uuid is unknown." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
           }
         }
       ],
@@ -445,35 +475,35 @@
           "type": "object",
           "required": ["type", "text", "mesh_layer"],
           "properties": {
-            "type": { "const": "TextLayer" },
-            "text": { "type": "string", "description": "The literal string; \\n for line breaks." },
-            "font": { "type": "string" },
-            "textsize": { "type": "integer" },
-            "justification": { "type": "integer", "description": "Observed 0, 1, 2." },
-            "leading": { "type": "integer" },
-            "kerning": { "type": "integer" },
-            "fill": { "type": "boolean" },
-            "stroke": { "type": "boolean" },
-            "fillcolor": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour (not a channel), unlike almost every other colour field in the format." },
-            "linecolor": { "$ref": "#/$defs/PlainRGBA" },
-            "linewidth": { "type": "number" },
-            "textinheritedstyle1": { "type": "string" },
-            "textinheritedstyle2": { "type": "string" },
-            "balloonfill": { "type": "boolean" },
-            "balloonfillcolor": { "$ref": "#/$defs/PlainRGBA" },
-            "balloonlinecolor": { "$ref": "#/$defs/PlainRGBA" },
-            "balloonlinewidth": { "type": "number" },
-            "balloonfliph": { "type": "boolean" },
-            "balloonflipv": { "type": "boolean" },
-            "balloonposes": { "type": "string" },
-            "balloonsize": { "type": "integer" },
-            "balloonsizeproportional": { "type": "boolean" },
-            "balloonstroke": { "type": "boolean" },
-            "balloonstyle": { "type": "string" },
+            "type": { "const": "TextLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "text": { "type": "string", "description": "The literal string; \\n for line breaks." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "font": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "textsize": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "justification": { "type": "integer", "description": "Observed 0, 1, 2." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "leading": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "kerning": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "fill": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "stroke": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "fillcolor": { "$ref": "#/$defs/PlainRGBA", "description": "PLAIN 0-255 integer colour (not a channel), unlike almost every other colour field in the format." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "linecolor": { "$ref": "#/$defs/PlainRGBA" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "linewidth": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "textinheritedstyle1": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "textinheritedstyle2": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonfill": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonfillcolor": { "$ref": "#/$defs/PlainRGBA" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonlinecolor": { "$ref": "#/$defs/PlainRGBA" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonlinewidth": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonfliph": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonflipv": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonposes": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonsize": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonsizeproportional": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonstroke": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "balloonstyle": { "type": "string" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
             "mesh_layer": {
               "$ref": "#/$defs/MeshLayer",
               "description": "The laid-out glyph outlines as a COMPLETE, ordinary MeshLayer - confirmed to carry the full MeshLayer field set (noise/sketchy fields, 3d_mode, 3d_options, texture paths and filerefs, ...), not just type+mesh. moho2svg.py synthesises it into a real child Layer at load time (named `<layer>_text` if it has no name of its own), after which nothing downstream special-cases TextLayer at all - the font/balloon fields above are then purely informational."
-            }
+            , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5085 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"}
           }
         }
       ]
@@ -484,10 +514,10 @@
       "description": "A plain (non-channel, non-animated) colour using 0-255 integer components - as opposed to the 0.0-1.0 float components used inside a ColorChannel.",
       "required": ["r", "g", "b", "a"],
       "properties": {
-        "r": { "type": "integer", "minimum": 0, "maximum": 255 },
-        "g": { "type": "integer", "minimum": 0, "maximum": 255 },
-        "b": { "type": "integer", "minimum": 0, "maximum": 255 },
-        "a": { "type": "integer", "minimum": 0, "maximum": 255 }
+        "r": { "type": "integer", "minimum": 0, "maximum": 255 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "g": { "type": "integer", "minimum": 0, "maximum": 255 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "b": { "type": "integer", "minimum": 0, "maximum": 255 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2491 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+        "a": { "type": "integer", "minimum": 0, "maximum": 255 , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:2492 in Color.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"}
       },
       "additionalProperties": false
     },
@@ -500,40 +530,65 @@
           "type": "object",
           "required": ["type", "image_path", "width", "height"],
           "properties": {
-            "type": { "const": "ImageLayer" },
-            "image_path": { "type": "string" },
-            "image_fileref": { "$ref": "#/$defs/FileRef" },
-            "width": { "type": "number", "description": "PLAIN (not a channel)." },
-            "height": { "type": "number" },
-            "image_cropped": { "type": "boolean" },
-            "avi_alpha": { "type": "boolean", "description": "Whether an embedded movie's alpha channel is used." },
-            "movie_looping": { "type": "boolean" },
-            "interpreted_fps": { "type": "number" },
-            "persist_first_frame": { "type": "boolean" },
-            "persist_last_frame": { "type": "boolean" },
-            "premultiplied_movie": { "type": "boolean" },
-            "reverse_movie": { "type": "boolean" },
-            "psd_layer": { "type": "integer", "description": "Present on most, not all, sampled ImageLayer instances." },
-            "psd_layerid": { "type": "integer" },
+            "type": { "const": "ImageLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "image_path": { "type": "string" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4839 in Layer.image_path (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "image_fileref": { "$ref": "#/$defs/FileRef" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4861 in Layer.image_fileref (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "images": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/FileRef" },
+              "description": "A movie imported as a numbered image SEQUENCE rather than one video file - one FileRef per frame (observed 121 entries, \"frame0000.png\".. \"frame0120.png\", in metamorphosis/Scene 3.moho). Sibling to image_path/image_fileref, which cover the single-file case."
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "width": { "type": "number", "description": "PLAIN (not a channel)." , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4390 in MeshPoint._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "height": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5139 in Document.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "image_cropped": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "image_cropping_min": {
+              "type": "object",
+              "description": "Plain (not a channel) - the crop rectangle's near corner in 0.0-1.0 normalized image space, {x,y,z}. z observed constant 0.0. Sibling to image_cropping_max.",
+              "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "z": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:6730 in CameraView.at (trace: out/traced_keys.json, see tools/trace_fields.py)"} }
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "image_cropping_max": {
+              "type": "object",
+              "description": "Plain (not a channel) - the crop rectangle's far corner, same shape as image_cropping_min.",
+              "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "z": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:6730 in CameraView.at (trace: out/traced_keys.json, see tools/trace_fields.py)"} }
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "avi_alpha": { "type": "boolean", "description": "Whether an embedded movie's alpha channel is used." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "movie_looping": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "interpreted_fps": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "persist_first_frame": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "persist_last_frame": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "premultiplied_movie": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "reverse_movie": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "psd_layer": { "type": "integer", "description": "Present on most, not all, sampled ImageLayer instances." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "psd_layerid": { "type": "integer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:4872 in Layer.psd_layerid (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "psd_layer_identifier": {
+              "type": "string",
+              "description": "A \"|\"-joined (PSD layer index, PSD layer id, PSD layer name) triple, e.g. \"1|289|arm fox 2 copy\" (Boar.mohoproj). Redundant with psd_layer/psd_layerid plus the source PSD's own layer name, kept together as one string."
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "psd_layer_translation": {
+              "type": "object",
+              "description": "Plain (not a channel) - this ImageLayer's offset within the PSD canvas, as a {x,y} fraction of canvas size.",
+              "properties": { "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"}, "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"} }
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "psd_trim_alpha": { "type": "boolean", "description": "Whether fully-transparent PSD-layer border pixels were trimmed on import. Observed true on every sampled PSD-cutout ImageLayer." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
             "psd_layer_bounds": {
               "type": "object",
               "properties": {
-                "top": { "type": "number" },
-                "left": { "type": "number" },
-                "right": { "type": "number" },
-                "bottom": { "type": "number" }
+                "top": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "left": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "right": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+                "bottom": { "type": "number" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
               }
-            },
-            "sampling_mode": { "type": "integer" },
-            "quality_level": { "type": "integer" },
-            "toon_effect": { "type": "boolean" },
-            "toon_black_threshold": { "type": "integer" },
-            "toon_gray_threshold": { "type": "integer" },
-            "toon_lightness": { "type": "integer" },
-            "toon_saturation": { "type": "integer" },
-            "toon_quantize": { "type": "integer" },
-            "toon_min_edge_threshold": { "type": "integer" },
-            "toon_max_edge_threshold": { "type": "integer" }
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "sampling_mode": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "quality_level": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_effect": { "type": "boolean" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_black_threshold": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_gray_threshold": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_lightness": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_saturation": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_quantize": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_min_edge_threshold": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "toon_max_edge_threshold": { "type": "integer" , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
           }
         }
       ]
@@ -548,41 +603,61 @@
           "type": "object",
           "required": ["type", "layers"],
           "properties": {
-            "type": { "const": "ParticleLayer" },
+            "type": { "const": "ParticleLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
             "layers": {
               "type": "array",
               "items": { "$ref": "#/$defs/Layer" },
               "description": "The sub-layers used as the particles themselves. Declared here rather than in LayerContainer for the same performance reason GroupLayer gives."
-            },
-            "num_particles": { "type": "integer", "description": "\"Particle Count\" - how many particles are visible at once." },
-            "preview_particles": { "type": "integer", "description": "\"Preview particles\" - the smaller count drawn in the working view only." },
-            "particle_lifetime": { "type": "integer", "description": "\"Lifetime (frames)\" before a particle is recycled back to the source. Zero means they never recycle." },
-            "particle_activation": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "\"On at start\", and animatable: switching it off mid-animation stops NEW particles without killing the ones already alive." },
+            , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5137 in Document.from_raw (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "num_particles": { "type": "integer", "description": "\"Particle Count\" - how many particles are visible at once." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "preview_particles": { "type": "integer", "description": "\"Preview particles\" - the smaller count drawn in the working view only." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "particle_lifetime": { "type": "integer", "description": "\"Lifetime (frames)\" before a particle is recycled back to the source. Zero means they never recycle." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "particle_activation": { "$ref": "channel.schema.json#/$defs/BoolChannel", "description": "\"On at start\", and animatable: switching it off mid-animation stops NEW particles without killing the ones already alive." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
             "source_shape": {
               "type": "object",
               "description": "\"Source width\" / \"Source height\" / \"Source depth\" as x/y/z - a plain vector, not a channel. A non-zero z puts some particles nearer the camera than others. Spelled out here rather than $ref'd to project.schema.json's PlainVec3, to keep this file free of a reference back to the file that references it.",
               "properties": {
-                "x": { "type": "number" },
-                "y": { "type": "number" },
-                "z": { "type": "number" }
+                "x": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+                "y": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:1544 in Vec2.of (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+                "z": { "type": "number" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:6730 in CameraView.at (trace: out/traced_keys.json, see tools/trace_fields.py)"}
               },
               "additionalProperties": true
-            },
-            "use_base_as_source": { "type": "boolean", "description": "\"Use Base Layer as Source\" - emit from the bottommost sub-layer's shape instead of the source box." },
-            "velocity": { "type": "number", "description": "\"Velocity\" - starting speed. The manual calibrates it: 2 crosses the screen vertically in one second." },
-            "velocity_spread": { "type": "number", "description": "\"Velocity spread\" - random variation around `velocity`." },
-            "start_dir": { "type": "number", "description": "\"Direction\" to spray in, in RADIANS (observed 1.570796 = straight up)." },
-            "start_spread": { "type": "number", "description": "\"Spread\" - how wide the spray is, in radians (the manual quotes its maximum as 360 degrees = all directions)." },
-            "accel_angle": { "type": "number", "description": "\"Acceleration\" direction, in radians (observed 4.712389 = straight down, i.e. gravity)." },
-            "accel_rate": { "type": "number", "description": "\"Rate\" of acceleration along `accel_angle`." },
-            "damping": { "type": "number", "description": "\"Damping\" - air resistance / backwards acceleration." },
-            "start_full": { "type": "boolean", "description": "\"Full speed start\" - begin already running rather than ramping up." },
-            "orient_particles": { "type": "boolean", "description": "\"Orient particles\" - rotate each to face its direction of travel." },
-            "free_floating": { "type": "boolean", "description": "\"Free-floating\". When FALSE the particles are tied to the layer and move with it." },
-            "evenly_spaced": { "type": "boolean", "description": "\"Evenly spaced\" - release particles at even time increments." },
-            "random_start_time": { "type": "boolean", "description": "\"Randomize playback\" - each particle starts its sub-layer animation at a random time instead of frame 0." },
-            "seed": { "type": "integer", "description": "RNG seed for the whole simulation. Not named in the manual; needed for a reproducible result." },
-            "expanded": { "type": "boolean", "description": "Layers-window UI state only." }
+            , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "use_base_as_source": { "type": "boolean", "description": "\"Use Base Layer as Source\" - emit from the bottommost sub-layer's shape instead of the source box." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "velocity": { "type": "number", "description": "\"Velocity\" - starting speed. The manual calibrates it: 2 crosses the screen vertically in one second." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "velocity_spread": { "type": "number", "description": "\"Velocity spread\" - random variation around `velocity`." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "start_dir": { "type": "number", "description": "\"Direction\" to spray in, in RADIANS (observed 1.570796 = straight up)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "start_spread": { "type": "number", "description": "\"Spread\" - how wide the spray is, in radians (the manual quotes its maximum as 360 degrees = all directions)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "accel_angle": { "type": "number", "description": "\"Acceleration\" direction, in radians (observed 4.712389 = straight down, i.e. gravity)." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "accel_rate": { "type": "number", "description": "\"Rate\" of acceleration along `accel_angle`." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "damping": { "type": "number", "description": "\"Damping\" - air resistance / backwards acceleration." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "start_full": { "type": "boolean", "description": "\"Full speed start\" - begin already running rather than ramping up." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "orient_particles": { "type": "boolean", "description": "\"Orient particles\" - rotate each to face its direction of travel." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "free_floating": { "type": "boolean", "description": "\"Free-floating\". When FALSE the particles are tied to the layer and move with it." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "evenly_spaced": { "type": "boolean", "description": "\"Evenly spaced\" - release particles at even time increments." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "random_start_time": { "type": "boolean", "description": "\"Randomize playback\" - each particle starts its sub-layer animation at a random time instead of frame 0." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "seed": { "type": "integer", "description": "RNG seed for the whole simulation. Not named in the manual; needed for a reproducible result." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "expanded": { "type": "boolean", "description": "Layers-window UI state only." , "x-moho-disposition": "PRESERVE", "x-moho-evidence": "Editor/view/provenance state matched by DESCRIPTION_PATTERNS; excluded from the content metric but still required to survive an unedited load->save (tools/check_roundtrip.py)."}
+          }
+        }
+      ]
+    },
+
+    "AudioLayer": {
+      "description": "A layer that plays an audio clip alongside the timeline (manual appendix F.03 lists the `type` string; not otherwise documented). 7 instances across 3 archived documents (TheNutcrackerBallet, metamorphosis Scene 1/2) - all inside `.moho` ZIP containers, which is why the earlier 46-bare-file sample never saw one (see docs/moho-field-coverage-plan.md §1). Not rendered by either exporter, which emit an unsupported-layer warning - correctly, since there is no visual output to draw.",
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "audio_path"],
+          "properties": {
+            "type": { "const": "AudioLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "audio_path": { "type": "string", "description": "Observed relative to the project (e.g. \"Audio/Nutcracker.wav\") or Absolute; see audio_fileref's own relativeTo." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "audio_fileref": { "$ref": "#/$defs/FileRef", "description": "The same path/relativeTo pair as audio_path/its sibling, in the shared FileRef shape used elsewhere in the format." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "audio_level": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Playback volume/gain. Observed 1.0 (unity) and 5.0 across the 3 sampled documents." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "audio_jump": { "$ref": "channel.schema.json#/$defs/ValChannel", "description": "Observed constant 0.0 in every sample. Presumably seeks playback to a given point in the clip - manual appendix F does not name it." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "audio_text": { "type": "string", "description": "Observed \"\" (empty) in every sample. Presumably a transcript/caption field." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+            "spatial_positioning": { "type": "boolean", "description": "Observed both true and false across the 3 sampled documents - presumably whether the clip pans with the layer's position in a stereo mix." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
           }
         }
       ]
@@ -596,15 +671,15 @@
           "type": "object",
           "required": ["type"],
           "properties": {
-            "type": { "const": "NoteLayer" },
-            "text": { "type": "string", "description": "The note's own text." }
+            "type": { "const": "NoteLayer" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
+            "text": { "type": "string", "description": "The note's own text." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"}
           }
         }
       ]
     },
 
     "Layer": {
-      "description": "Any layer node, discriminated by its `type` field. Covers every type the 46-file sample set contains. The format defines one more, AudioLayer (manual appendix F.03, which lists every layer `type` string the format uses), which no sample document uses and which is therefore deliberately absent rather than guessed at.",
+      "description": "Any layer node, discriminated by its `type` field. Covers every type the 76-document census contains (10 of the 12 Moho declares - Mesh3DLayer and LT_UNKNOWN are absent from the whole corpus). AudioLayer was believed absent from the format entirely under the earlier 46-bare-file sample - it turned out to live exclusively inside the 30 `.moho` ZIP archives that sample never opened (see docs/moho-field-coverage-plan.md §1), which is the whole reason that earlier note said it was 'deliberately absent rather than guessed at'.",
       "oneOf": [
         { "$ref": "#/$defs/MeshLayer" },
         { "$ref": "#/$defs/BoneLayer" },
@@ -614,7 +689,8 @@
         { "$ref": "#/$defs/TextLayer" },
         { "$ref": "#/$defs/ImageLayer" },
         { "$ref": "#/$defs/ParticleLayer" },
-        { "$ref": "#/$defs/NoteLayer" }
+        { "$ref": "#/$defs/NoteLayer" },
+        { "$ref": "#/$defs/AudioLayer" }
       ]
     }
   }

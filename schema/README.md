@@ -389,3 +389,58 @@ semantics + evidence) and `docs/moho-export-pipeline.md` (how `moho2svg.py`
 actually consumes each field, in what order). This schema is the fast,
 automatable check that a file's *shape* matches expectations — a first line
 of defense, not a substitute for reading the prose.
+
+---
+
+## 7. The disposition registry (`x-moho-disposition`)
+
+Every property definition across the six schema files also carries an
+`x-moho-disposition` annotation — a non-standard JSON Schema keyword (a
+validator ignores keywords it does not recognise, so this changes no
+validation behaviour) that records, for that field, one of four values:
+
+| Disposition | Meaning |
+|---|---|
+| `MODELLED` | This key is document CONTENT and `moho2svg.py`/`moho2lottie.py` are confirmed to read it during a real export (`tools/trace_fields.py`'s runtime trace observed it). Carries an `x-moho-evidence` string naming the code path that read it plus the trace artifact. |
+| `PRESERVE` | This key is editor/view/provenance state, not artwork content (see `tools/check_field_coverage.py`'s `DESCRIPTION_PATTERNS`) — excluded from the coverage metric, but still required to survive an unedited load→save (`tools/check_roundtrip.py`). |
+| `UNKNOWN` | This key is document content that nothing in this repository reads yet. Carries an `x-moho-unknown-reason` explaining why (usually `"not yet investigated"` for a freshly-seeded entry). |
+| `EDITABLE` | (Reserved for later work.) A key whose semantics are decoded and round-trip through an edit, independent of whether anything renders it. |
+
+Score the whole registry against the corpus with `make check-coverage`
+(`tools/check_field_coverage.py`), which prints the coverage percentage
+(`MODELLED + EDITABLE` over every CONTENT key — `PRESERVE` keys are excluded
+from the denominator) and a per-schema-file breakdown table. Two rules fail
+the check closed: a corpus key with no registry entry at all, and a key
+claimed `MODELLED` that the trace never actually observed being read — so the
+number can rise only by genuinely decoding and reading more of the format,
+never by omission or assertion. A third rule refuses (or, with
+`--allow-degraded-environment`, loudly warns instead of refusing) to trust a
+trace that was taken without Pillow/psd-tools/pyclipper importable, since
+that environment cannot reach every code path the exporters have.
+
+**`patternProperties` families are registered once, not once per instance.**
+The `DocState_*` view-state fields and the `g_<number>` editor-toggle family
+each carry their `x-moho-disposition` on the `patternProperties` regex entry
+itself; `check_field_coverage.py`'s `load_registry`/`resolve` match a corpus
+key against these regexes whenever no exact property name covers it, so a
+whole family is one registry entry instead of dozens.
+
+**How the 547 annotations were seeded**, not hand-typed:
+`tools/gen_field_dispositions.py` reads the corpus census
+(`out/census_keys.json`) and the runtime trace (`out/traced_keys.json`), and
+for every property not already annotated, decides `PRESERVE` /`MODELLED` /
+`UNKNOWN` mechanically from those two artifacts and writes the annotation in
+place (see that script's own docstring for exactly how, including why it
+edits the hand-formatted JSON text directly rather than reparsing and
+reserializing it). Re-run it after adding new schema properties or a fresh
+trace; it is idempotent and never touches an occurrence that already carries
+a disposition, so any hand-refined entry survives a re-run. The five
+properties picked out in `docs/moho-field-coverage-plan.md` Task 8 Step 1
+(`smoothness`, `parent_bone`, `masking`, `fixed_angle`, `im`) carry
+hand-written evidence quoting the specific measurement that confirms them,
+rather than the generator's generic trace-call-site text.
+
+See `docs/moho-field-coverage-plan.md` (Task 8 onward) and
+`docs/superpowers/specs/2026-08-18-moho-field-coverage-design.md` for the
+full design and the reasoning behind the 95% target, the CONTENT/DESCRIPTION
+split, and the fail-closed rules.

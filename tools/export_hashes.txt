@@ -1,0 +1,7 @@
+# SHA-256 of each export produced by tools/check_export_stability.py.
+# Regenerate with --update ONLY when output changes deliberately.
+bc0f2fc25793eda4fabbe58c2e50973a0287a0300ed1d5586095809ccded71e7  Bandit.mohoproj
+f08fa7ddcc96bb9bd7df27d1c106714615a413c47f8e55e4fb63c9e82c4f4971  DonkeyAndMan.mohoproj
+be89677050ccc60a99766a946425d4cc4194f228bf1ffed529c3d6d63b83ebf9  SketchBone.animeproj
+d6adff8a80128fee0121c2f4f63db3409af6da1c4e8753f2d6d3ee09f9c48146  TransformBoneTool.animeproj
+a35b5d5f4a11b4d921a4dffd48702113149216e7e4b1ca6de2cf1da0c28902da  WhatIsBone.animeproj
