@@ -158,3 +158,19 @@ and confirmed to render real artwork), is the real measurement:
 `AFFECTS RENDER`. This file stays append-only by design (see the header
 above) — this note is added rather than editing or removing the misleading
 row.
+| `brush_angle_drift` | `1.0` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_hue_drift` | `0.5` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_merged_alpha` | `true` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_rand_order` | `true` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_random_interval` | `2` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_randomize` | `true` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_sat_drift` | `0.5` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_size_amp` | `0.9` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_size_scale` | `0.9` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_val_drift` | `0.5` | 124 | Bandit.mohoproj | 25 | none | inert |
+| `brush_size_amp` | `0.95` | 124 | Bandit.mohoproj | 25 | `brush_randomize=true` x124 | inert |
+| `combo_blend_anim` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.7], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 112 | Bandit.mohoproj | 25 | none | inert |
+| `fill_allowed` | `false` | 112 | Bandit.mohoproj | 25 | none | inert |
+| `effect_offset` | `{"type": "Vec2", "ref": false, "mute": false, "when": [0], "val": [{"x": 0.3, "y": 0.3}], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 190 | SketchBone.animeproj | 0 | none | **AFFECTS RENDER** |
+| `fill_style_id` | `4` | 76 | SketchBone.animeproj | 0 | none | **AFFECTS RENDER** |
+| `through_alpha` | `true` | 83 | SketchBone.animeproj | 0 | none | inert |
