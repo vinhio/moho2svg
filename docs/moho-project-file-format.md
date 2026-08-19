@@ -408,7 +408,7 @@ This is the important gap list: every field here changes what Moho draws.
 | `motion_blur` | `{on, frames, radius, skip, alpha_start, alpha_end, frame_percentage, extended_frames, sub_frames}` | `on: true` on real occurrences in 2 of 76 documents (`SlickObjectTransition.mohoproj`, `Snow-girl-cut51.mohoproj`) | Motion blur. **Correction (M1.4a):** an earlier revision of this row claimed both "`on: false`" everywhere and "not meaningful for a single-frame export anyway" — BOTH are false. Flipping Snow-girl-cut51.mohoproj's own genuinely-active block (`on: true`, layer 6/7) to off at frame 175 (inside the animated `[169, 187)` window) AFFECTS RENDER — motion blur DOES change Moho's own single-frame headless PNG output. Its own `alpha_start`/`alpha_end` sub-fields, probed the same non-confounded way (real `on: true`, only the sub-field's value changed), came back inert — see their own entries in `schema/layer.schema.json`'s `MotionBlur`. Now `EDITABLE` for the compound key itself (docs/moho-field-probes.md). |
 | `distortion_layer_uuid` | str | `""` in all 827 layers that have it; **absent in the `1021` file** | Points at another layer used as a distortion mesh — the most likely storage hook for Smart Warp. See [`moho-rigging-and-deformation.md` § 5](moho-rigging-and-deformation.md#5-smart-warp). |
 | `follow_layer_uuid`, `follow_curve`, `follow_bending`, `rotate_to_follow` | str/int/bool | `""`, `-1`/`0`, defaults | "Follow path" rigging. **Correction (fix round 1):** an earlier revision of this document claimed `follow_curve` is `-1` in every sampled document with no exception — that is wrong. A direct scan of all 76 corpus documents found `follow_curve` takes **two** values, `{-1, 0}`, not one: it is `0` on layers in `Gathered-00intro.mohoproj`, `Gathered-01Intro2.mohoproj`, `Gathered-02Wire2.mohoproj` and four `metamorphosis/Scene *.moho` files. In particular, the layer in `Gathered-01Intro2.mohoproj` that actually carries a real `follow_layer_uuid` (`layers[7]/layers[1]`, name `Butter`, uuid `b9d35e03-0404-4672-9719-d213e82fad57`, targeting `870b500e-c8f6-45b9-ab17-38db1de3b6b9`) has `follow_curve = 0`, NOT `-1` — so this is not confirmed to be an inert/feature-disabled configuration; whether `0` is a real curve selection or a different "unset" sentinel is unresolved, not ruled out. The `follow_layer_uuid`/`follow_bending`/`following` probes in this milestone were run on `Bandit.mohoproj`, where `follow_curve` genuinely is `-1` on every layer, so those specific inert results stand on their own terms — but the broader claim that no corpus document could exercise the feature does not hold, and `Gathered-01Intro2.mohoproj` remains an open candidate for a follow-up probe. `rotate_to_follow` was not probed. |
-| `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | disabled | 2D physics simulation. |
+| `physics`, `gravity`, `wind`, `enable_physics`, `use_baked_physics` | objs/channels | constant/default on every sample document | 2D rigid-body physics simulation (Layer Settings > Physics tab, manual ch. 12.14, Pro only — a different subsystem from `Bone.gravity`/`.wind`, the wind/gravity SPRING dynamics covered under "Physics/dynamics" in [§ 9](#9-bones-and-skinning)). **M1.5 batch 2 (2026-08-20):** never exercised at rest by any of the 76 corpus documents (`enable_physics` constant `false` on all 615 sites across the 68 documents that carry it; every field of the per-layer `physics` object — `$defs/Physics` in `schema/layer.schema.json` — likewise constant, `enabled`/`static` aside, which are already `MODELLED`), but genuinely LIVE once switched on: forcing `enable_physics` alone from `false` to `true` (no other field touched) already **AFFECTS RENDER**, confirmed independently on two documents (`Bandit.mohoproj`, `WhatIsBone.animeproj`) — Moho's headless single-frame `-f PNG` renderer re-simulates the whole rigid-body physics state for whatever frame is asked, not merely a keyframe interpolation. With `enable_physics` forced `true` as a precondition, `use_baked_physics`, `sleeping`, `pivot` and `force_field` each independently **AFFECT RENDER** too; `friction`/`restitution`/`respawn` are inert under the same precondition (a real, non-confounded negative, since sibling fields in the identical fixture do show an effect — plausibly because this fixture's bones never collide with anything, so there is nothing for contact-only fields to act on); `enable_motor`/`motor_speed`/`motor_torque` are inert under `enable_physics` alone but **AFFECT RENDER** once `pivot` (a fixed hinge to motor around) is added as a further precondition; `force_field_vector` stays inert even with `force_field` forced on and its own vector reversed — one of this codebase's other switch-fires/parameter-doesn't findings (`motion_blur.alpha_start`/`.alpha_end`, above). All ten `$defs/Physics` fields plus `enable_physics`/`use_baked_physics` are now `EDITABLE` — see each field's own entry in `schema/layer.schema.json` for the exact probe rows and preconditions. |
 | `scale_compensation`, `scale_normalization` | bool/float | defaults | How a layer's stroke width reacts to scaling. Relevant to [§ 7.6](#76-stroke-width) if ever non-default. Both probed inert on Bandit.mohoproj, whose ancestor scale is 1.0 throughout — neither was retested under an actual non-1.0 ancestor scale. |
 | `layer_ordering` | `String` channel | `""` | Animated child reordering (with `animated_layer_order` on `BoneLayer`). Would change draw order per frame. |
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |
@@ -1436,8 +1436,53 @@ Bone fields **not** used, grouped by what they would change:
   binding — [§ 7.2](#72-mesh-points)) is read but ignored by default too
   (`--point-bones`), and honouring it measurably helps the exact symptom
   `DarkMan.mohoproj` showed.
+
+  **M1.5 batch 2 (2026-08-20): the `pos_`/`scale_` dynamics families and the
+  whole per-bone `physics_*` family are genuinely unread here, and now
+  registered `EDITABLE` (not `UNKNOWN`) with real Moho render probes proving
+  each one live.** `moho2svg.py`'s `Bone` dataclass carries no `pos_*`/
+  `scale_*` field at all — `Skeleton.dynamic_angles` only simulates the angle
+  and wind families (see that method's own docstring) — so this is a second,
+  confirmed exercised gap alongside `wind_dynamics` above, not a naming
+  collision with the already-modelled bare `spring_force`/`damping_force`/
+  `torque_force` (the angle family's own fields; Moho's own scripting header,
+  `pkg_moho.lua_pkg`, declares both the bare `fAngle*Force` trio and a
+  parallel `fPos*Force`/`fScale*Force` trio side by side in the same `M_Bone`
+  struct). A fresh 76-document corpus scan (superseding the stale "19-file
+  corpus" figures above) found the `pos_`/`scale_` family on 587 sites across
+  10 documents — mostly the shared default (`pos_dynamics`/`scale_dynamics`
+  false on 579/567 sites; `*_spring_force` 2.0, `*_damping_force` 1.0,
+  `*_torque_force` 2.0, `*_weight` −1.0 on the great majority) plus real,
+  hand-tuned non-default values on `Cocon.mohoproj` (17 bones), `Lute.mohoproj`
+  (1 bone) and `Whale.mohoproj` (2 bones) — see each field's own entry in
+  `schema/skeleton.schema.json` for the exact per-bone breakdown. Probed on
+  `Cocon.mohoproj` (bone `B33_3`, which already carries real `pos_dynamics`/
+  `scale_dynamics` = true with hand-tuned spring params) with `bone_dynamics`
+  and the relevant family switch forced `true` document-wide: all 10 fields
+  (`pos_dynamics`, `scale_dynamics`, and both families' `spring_force`/
+  `damping_force`/`torque_force`/`weight`) **AFFECT RENDER**.
+
+  The per-bone `physics_*` family (`physics_lock_tip`, `physics_radius`,
+  `physics_return_to_zero`, `physics_torque`, `physics_motor_speed`) is a
+  different, THIRD subsystem again — the Bone Physics tool (manual ch. 5.11,
+  Pro only), a per-bone collision region/motor used once the bone's own
+  `GroupLayer` has rigid-body physics enabled (`GroupLayer.enable_physics`,
+  below), not the angle/pos/scale/wind spring family at all. Observed
+  constant across all 5,196 sites in the 72 documents that carry it, except
+  `physics_radius` (two values: `-1.0` on 4,736 sites, `0.0` on 460 —
+  real usage on `Gathered-01Intro2.mohoproj`'s zero-length Smart-Bone dial
+  bones). Probed on `WhatIsBone.animeproj` with `enable_physics` forced
+  `true` document-wide: `physics_lock_tip`, `physics_radius` and
+  `physics_motor_speed` **AFFECT RENDER** immediately; `physics_torque` and
+  `physics_return_to_zero` are INERT under `enable_physics` alone (a real,
+  non-confounded negative) but **AFFECT RENDER** once a second precondition,
+  `physics_motor_speed` forced to a real non-zero value, is added — both
+  fields are meaningless for a motor that isn't turning, exactly as the
+  manual describes ("Motor torque controls the strength of the motor" and
+  "Return to Neutral" needs something to return FROM). See
+  `schema/skeleton.schema.json`'s own entries for the exact probe rows.
 - **Editor state**: `hidden`, `shy`, `selected`, `bone_label_showing`,
-  `bone_tags`, `angle_weight`, `pos_weight`, `scale_weight`.
+  `bone_tags`, `angle_weight`.
 - **`flip_h` / `flip_v`** — Bool channels, listed as editor state by an
   earlier revision of this document. **That was wrong**: they mirror
   everything the bone drives, and are now applied by

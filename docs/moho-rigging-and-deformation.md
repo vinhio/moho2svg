@@ -169,6 +169,22 @@ three force fields, the three `*_control_delay` fields, plus
 set them (`Whale` 2, `Lute` 1+1, `Cocon` 16, `Night_Boy` 3) — they are
 simply unread, and none of those documents has a reference render yet.
 
+**M1.5 batch 2 (2026-08-20)** confirmed by direct Moho render probe (not by
+inference from the corpus alone) that every field in this "not used" list
+DOES change Moho's own rendered output once its real precondition is met:
+the `pos_`/`scale_` force triples and weights, probed on `Cocon.mohoproj`
+with `bone_dynamics` and the matching `pos_dynamics`/`scale_dynamics`
+switch forced true; the `physics_*` per-bone family (a further, different
+subsystem — the Bone Physics tool, manual ch. 5.11 — not the spring
+dynamics family at all), probed on `WhatIsBone.animeproj` with the
+containing `GroupLayer`'s `enable_physics` forced true (`physics_torque`
+and `physics_return_to_zero` additionally needed a non-zero
+`physics_motor_speed` precondition to stop being inert, exactly as the
+manual's own wording implies). See `schema/skeleton.schema.json`'s own
+entries for the full per-field evidence; this remains a "not used" list for
+THIS EXPORTER's own reading model, not a claim that Moho ignores these
+fields.
+
 Everything from `angle_dynamics` onwards exists only from **format 1045**;
 files at 1021/1038 carry a single force triple and a single switch.
 
