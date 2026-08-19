@@ -214,3 +214,4 @@ row.
 | `noise_amp` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.5], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_fixture_noise_amp_layershading.mohoproj | 25 | none | inert |
 | `noise_scale` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [8.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_fixture_noise_scale_layershadow.mohoproj | 25 | none | inert |
 | `noise_scale` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [8.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_fixture_noise_scale_layershading.mohoproj | 25 | none | inert |
+| `exclude_lines_from_mask` | `true` | 38 | Spacewoman.mohoproj | 27 | none | **AFFECTS RENDER** |

@@ -1582,6 +1582,15 @@ fill-silhouette-plus-carve model cannot express. One more wrinkle from the manua
 layer in a group has Exclude Strokes on, and falls back to an older method
 otherwise — so Moho's own behaviour here is not a single algorithm either.
 
+**M1.5:** the 336px figure above was Moho's own measured effect from an
+earlier investigation, predating the disposition registry; this milestone
+converts it into a formal `tools/probe_field.py` row (forcing all 38 of
+`Spacewoman.mohoproj`'s occurrences of `exclude_lines_from_mask` from
+`false` to `true` at frame 27, `AFFECTS RENDER` — docs/moho-field-probes.md)
+so it is registered rather than only documented in prose. Read by
+`moho2svg.py`'s own accessor but deliberately not applied (as above), so
+`MODELLED` is unreachable by design; now `EDITABLE`.
+
 **A `masking == 2` sibling's own stroke stays fully visible on top of
 whatever it masks.** Confirmed directly against the Moho app on
 `Bandit.mohoproj`'s `Head_DarkBlue` (`masking == 0`) / `BellyTexture`

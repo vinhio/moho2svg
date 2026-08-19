@@ -54,6 +54,32 @@ task's step checkboxes as you go, then flip the row and record the commit.
 Anything started but unfinished is `IN PROGRESS`, and its row says which step it
 stopped at.
 
+**Correction to M1.1's key count (found while scoping the dispatch, 2026-08-19).**
+The per-milestone `Keys` counts in the table below (72, 21, 15, 22, 14, 27, 16,
+12, 8, 34, 10, 5, 29/31) were computed from the pre-Task-8 grep baseline and
+were never re-derived against the real registry once Task 8 built it. Re-scoped
+M1.1 directly: of the 103 keys matching its classifier pattern, **54 are
+already `MODELLED`** in the real registry (mostly ubiquitous keys the grep
+estimate mis-scoped — `type`, `name`, `uuid`, `id`, `parent`, `layers`,
+`visible`, `bones`, `skeleton`, and the bone-pose/control-bone fields that fall
+into this milestone's catch-all classifier). **M1.1's real remaining work is 49
+keys, not 72.** Re-scope each later milestone the same way — against the live
+registry, not this table's original counts — before dispatching it; do not
+assume the labelled key counts below are still accurate.
+
+**M1.4b's Moho-licensing block is resolved (2026-08-19).** It stalled at 4 of
+12 (key, owner) pairs when Moho's headless renderer started failing 100% of
+the time with a "Trial mode" licensing error unrelated to this codebase;
+the user fixed it on their end, verified independently (canary render
+succeeded) before resuming. The remaining 8 pairs are now done, committed,
+and reviewed — PASS on both spec compliance and quality, all six gates
+green (see `.superpowers/sdd/moho-field-coverage-plan/progress.md`) — so
+**M1.4b is fully DONE, 244/434 = 56.2%.** Also worth recording: the live
+registry's remaining-uncovered set (re-derived from `out/traced_keys.json`,
+the real runtime trace) contained zero already-trace-confirmed reads
+waiting to be claimed for free — every further key needs an actual
+`tools/probe_field.py` render, same as before.
+
 **Read this before trusting any percentage below.** Every coverage figure in
 this plan derives from the string-literal baseline, which the spec § 1 shows is
 wrong in both directions. **Task 8 produces the first real number.** When it
@@ -76,10 +102,11 @@ then.
 | 8 | Disposition registry + `check-coverage` + **real baseline** | *32.5% measured (corrected from 32.7% in fix round 1 — see task-8-report.md)* | **DONE** | `2c208e0`, + fix round 1 |
 | 9 | Integrity checker, detect-only (**scope narrowed** — see ruling) | — | **DONE** | `d223b72`, `5e46232` |
 | 10 | Field probe harness | — | **DONE** | `df487e1`, `0df5114` |
-| M1.1 | Template: camera / project / transforms + shared (72 keys) | 49.3% | | |
-| M1.2 | Template: image / PSD (21) | 54.1% | | |
-| M1.3 | Template: style / shape effects (15) | 57.6% | | |
-| M1.4 | Template: mesh / point + compositing (22) | 62.7% | | |
+| M1.1 | Template: camera / project / transforms + shared (**43 real keys, not 72** — see correction above) | **42.6% (185/434)** | **DONE** | `54a26b8`, `7fede99`, `500ef5d`, `ebd1044`, `f20d910` |
+| M1.2 | Template: image / PSD (**20 of 21** — `images` left UNKNOWN, no real writer) | **47.2% (205/434)** | **DONE** | `103ac27`, `14b24c8`, `5c1b34f` |
+| M1.3 | Template: style / shape effects (15) | **50.7% (220/434)** | **DONE** | `5d30cb8`, `09f0acb`, `ff33281` |
+| M1.4a | Template: mesh/point/compositing, single-owner part (20) | **55.3% (240/434)** | **DONE** | `0cf5ae6`, `339b4a0`, `210ed97` |
+| M1.4b | Template: multi-owner effect fields (blur, threshold, noise_amp, noise_scale) | **56.2% (244/434), 12 of 12 (key, owner) pairs — reviewed, PASS** | **DONE** | `7cf318a`, `9a3210f`, `26cfcd9`, `0040560` |
 | M1.5 | Template: remainder (14) | 65.9% | | |
 | M2.1 | Bone IK + constraints + physics (27) | 72.1% | | |
 | M2.2 | Particle (16) | 75.8% | | |
@@ -1992,6 +2019,20 @@ AFFECTS RENDER for line_width and inert for DocState_gridSize."
 
 ---
 
+## A trap for future ImageLayer/PSD milestones
+
+`moho/Boar.mohoproj` and `moho/Clay_Crocodile.mohoproj` — the obvious choices
+for probing any `ImageLayer` field — both reference PSD assets under an
+`Images/` directory that **does not exist in this checkout**, so every layer
+in both documents renders as a broken-image placeholder. A probe against
+either produces a false `inert` result for any field whose effect only shows
+up when the image actually decodes. M1.2 hit this, caught it, and switched to
+`moho/Snow_wars/04 snow man construction.moho`, which does render correctly.
+**Any future milestone touching `psd_layer_identifier`, `psd_layer_translation`,
+`psd_trim_alpha`, or other PSD/ImageLayer fields should default to
+`Snow_wars/04` or verify a candidate document renders before probing it —
+do not default to Boar/Clay_Crocodile.**
+
 ## The sweep recipe — M1, M2 and M3
 
 Every remaining milestone applies the same recipe to one group of keys. The
@@ -2078,6 +2119,7 @@ Recorded here rather than guessed at, in the style of
 | Q2 | `layercomps` and `action_refs` are empty in all 76 documents and `switch_data` is `""` in all 45 that carry it. Their element grammar cannot be observed or synthesised. Manual Appendix F documents `layercomps` as `{name, uuid, layer_ids[]}`; the other two are undocumented. | OPEN |
 | Q3 | `Mesh3DLayer` has no instance in the corpus and no `type` string in Appendix F's list, though the old `.anme` format numbered a Poser/3D layer 8. Whether a Moho 14 document can contain one is unknown. | OPEN |
 | Q4 | Does `make check-reference` need extending? It fences three documents. Any field decoded in an area those three do not exercise is verified by its own probe alone, with no outside-authority gate. | OPEN |
+| Q10 | **`tools/check_bezier_roundtrip.py` may never have checked 30 of the 76 documents, ever.** Found while investigating an M1.4a probing incident, not by design: the script's own corpus walk is `os.listdir(MOHO_DIR)` filtered by `.mohoproj`/`.animeproj` extension — non-recursive, and missing `.moho` entirely. That means it has only ever checked the ~46 top-level bare-JSON documents, never any subdirectory document nor any of the 30 ZIP archives, since before this whole coverage effort began (it is one of the original `check-lottie` fixtures, predating Task 1). Whether `build_path_bezier()`/`build_path_d()` agree on the other 30 documents is therefore genuinely untested, not just unmeasured. Deliberately NOT fixed as part of any M1 milestone: broadening the walk could surface a real, previously-invisible bezier mismatch that needs its own triage, and rushing that in as a side effect of an unrelated hardening fix is the wrong way to find out. | OPEN |
 | Q9 | **Rule 5 does not cover `patternProperties` collisions, and a future one would pass silently rather than warn.** The final fix wave added rule 5, which fails the build when one flat key name carries conflicting dispositions across its occurrences (the defect that made `b` score uncovered). But `load_registry` populates its `occurrences` map only from `properties` blocks, so a future `patternProperties`-vs-`patternProperties` or pattern-vs-exact conflict on the same content key is invisible to it. The scoping is documented as deliberate — no such collision exists today, and both pattern families (`DocState_*`, `g_<number>`) are 100% `PRESERVE` — but the failure mode for a future violation is a silent pass, not a warning. Adjudicated as parked rather than fixed: there is no second fix wave, and nothing in M1–M3 is scheduled to add a pattern family. Close it if a milestone ever annotates one. | OPEN |
 | Q8 | **M3.1's efficiency premise is measurably false, and this changes the plan's arithmetic.** The plan claims "one `3d_mode = 1` precondition unlocks all ten `3d_*` keys". Task 10's probe measured it on `Bandit.mohoproj` frame 25 and I re-ran it independently: `3d_mode = 1` alone **does** change the render (21 sites, AFFECTS RENDER), so the precondition is genuinely live — but `3d_shading_density = 90` behind that same precondition is still **inert**. The precondition works and does not unlock the target key. So the ten `3d_*` keys need individual, possibly **compound** preconditions (`3d_shading_mode`, a non-zero `3d_thickness`, or a mesh that actually extrudes), not one shared switch. Consequence for the target: M3 must supply 31 of the 39 constant-valued keys, and 10 of those 31 were budgeted as this cheap group. If they resist, the 8-key residual cannot absorb a 10-key loss, and the 95% target would miss. **M3.1 must therefore begin by finding a working compound precondition for the `3d_*` family and reporting whether one exists, before any of its ten keys is scheduled.** | OPEN |
 | Q7 | **`mesh.points[].parent` and `flexi_bone_subset` are clean on 75 of 76 documents.** Task 9 measured all four excluded reference classes with the naive rule: `switch_keys` 1167 violations / 9 documents, `parent_bone` 73 / 24, but `mesh.points[].parent` only **17 / 1** and `flexi_bone_subset` only **1 / 1** — and both of those single documents are the same one, `ReparentBone.animeproj`. That is a lead, not noise: that document is this corpus's fixture for the **Reparent Bone tool**, and `anim_parent` (an animated bone-parent index) is exactly the feature that would move a bone's index space partway through a document. So those two rules may well be validatable with `ReparentBone.animeproj` as a documented exception, unlike `parent_bone`, whose 24-document spread means the model itself is wrong. Worth attacking first in M2.1. | OPEN |
