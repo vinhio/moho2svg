@@ -949,6 +949,14 @@ that turns a control bone which drives a dial would settle it
 > is still not, and an implementation attempt was measured and rejected — see
 > § 4b.1 below. Still **do not implement against this** without new evidence.
 > [🟠 3/10 on the semantics; 🟢 9/10 on the field shape]
+>
+> **M1.5 registry note (2026-08-19).** The 2,840px measurement below is now
+> also registered formally: `BoneGroup.active_bone` is `x-moho-disposition:
+> EDITABLE` in `schema/skeleton.schema.json` (`tools/probe_field.py` against
+> `Night_Boy.mohoproj`, independent of the hand-authored `TransformBoneTool`
+> group described here, also shows `AFFECTS RENDER`). `EDITABLE` records only
+> that varying the field moves rendered pixels — it is not a claim that the
+> semantics below are resolved.
 
 **What it is.** Vitruvian Bones is a Moho Pro 13.5 feature
 (`mono-changelogs.md`): "you can have different sets of heads, each with its

@@ -1336,17 +1336,40 @@ Bone fields **not** used, grouped by what they would change:
 - **Reparenting over time**: `anim_parent`, a `Val` channel whose values are
   bone indices (or `-1`). This is the storage for Moho's Reparent Bone tool,
   which lets a bone change parent mid-animation. This tool uses the static
-  `parent` index instead, so a frame after a reparent keyframe would attach
-  the bone to the wrong parent.
+  `parent` index instead, so a frame after a reparent keyframe attaches the
+  bone to the wrong parent.
 
-  **Ignoring it is currently free, and measurably so.** All 850
-  `anim_parent` channels (19-file total) have exactly **one** keyframe, and
-  that single value equals the bone's own static `parent` in **850 of 850**
-  cases — zero
-  mismatches. That holds even in `ReparentBone.animeproj`, which demonstrates
-  the *tool* without ever keyframing a reparent. So `anim_parent` is fully
-  redundant with `parent` across this whole sample set, and the risk is
-  theoretical until a document that actually keyframes it turns up.
+  **M1.5 correction (2026-08-19): the claim below that this was theoretical
+  was wrong, and it is now a confirmed, currently-shipping defect.** A full
+  76-document scan (replacing the stale, undercounted 19-file/850-channel
+  figure — the real corpus carries **5,196** `anim_parent` channels across
+  **72** documents) found **7 bones across 5 documents** whose channel
+  genuinely diverges from the bone's own static `parent` after a second
+  keyframe: `Snow-girl-cut12.mohoproj` (B33, parent −1, reparents to bone 6 at
+  frame 69), `Snow-girl-cut13.mohoproj` (B33 → −1 at frame 541, B26 → −1 at
+  frame 394), `Snow-girl-cut51.mohoproj` (B1 → bone 14 at frame 195), and
+  `Snow_wars/02 snow fight.moho` / `Snow_wars/04 snow man construction.moho`
+  (one bone each). A single-bone isolation probe (`tools/probe_field.py`
+  against a hand-built fixture that renamed every OTHER bone's `anim_parent`
+  key out of the way, leaving only `Snow-girl-cut12` bone B33's channel under
+  its real name — see `docs/moho-field-probes.md`) confirms Moho's own
+  renderer follows the divergence: freezing that one channel back to a
+  constant `-1.0` changes the frame-90 render. So on these 5 documents, past
+  their reparent frame, this exporter attaches the affected bone(s) to the
+  wrong parent for real, not just in principle — recorded here as a known
+  gap; not fixed, since fixing it is out of scope for the field-coverage
+  registry work this correction was made under.
+
+  ~~Ignoring it is currently free, and measurably so.~~ (superseded above)
+  All *other* 5,189 of 5,196 `anim_parent` channels do have exactly **one**
+  keyframe whose value equals the bone's own static `parent` — that part of
+  the old measurement was accurate, including for `ReparentBone.animeproj`
+  (`moho/Others/ReparentBone.animeproj` — this repo's own tool-demonstration
+  fixture, re-checked directly: all 24 of its bones have single-keyframe
+  `anim_parent` channels matching `parent`, so it does not itself demonstrate
+  a keyframed reparent, despite its name). The 7 divergent bones live
+  elsewhere in the corpus, in ordinary production documents that happen to
+  use the tool for real.
 - **Constraints and IK** (`fixed_angle` has since been decoded and applied —
   see [`moho-rigging-and-deformation.md` § 3.2](moho-rigging-and-deformation.md#32-independent-angle-fixed_angle)):
   `constraints`, `min_constraint`, `max_constraint`,
@@ -1357,6 +1380,30 @@ Bone fields **not** used, grouped by what they would change:
   defaults except `pos_control_parent` (`4`, `5` on a few bones) and the
   `min`/`max_constraint` pairs. Constraints only matter while posing in the
   editor; the resulting angles are already baked into `anim_angle`.
+
+  **M1.5 (2026-08-19): registered `EDITABLE`, not just asserted inert.**
+  `constraints`, `min_constraint`, `max_constraint`, `ik_lock`,
+  `ik_global_angle`, `ik_parent_target`, `ignored_by_ik` and
+  `bone_enable_arc_solver` were each forced, real-corpus-value-first, on a
+  document that carries them (`tools/probe_field.py`, see
+  `docs/moho-field-probes.md`) and rendered **inert** in every case — the
+  frame this exporter draws does not change, confirming rather than merely
+  asserting the "already baked into `anim_angle`" claim above for this
+  specific set of 8 fields. Two real, non-synthesised leads used here:
+  `DarkMan.mohoproj`'s `hat` skeleton (bones B2/B3) is this corpus's one
+  genuine IK-active chain — `ik_lock`, `ik_global_angle` and
+  `ik_parent_target` all carry real non-default values there (`true`,
+  `2.845608`/`0.238156` rad, non-zero `{x, y}` vectors — `FoxAndGhost.animeproj`
+  independently carries a third non-default `ik_global_angle`/`ik_parent_target`
+  pair), so those three were probed with DarkMan's own real values rather
+  than a synthesised alternative. `bone_enable_arc_solver` is constant
+  `false` across all 54 documents that carry it — no corpus lead — so its
+  probed alternative (`true`) is sourced from the manual instead (ch. 5,
+  "Arc IK Solver (Pro only)": an alternative IK solver for 3+-bone chains
+  that keeps them lined up on a smooth arc). `angle_weight` and
+  `grandpa_bone` (`BoneLayer`, not `Bone`) were probed the same way and are
+  documented at their own schema entries (`schema/skeleton.schema.json`,
+  `schema/layer.schema.json`).
 - **Scaling behaviour**: `scaling_mode` (`0` on 586 bones, `2` on 264 — 19-file totals),
   `squash_stretch_scaling` (`0.44` or `1.0`), `max_auto_scaling`. `scaling_mode`
   is not decoded and is a plausible explanation for the intentionally-preserved

@@ -215,3 +215,15 @@ row.
 | `noise_scale` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [8.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_fixture_noise_scale_layershadow.mohoproj | 25 | none | inert |
 | `noise_scale` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [8.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_fixture_noise_scale_layershading.mohoproj | 25 | none | inert |
 | `exclude_lines_from_mask` | `true` | 38 | Spacewoman.mohoproj | 27 | none | **AFFECTS RENDER** |
+| `anim_parent` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [-1.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | .probe_fixture_anim_parent.mohoproj | 90 | none | **AFFECTS RENDER** |
+| `ik_lock` | `{"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [true], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 91 | DarkMan.mohoproj | 0 | none | inert |
+| `ik_global_angle` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [2.845608], "interp": [{"im": 3, "v1": -1.0, "v2": -1.0, "in": 1, "h": 0, "s": false, "t": 0}]}` | 91 | DarkMan.mohoproj | 0 | none | inert |
+| `ik_parent_target` | `{"type": "Vec2", "ref": false, "mute": false, "when": [0], "val": [{"x": -0.022371, "y": 0.66081}], "interp": [{"im": 3, "v1": -1.0, "v2": -1.0, "in": 1, "h": 0, "s": false, "t": 0}]}` | 91 | DarkMan.mohoproj | 0 | none | inert |
+| `bone_enable_arc_solver` | `true` | 91 | DarkMan.mohoproj | 0 | none | inert |
+| `grandpa_bone` | `true` | 37 | DarkMan.mohoproj | 0 | none | inert |
+| `constraints` | `true` | 64 | Boar.mohoproj | 0 | none | inert |
+| `ignored_by_ik` | `true` | 44 | Cocon.mohoproj | 0 | none | inert |
+| `min_constraint` | `-1.570796` | 64 | Boar.mohoproj | 0 | none | inert |
+| `max_constraint` | `1.570796` | 64 | Boar.mohoproj | 0 | none | inert |
+| `angle_weight` | `1.85` | 64 | Boar.mohoproj | 0 | none | inert |
+| `active_bone` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [1.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | Night_Boy.mohoproj | 0 | none | **AFFECTS RENDER** |
