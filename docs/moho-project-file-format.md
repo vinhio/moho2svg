@@ -532,7 +532,17 @@ hidden by either visibility mechanism.
 
 - `fill_texture_path` / `fill_texture_fileref`, `line_texture_path` /
   `line_texture_fileref` — image textures for fills and lines. Empty in
-  every mesh layer.
+  every mesh layer (4,969/4,969 `fill_texture_path`/`line_texture_path`
+  sites across all 76 documents; 4,282/4,282 for the fileref pair, present
+  on 74 of the 76 — 2 documents carry no MeshLayer occurrence of it at all).
+  **M1.5 batch 6:** registered `EDITABLE` rather than left `UNKNOWN` —
+  forced to a real, existing absolute image path on `Bandit.mohoproj`'s own
+  21 sites at frame 25, alone and (for the fileref) together with its own
+  `_path` sibling set to the same value at once: inert every time. Read as
+  a legacy/import-time field superseded by the `SS_Texture2` style object
+  (also probed this batch, also inert — [§ 6.7](#67-fileref-audiolayer-and-the-psdimage-probes-m15-batch-6)),
+  matching the pattern already established for `layer_ref_fileref` (also
+  universally empty, also inert when forced non-empty).
 - `noisy_lines`, `noisy_shapes`, `extra_sketchy`, `extra_lines`, `noise_amp`,
   `noise_scale`, `noise_interval`, `animated_noise` — the "sketchy lines"
   look. `extra_sketchy: true` with `extra_lines: 5` on **2 layers** (in
@@ -792,13 +802,20 @@ in [§ 2](#2-top-level-structure). `metadata` appears on `MeshLayer`,
 `BoneLayer`, and `SwitchLayer` instances; observed keys: `what` (`0`),
 `NewLayerScript` (bool), `LM_GrandpaBones` (bool, `SwitchLayer` only,
 presumably the same feature as `BoneLayer.grandpa_bone`), `psd_layers` (a
-`"|"`-joined list of PSD layer indices, e.g. `"24|12|7|23|..."`, on the
-`BoneLayer` wrapping a PSD cutout-puppet import — recording which PSD layers
-became `ImageLayer` children), and a `g_<number>` boolean-toggle family
-(`g_10000`, `g_10001`, `g_10002`, `g_10031`, `g_10033`, `g_10056`, `g_10069`,
-`g_10082` observed). `script_data` (rare — 2 `BoneLayer` instances in
-`WhatIsBone.animeproj`) has the shape `{NewLayerScript, what}`. Neither bag
-is read by `moho2svg.py`.
+`"|"`-joined list of PSD layer indices, e.g. `"24|12|7|23|..."` —
+**corrected, M1.5 batch 6:** 10 occurrences across 10 documents, 9 on a
+`BoneLayer` wrapping a PSD cutout-puppet import as the earlier text said,
+but the 10th sits on a `GroupLayer` instead
+(`Snow_wars/04 snow man construction.moho`) — recording which PSD layers
+became this container's own `ImageLayer` children), and a `g_<number>`
+boolean-toggle family (`g_10000`, `g_10001`, `g_10002`, `g_10031`,
+`g_10033`, `g_10056`, `g_10069`, `g_10082` observed). `script_data` (rare —
+2 `BoneLayer` instances in `WhatIsBone.animeproj`) has the shape
+`{NewLayerScript, what}`. Neither bag is read by `moho2svg.py` — but
+**`psd_layers` genuinely is read by Moho itself at render/load time**,
+the one exception to this whole bag's "editor bookkeeping" reputation:
+see [§ 6.7](#67-fileref-audiolayer-and-the-psdimage-probes-m15-batch-6)
+for the render-changing probe that found this.
 
 ### 6.5 `ImageLayer` (19-file finding)
 
@@ -819,8 +836,10 @@ to raster images, not reverse-engineered), plus its own fields:
 | `image_path` / `image_fileref` | The source image/movie file. |
 | `width` / `height` | Plain (not channels) pixel dimensions. |
 | `image_cropped` | Whether the image is cropped to a sub-region. |
+| `image_cropping_min` / `image_cropping_max` | `{x, y, z}` (0.0–1.0 normalized) crop rectangle corners. 36 sites/7 documents carry a non-default value, 19 of them genuinely non-trivial (not the identity rectangle) — including 2 on `04 snow man construction.moho` itself, both with `image_cropped: true`. |
 | `psd_layer` / `psd_layerid` | Which PSD layer this instance came from. Present on most, not all, sampled instances (244/332 `ImageLayer` instances across the 76-document corpus, in 13 of the 76 documents). |
-| `psd_layer_bounds` | `{top, left, right, bottom}` — the PSD layer's bounding box within the source PSD canvas. |
+| `psd_layer_identifier` / `psd_layer_translation` / `psd_trim_alpha` | A `"index\|id\|name"` triple, `{x,y}` PSD-canvas offset, and an alpha-trim flag — present with real, varying values on exactly 5 documents (`Boar`, `Clay_Crocodile`, `Lute`, `Night_Boy`, `Whale`), all 5 confirmed to have broken PSD assets in this checkout (see below) — blocked, `UNKNOWN`. `psd_trim_alpha` was previously described as "true on every sample" — a corpus scan found 73 true / 64 false across the 137 real sites, not uniform. |
+| `psd_layer_bounds` | `{top, left, right, bottom}` — the PSD layer's bounding box within the source PSD canvas. Present with real, non-degenerate values on 24 of `04 snow man construction.moho`'s own 28 `ImageLayer` sites (a working document, unlike the 5 above) — each sub-field probed individually, all four inert (M1.5 batch 6). |
 | `avi_alpha`, `movie_looping`, `interpreted_fps`, `persist_first_frame` / `_last_frame`, `premultiplied_movie`, `reverse_movie` | Embedded-movie playback settings. |
 | `sampling_mode`, `quality_level` | Image resampling settings. |
 | `toon_effect`, `toon_black_threshold`, `toon_gray_threshold`, `toon_lightness`, `toon_saturation`, `toon_quantize`, `toon_min_edge_threshold`, `toon_max_edge_threshold` | A cel-shading post-process filter over the raster image. |
@@ -839,7 +858,14 @@ to either file) — both render every `ImageLayer` as Moho's own
 broken-image placeholder, which produces a misleadingly clean "inert" result
 for anything probed against them (see the stray `toon_effect`/`Boar.mohoproj`
 row in `docs/moho-field-probes.md`, superseded by the same key's row against
-the working Snow_wars document). Findings, all at frame 0 of that one
+the working Snow_wars document). **M1.5 batch 6 confirmed this trap is
+wider than the two named documents:** `Lute.mohoproj`, `Night_Boy.mohoproj`
+and `Whale.mohoproj` — the other three documents carrying real
+`psd_layer_identifier` values — were each rendered and visually inspected;
+all three also show Moho's own broken-image placeholder throughout, not
+real artwork. All 5 of the corpus's `psd_layer_identifier`-bearing
+documents are unusable for probing PSD pixel content in this checkout; see
+[§ 6.7](#67-fileref-audiolayer-and-the-psdimage-probes-m15-batch-6). Findings, all at frame 0 of that one
 document, so read as "true there," not "true everywhere":
 
 - **AFFECTS RENDER:** `psd_layer` (forced to an out-of-range value on every
@@ -866,7 +892,14 @@ by the same M1.2 classifier pattern but turned out **not to be written by
 `"images"` (an output directory path), not a dict key. It stays `UNKNOWN` —
 present in only 1 of the 76 corpus documents (`metamorphosis/Scene 3.moho`,
 424 entries, `frame0000.png` .. `frame0423.png`) — pending the
-observe-then-probe recipe a field with no writer needs.
+observe-then-probe recipe a field with no writer needs. **M1.5 batch 6
+re-verified this rather than assuming it still holds:** still exactly 1
+document, and that document's own `ImageLayer` has TWO independent reasons
+a probe could not measure anything even with a working fixture — its
+`visible` flag is stored `false` (so nothing behind it ever reaches the
+canvas, matching `tools/probe_field.py`'s own documented Finding-C blind
+spot), and its 424 `FileRef` entries all carry an unresolvable
+Windows-absolute path (`D:/Anime Studio Pro/...`). Not attempted further.
 
 See `schema/layer.schema.json`'s `ImageLayer` for the full field list with
 per-field descriptions and probe evidence.
@@ -907,6 +940,118 @@ layer. `moho2lottie.py` cannot: it flattens the tree into one flat Lottie layer
 list, so a container's own blend mode has nowhere to land (counted warning
 `blend_mode_container`, 3 layers corpus-wide) and a mesh layer's blend reaches
 everything beneath it in the composition.
+
+### 6.7 `FileRef`, `AudioLayer`, and the PSD/image probes (M1.5 batch 6)
+
+**`FileRef`** (`schema/layer.schema.json`) is the `{relativeTo, path}` shape
+shared by `image_fileref`, `fill_texture_fileref`/`line_texture_fileref`,
+`layer_ref_fileref`, `audio_fileref`, the `images` array, and
+`style.schema.json`'s own `Texture2.SS_Texture2FileRef` — every file
+reference in the format goes through this one `$def`. Its own `path` and
+`relativeTo` properties therefore collide by flat name across every one of
+those owners at once (284 sites on `Snow_wars/04 snow man construction.moho`
+alone), so isolating one owner needs the same per-occurrence method
+`M1.4b` used for `blur`/`threshold` — but with one correction found this
+batch: **do not delete the competing sites' `path`/`relativeTo` outright.**
+A hand-edited fixture that removed both keys from a `FileRef` object was
+tried first and Moho's own loader rejected it as corrupt (`Error (108):
+Unable to load document (corrupt)`, citing the exact JSON pointer) —
+unlike the scalar flat keys `M1.4b` isolated (`blur`, `threshold`, ...),
+which tolerate being absent because `additionalProperties: true` makes
+them genuinely optional to Moho's own reader, a `FileRef`'s `path`/
+`relativeTo` are NOT optional in practice even though this schema's own
+declaration would allow omitting them. The working method instead
+**pre-stamps every competing occurrence's `path` (or `relativeTo`) to the
+exact value the probe is about to write**, before handing the fixture to
+`tools/probe_field.py`: since `probe_field.py` builds its `base`/`variant`
+twins from that SAME pre-stamped fixture, both twins already agree at
+every competing site (a no-op there), so the only real transition between
+them is the isolated owner's own occurrences.
+
+Isolated to `image_fileref` this way on `Snow_wars/04 snow man
+construction.moho` (28 of the fixture's 284 `path`/`relativeTo` sites):
+`path` **AFFECTS RENDER** (forced every `image_fileref` to a single
+different real image, "Images/Sky.png" — a raster layer's own source image
+moving is exactly the kind of change this method exists to catch, now
+measured rather than assumed); `relativeTo` is **inert** (forced
+`Absolute` → `Project`), consistent with `mohoedit.py`'s own `make_twin`
+docstring note that Moho resolves an `ImageLayer`'s fileref relative to
+the *document's own directory* regardless of what this field says — 12 of
+the 76 corpus documents already store a relative-looking path under a
+`relativeTo: Absolute` label and resolve correctly regardless.
+
+The SAME isolation method, extended one level deeper (pre-stamp every
+dict that has a `relativeTo` sibling — i.e. every genuine `FileRef`,
+including the *nested* `SS_Texture2FileRef` — leaving only the
+`relativeTo`-less outer `path` untouched), finally closed
+`style.schema.json`'s **`Texture2.path`**, previously scoped "M3-shaped"
+(no natural non-empty corpus value, needing a synthesised one). Forced
+from its constant `""` to a real, existing image path on
+`Others/IndependentAngle.animeproj`'s 4 real `SS_Texture2` sites (`fill_style2`
+slot) at frame 0, tried plain and again with a `fill_mode=1` precondition:
+**inert** both times — a genuine, twice-measured negative now, not merely
+"never authored non-empty".
+
+**`AudioLayer`'s own six fields** (`audio_fileref`, `audio_jump`,
+`audio_level`, `audio_path`, `audio_text`, `spatial_positioning`) are all
+`EDITABLE` and all **inert** — expected, not a gap: `AudioLayer` is not a
+visual layer type at all (see § 6.1), and Moho's own headless PNG render
+confirmed it draws literally nothing for one, on every field forced to a
+different value on `TheNutcrackerBallet.moho`'s own instance. **Corrected
+corpus count:** the type occurs on 7 documents, not 3 — `TheNutcrackerBallet`
+plus ALL SIX `metamorphosis/Scene N.moho` files (1–6), not just Scene 1/2
+as an earlier revision of this section said.
+
+**PSD-import fields blocked by broken checkout assets, extended.**
+`psd_layer_identifier`, `psd_layer_translation` and `psd_trim_alpha` each
+hold a real, varying, non-degenerate value on exactly 5 corpus documents —
+`Boar.mohoproj`, `Clay_Crocodile.mohoproj`, `Lute.mohoproj`,
+`Night_Boy.mohoproj`, `Whale.mohoproj` — and this batch confirmed, by
+rendering **all five** and inspecting the output, that **every one** shows
+Moho's own broken-image placeholder icon (a teal ellipse with a white X)
+in place of the real PSD artwork. The previously-known trap
+(`docs/moho-field-coverage-plan.md`) named only `Boar`/`Clay_Crocodile`;
+this extends it to `Lute`/`Night_Boy`/`Whale` too — none of the five can
+be probed for these fields in this checkout. The one confirmed-working
+PSD-import document, `Snow_wars/04 snow man construction.moho`, uses a
+different `ImageLayer` shape entirely (`psd_layer`/`psd_layerid` only,
+never `psd_layer_identifier`), and `tools/probe_field.py`'s `set_every`
+only overwrites an *existing* key, so there is no way to build a working
+fixture for these three fields without the real PSD assets. `psd_layer_bounds`'s
+own `top`/`left`/`right`/`bottom` sub-fields do NOT share this block —
+they are present with real, non-degenerate values on 24 of the WORKING
+`04 snow man construction.moho`'s own 28 `ImageLayer` sites, so each was
+probed individually (forced to 999 on all 28 sites): all four **inert**,
+confirming at per-field granularity what the combined-object probe
+(§ 6.5) already found.
+
+**`image_cropping_min`/`image_cropping_max`** (36 sites/7 documents
+corpus-wide, mostly the identity rectangle but 19 genuinely non-trivial
+crops) were probed on the two real, non-degenerate, `image_cropped: true`
+sites already present on `04 snow man construction.moho` itself — a
+stronger fixture than `image_cropped`'s own earlier probe, whose only
+changed sites happened to carry a degenerate all-zero `psd_layer_bounds`.
+Forced to `{0.3,0.3,0.0}`/`{0.7,0.7,0.0}`: both **inert**, even under this
+better precondition.
+
+**A genuine surprise: `LayerMetadata.psd_layers` affects render.** This
+key was assumed to share its `$def`'s general "purely editor bookkeeping"
+reputation (see § 6.4's `psd_layers` entry above and
+`schema/layer.schema.json`'s `LayerMetadata`). Forcing it from its real
+value to a garbage string (`"0|999|CHANGED_LAYER_LIST"`) on `04 snow man
+construction.moho`'s own `GroupLayer` site (the ONE corpus occurrence of
+this key on a `GroupLayer` rather than a `BoneLayer` — 9 of the other 10
+occurrences are on a `BoneLayer`) produced a visibly different render: the
+scene's snowball-construction stage jumped from an early, faceted rolling
+pose to what looks like a later, more-finished one — a real semantic
+change confirmed by eye on both PNGs, not a load error (Moho rendered
+both twins cleanly, exit 0). The likely mechanism is that Moho consults
+this "|"-joined PSD-layer-index list at load/render time to reconcile
+which of the source PSD's layers belong to this container's own children,
+and a garbage value desyncs that mapping. This is now the one exception
+to `LayerMetadata`'s "not read by Moho" framing — every sibling key in
+that bag (`what`, `NewLayerScript`, the `_sec` family, the `g_<number>`
+toggles) stays `PRESERVE`-only, untouched by this finding.
 
 ---
 
@@ -2285,7 +2430,11 @@ This is a living reverse-engineering effort, not a specification. Fields whose
   Snow-girl-cut12.mohoproj (a real, actively Crayon-styled shape): all
   inert. Now `EDITABLE`.** See `schema/style.schema.json`'s `Crayon` $def.
 - The `g_<number>` boolean toggles and `psd_layers` in a layer's own
-  `metadata` bag. **(19-file finding.)** ([§ 6.4](#64-type-specific-fields))
+  `metadata` bag — still not read by `moho2svg.py`, though **`psd_layers`
+  specifically is confirmed to affect Moho's OWN render** (M1.5 batch 6,
+  [§ 6.7](#67-fileref-audiolayer-and-the-psdimage-probes-m15-batch-6)) —
+  this exporter's own gap, not a claim that the field is inert. **(19-file
+  finding.)** ([§ 6.4](#64-type-specific-fields))
 - **Smart Warp** — a whole Moho deformation feature with **no representation
   at all in this sample**: a search for any JSON key containing "warp"
   returns zero hits across all 19 files. The only hooks visible are

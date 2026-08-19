@@ -2033,6 +2033,23 @@ up when the image actually decodes. M1.2 hit this, caught it, and switched to
 `Snow_wars/04` or verify a candidate document renders before probing it —
 do not default to Boar/Clay_Crocodile.**
 
+**Extended (M1.5 batch 6): the trap is not limited to those two documents.**
+`psd_layer_identifier`/`psd_layer_translation`/`psd_trim_alpha` hold a real,
+non-degenerate, varying value on exactly 5 corpus documents total - Boar,
+Clay_Crocodile, `Lute.mohoproj`, `Night_Boy.mohoproj`, `Whale.mohoproj` -
+and this batch rendered and visually inspected all 5: every one shows
+Moho's own broken-image placeholder (a teal ellipse with a white X), not
+real artwork. `Snow_wars/04 snow man construction.moho` does NOT carry
+these three fields at all (it uses a different, older `psd_layer`/
+`psd_layerid`-only `ImageLayer` shape), and `tools/probe_field.py`'s
+`set_every` only overwrites an EXISTING key, so it cannot be used as a
+substitute fixture for them either - these three fields are genuinely
+unprobeable for a render effect in this checkout without the real PSD
+assets restored. `psd_layer_bounds`'s own `top`/`left`/`right`/`bottom`
+sub-fields do NOT share this limitation - they ARE present with real,
+non-degenerate values on `Snow_wars/04`'s own `ImageLayer` sites, and were
+probed there successfully (see `docs/moho-project-file-format.md` § 6.7).
+
 ## The sweep recipe — M1, M2 and M3
 
 Every remaining milestone applies the same recipe to one group of keys. The

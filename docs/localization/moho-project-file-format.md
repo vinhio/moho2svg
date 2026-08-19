@@ -611,6 +611,15 @@ boolean `g_<number>` (`g_10000`, `g_10001`, `g_10002`, `g_10031`, `g_10033`,
 instance `BoneLayer` trong `WhatIsBone.animeproj`) có hình dạng
 `{NewLayerScript, what}`. Không túi nào được `moho2svg.py` đọc.
 
+**Đính chính (M1.5 batch 6, bản gốc tiếng Anh § 6.4/6.7):** `psd_layers` có
+10 lần xuất hiện trên 10 tài liệu, 9 lần trên `BoneLayer` như mô tả ở trên
+nhưng lần thứ 10 lại nằm trên một `GroupLayer`
+(`Snow_wars/04 snow man construction.moho`) — và trái với khẳng định
+"không túi nào được Moho đọc" ở trên, riêng `psd_layers` THỰC SỰ được
+Moho đọc khi render: ép giá trị này thành một chuỗi rác đã làm thay đổi rõ
+rệt khung hình render trên tài liệu đó. Xem bản gốc tiếng Anh để biết đầy
+đủ bằng chứng.
+
 ### 6.5 `ImageLayer` (phát hiện từ 19 file)
 
 Một layer ảnh raster/phim/import PSD, vắng trong mẫu 5-file ban đầu — được
