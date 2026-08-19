@@ -372,3 +372,25 @@ row.
 | `noise_interval` | `1` | 30 | .probe_meshlayer_noise_interval_real_3sxvud2i.animeproj | 0 | none | **AFFECTS RENDER** |
 | `extra_lines` | `0` | 191 | .probe_meshlayer_extra_lines_real_i2ds39b1.animeproj | 0 | none | inert |
 | `triangulated` | `false` | 5 | .probe_meshlayer_triangulated_real_f37nmtsj.mohoproj | 0 | none | inert |
+| `path` | `"Images/Sky.png"` | 284 | .probe_path_imagefileref_136rdqw3.moho | 0 | none | **AFFECTS RENDER** |
+| `relativeTo` | `"Project"` | 284 | .probe_relto_imagefileref_8se475_o.moho | 0 | none | inert |
+| `audio_path` | `"Audio/Changed.wav"` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `audio_fileref` | `{"relativeTo": "Absolute", "path": "Audio/Changed.wav"}` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `audio_level` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `audio_jump` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `audio_text` | `"CHANGED_AUDIO_TEXT"` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `spatial_positioning` | `true` | 1 | The Nutcracker Ballet.moho | 0 | none | inert |
+| `image_cropping_min` | `{"x":0.3,"y":0.3,"z":0.0}` | 4 | 04 snow man construction.moho | 0 | none | inert |
+| `image_cropping_max` | `{"x":0.7,"y":0.7,"z":0.0}` | 4 | 04 snow man construction.moho | 0 | none | inert |
+| `top` | `999` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `left` | `999` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `right` | `999` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `bottom` | `999` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `psd_layers` | `"0|999|CHANGED_LAYER_LIST"` | 1 | 04 snow man construction.moho | 0 | none | **AFFECTS RENDER** |
+| `fill_texture_fileref` | `{"relativeTo":"Absolute","path":"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"}` | 21 | Bandit.mohoproj | 25 | none | inert |
+| `fill_texture_path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 21 | Bandit.mohoproj | 25 | none | inert |
+| `line_texture_fileref` | `{"relativeTo":"Absolute","path":"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"}` | 21 | Bandit.mohoproj | 25 | none | inert |
+| `line_texture_path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 21 | Bandit.mohoproj | 25 | none | inert |
+| `fill_texture_fileref` | `{"relativeTo":"Absolute","path":"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"}` | 21 | Bandit.mohoproj | 25 | `fill_texture_path="/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` x21 | inert |
+| `path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 113 | .probe_texture2path_1mmsyqm_.animeproj | 0 | none | inert |
+| `path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 113 | .probe_texture2path_fm1_9mphfjuz.animeproj | 0 | `fill_mode=1` x4 | inert |
