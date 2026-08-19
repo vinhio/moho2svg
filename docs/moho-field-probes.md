@@ -122,3 +122,24 @@ behaviour.
 | `color_palette` | `"Nonexistent Palette.png"` | 1 | Bandit.mohoproj | 25 | none | inert |
 | `global_render_style_line_style` | `1` | 1 | Bandit.mohoproj | 25 | none | inert |
 | `face_camera_mode` | `0` | 25 | Bandit.mohoproj | 25 | `face_camera=true` x25 | **AFFECTS RENDER** |
+| `toon_effect` | `true` | 27 | Boar.mohoproj | 0 | none | inert |
+| `toon_effect` | `true` | 28 | 04 snow man construction.moho | 0 | none | **AFFECTS RENDER** |
+| `avi_alpha` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `movie_looping` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `interpreted_fps` | `12.0` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `persist_first_frame` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `persist_last_frame` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `premultiplied_movie` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `reverse_movie` | `true` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `image_cropped` | `false` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `quality_level` | `0` | 28 | 04 snow man construction.moho | 0 | none | **AFFECTS RENDER** |
+| `sampling_mode` | `0` | 28 | 04 snow man construction.moho | 0 | none | **AFFECTS RENDER** |
+| `psd_layer` | `999` | 24 | 04 snow man construction.moho | 0 | none | **AFFECTS RENDER** |
+| `psd_layer_bounds` | `{"top": 0, "left": 0, "right": 200, "bottom": 200}` | 28 | 04 snow man construction.moho | 0 | none | inert |
+| `toon_black_threshold` | `200` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_gray_threshold` | `200` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_lightness` | `80` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_max_edge_threshold` | `50` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_min_edge_threshold` | `10` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_quantize` | `2` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+| `toon_saturation` | `200` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
