@@ -669,8 +669,8 @@ by the same M1.2 classifier pattern but turned out **not to be written by
 (`lottie2moho.py:1914`) pointed at an unrelated local variable named
 `"images"` (an output directory path), not a dict key. It stays `UNKNOWN` —
 present in only 1 of the 76 corpus documents (`metamorphosis/Scene 3.moho`,
-121 entries) — pending the observe-then-probe recipe a field with no writer
-needs.
+424 entries, `frame0000.png` .. `frame0423.png`) — pending the
+observe-then-probe recipe a field with no writer needs.
 
 See `schema/layer.schema.json`'s `ImageLayer` for the full field list with
 per-field descriptions and probe evidence.

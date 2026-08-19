@@ -143,3 +143,18 @@ behaviour.
 | `toon_min_edge_threshold` | `10` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
 | `toon_quantize` | `2` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
 | `toon_saturation` | `200` | 28 | 04 snow man construction.moho | 0 | `toon_effect=true` x28 | **AFFECTS RENDER** |
+
+## Findings worth flagging to M1.2's own reader (fix round 1)
+
+The `toon_effect` row against `Boar.mohoproj` (above, frame 0, `inert`) is
+**superseded** — do not read it as a genuine negative. `Boar.mohoproj`
+references PSD source assets (`Images/Boar_fox_01.psd`) that are not present
+in this checkout, so every `ImageLayer` in it renders as Moho's own
+broken-image placeholder glyph regardless of what field is varied; both the
+base and variant twins of that probe rendered the identical placeholder, not
+identical toon-shaded artwork. The very next row, same key and value against
+`04 snow man construction.moho` (a document whose image assets ARE present
+and confirmed to render real artwork), is the real measurement:
+`AFFECTS RENDER`. This file stays append-only by design (see the header
+above) — this note is added rather than editing or removing the misleading
+row.
