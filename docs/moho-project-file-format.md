@@ -665,6 +665,66 @@ stripped-down `{type, mesh}` pair (19-file finding)** — it carries the whole
 `MeshLayer` field set, including `Mesh3DOptions`, texture paths/filerefs, and
 the "sketchy lines" fields, all likewise unused.
 
+**M1.5 batch 4 (2026-08-20): all 23 single-owner `TextLayer` fields above are
+now `EDITABLE`, every one measured INERT against Moho 14.4's own headless
+render — a uniform result, not 23 separate coincidences.** A 76-document
+corpus scan found 46 `TextLayer` objects across 26 documents (matching the
+brief's own document count, correcting two of its field-level premises: the
+brief's own "fillcolor / linecolor: 1, constant" claim undercounts — the scan
+found 9 distinct `fillcolor` values and 3 distinct `linecolor` values,
+because the earlier hand-picked sample happened not to include
+`Boar.mohoproj`/`Cocon.mohoproj`/etc., which carry different values from the
+`Tamales`-font documents' shared default). The mechanism, confirmed directly
+rather than only inferred from what `moho2svg.py` reads: a `TextLayer`'s own
+glyph mesh (`mesh_layer.mesh.shapes[0].style`) already carries the SAME
+values as this object's own `fillcolor`/`linecolor`/`linewidth` — measured
+exactly on `Rabbit.animeproj`'s "PROS" `TextLayer` (`linecolor`
+`{57,123,173,255}` equals the mesh style's `line_color`
+`{0.223529,0.482353,0.678431,1.0}` at the 0–255-vs-0.0–1.0 scale factor) —
+so Moho bakes text/font metadata into the glyph mesh's own style at AUTHOR
+time and never reads it again at render time. `tools/probe_field.py` confirms
+this for Moho's own renderer, not merely this exporter: forcing
+`text`/`font`/`textsize`/`justification`/`leading`/`kerning`/`fill`/
+`stroke`/`fillcolor`/`linecolor`/`linewidth`/`textinheritedstyle1`/
+`textinheritedstyle2` to a different real corpus value (or the manual's
+documented opposite for the fields constant across the corpus) on
+`Rabbit.animeproj`, cross-checked on `FoxAndGhost.animeproj` for
+`text`/`stroke`/`fillcolor`, left every render byte-identical. The eleven
+`balloon*` fields are inert for the same reason PLUS a second one:
+`balloonstyle` (the master "which word balloon" switch, `""` meaning the
+Insert Text dialog's own `<none>`, manual ch. 6.07–6.08) is the empty string
+on **all 46 sampled `TextLayer` objects across all 26 documents** — no
+sampled document ever authored a word balloon, so there is no baked balloon
+geometry anywhere in this corpus. Probed the switch itself, not just its
+dependents: forcing `balloonstyle` to a real installed word balloon asset
+name (`CK_Clean_Balloon`, one of 4 shipped under `Resources/Support/Common/
+Word Balloons/`) on `Rabbit.animeproj`, and to the one bundled NAMED preset
+(`Standard_01_Top_Bottom`) on `Gathered-00intro.mohoproj`, both left the
+render unchanged — Moho does not synthesise balloon geometry from this field
+at render time either; a balloon shape is presumably only ever baked in (the
+same way `mesh_layer` bakes the text) when the Insert Text dialog is
+actually used to add one, which no corpus document did. See
+`schema/layer.schema.json`'s `TextLayer` `$def` for every field's own probe
+row and `docs/moho-field-probes.md` for the raw evidence.
+
+**The `text` field has two genuinely different owners — `TextLayer` and
+`NoteLayer` — resolved the same way as `through_alpha` ([§ 8.4](#84-gradients)):
+investigated and probed separately, not assumed identical.** `TextLayer.text`
+is real on-canvas artwork content (see above); `NoteLayer.text` is a comment
+pinned into the layer tree for the editor only (manual ch. 11.12) — a
+76-document scan found 5 `NoteLayer` objects across 2 documents
+(`Snow-girl/Snow-girl-cut51.mohoproj`, 1; `Snow_wars/01 opening.moho`, 4),
+correcting the schema's own prior "1 instance in the sample set" note. Both
+ended up `EDITABLE` and both probed inert (so, like `velocity`/`density` in
+M1.5 batch 3, no registry-conflict waiver was needed — the two occurrences
+agree, they just don't mean the same thing), but for different underlying
+reasons: `TextLayer.text` is inert because it is baked into a sibling mesh
+and never re-read (see above); `NoteLayer.text` is inert because Moho itself
+never draws a `NoteLayer`'s content AT ALL — confirmed by rendering both of
+this corpus's `NoteLayer`-bearing documents twice with `text` forced to a
+different string each time, not merely inferred from the manual's own
+description of a Note as a non-rendering annotation.
+
 **Per-layer `metadata` / `script_data` bags — (19-file finding.)** Both are
 small free-form key/value bags, distinct from the document-level `metadata`
 in [§ 2](#2-top-level-structure). `metadata` appears on `MeshLayer`,

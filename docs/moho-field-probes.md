@@ -299,3 +299,35 @@ row.
 | `density` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.01], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 19 | .probe_isolate_crayondensity.animeproj | 60 | none | inert |
 | `velocity` | `{"x":500.0,"y":-500.0}` | 140 | WhatIsBone.animeproj | 60 | `enable_physics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x29 | **AFFECTS RENDER** |
 | `density` | `1000.0` | 140 | WhatIsBone.animeproj | 60 | `enable_physics={"type":"Bool","ref":false,"mute":false,"when":[0],"val":[true],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` x29 | **AFFECTS RENDER** |
+| `text` | `"ZZZ_CHANGED"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `font` | `"Arial Black"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `textsize` | `170` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `justification` | `0` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `leading` | `0` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `kerning` | `0` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `fill` | `false` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `stroke` | `true` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `fillcolor` | `{"r":0,"g":0,"b":0,"a":255}` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `linecolor` | `{"r":255,"g":255,"b":255,"a":255}` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `linewidth` | `0.004111` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `textinheritedstyle1` | `"SomeStyle"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `textinheritedstyle2` | `"SomeStyle2"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `text` | `"SECOND_CHECK"` | 4 | FoxAndGhost.animeproj | 0 | none | inert |
+| `stroke` | `false` | 4 | FoxAndGhost.animeproj | 0 | none | inert |
+| `fillcolor` | `{"r":0,"g":0,"b":0,"a":255}` | 4 | FoxAndGhost.animeproj | 0 | none | inert |
+| `balloonstyle` | `"CK_Clean_Balloon"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonfill` | `false` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonfillcolor` | `{"r":0,"g":0,"b":0,"a":255}` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonlinecolor` | `{"r":255,"g":0,"b":0,"a":255}` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonlinewidth` | `0.02` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonfliph` | `true` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonflipv` | `true` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonposes` | `"1.0 0.5"` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonsize` | `185` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonsizeproportional` | `false` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonstroke` | `false` | 2 | Rabbit.animeproj | 0 | none | inert |
+| `balloonsize` | `105` | 1 | Gathered-00intro.mohoproj | 0 | none | inert |
+| `balloonstyle` | `"Standard_01_Top_Bottom"` | 1 | Gathered-00intro.mohoproj | 0 | none | inert |
+| `balloonfillcolor` | `{"r":255,"g":0,"b":0,"a":255}` | 2 | BoneDynamics.animeproj | 0 | none | inert |
+| `text` | `"CHANGED_NOTE"` | 1 | Snow-girl-cut51.mohoproj | 0 | none | inert |
+| `text` | `"CHANGED_NOTE2"` | 4 | 01 opening.moho | 60 | none | inert |

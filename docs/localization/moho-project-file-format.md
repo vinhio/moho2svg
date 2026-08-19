@@ -550,6 +550,26 @@ không phải một cặp `{type, mesh}` tối giản (phát hiện từ 19 file
 mang toàn bộ tập trường `MeshLayer`, kể cả `Mesh3DOptions`, các đường dẫn
 /fileref texture, và các trường "sketchy lines", tất cả cũng không được dùng.
 
+**M1.5 batch 4 (2026-08-20, tóm tắt — xem bản gốc tiếng Anh để biết đầy đủ
+chi tiết và bằng chứng đo đạc):** cả 23 trường riêng-chủ-sở-hữu của
+`TextLayer` (mọi trường trừ `type`/`mesh_layer`) giờ là `EDITABLE`, và mọi
+trường đều đo được là INERT khi render thật bằng Moho 14.4 — không chỉ suy
+luận từ việc `moho2svg.py` không đọc chúng. Bằng chứng trực tiếp: style của
+mesh glyph (`mesh_layer.mesh.shapes[0].style`) đã mang sẵn CÙNG giá trị với
+`fillcolor`/`linecolor`/`linewidth` của chính `TextLayer` (đo chính xác trên
+`Rabbit.animeproj`) — nghĩa là Moho bake các trường text/font vào style của
+mesh glyph tại thời điểm soạn thảo và không bao giờ đọc lại chúng lúc render.
+Mười một trường `balloon*` cũng inert vì cùng lý do, cộng thêm một lý do nữa:
+`balloonstyle` (công tắc chính) là chuỗi rỗng trên toàn bộ 46 `TextLayer`
+được lấy mẫu trên cả 26 tài liệu — chưa tài liệu nào từng tạo bong bóng hội
+thoại thật, nên ép `balloonstyle` sang một tên tài nguyên bong bóng có thật
+vẫn không đổi gì trên render. Trường `text` có HAI chủ sở hữu khác nhau thật
+sự — `TextLayer` và `NoteLayer` — được xử lý giống tiền lệ `through_alpha`
+([§ 8.4](#84-gradients)): điều tra và probe riêng, không giả định giống
+nhau; cả hai đều thành `EDITABLE` và đều inert nhưng vì lý do khác nhau (xem
+bản gốc tiếng Anh, mục `NoteLayer`, để biết chi tiết và số liệu quét kho
+ngữ liệu 76 tài liệu).
+
 **Các túi `metadata` / `script_data` theo layer — (phát hiện từ 19 file.)**
 Cả hai là các túi khóa/giá trị tự do nhỏ, tách biệt với `metadata` cấp tài
 liệu trong [§ 2](#2-cấu-trúc-cấp-cao-nhất). `metadata` xuất hiện trên các
