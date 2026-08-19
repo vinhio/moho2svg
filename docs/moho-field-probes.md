@@ -331,3 +331,44 @@ row.
 | `balloonfillcolor` | `{"r":255,"g":0,"b":0,"a":255}` | 2 | BoneDynamics.animeproj | 0 | none | inert |
 | `text` | `"CHANGED_NOTE"` | 1 | Snow-girl-cut51.mohoproj | 0 | none | inert |
 | `text` | `"CHANGED_NOTE2"` | 4 | 01 opening.moho | 60 | none | inert |
+| `clear_background` | `true` | 1 | .probe_crayon_clear_background_eh28eghq.mohoproj | 0 | none | inert |
+| `rand_seed` | `999999` | 1 | .probe_crayon_rand_seed_kumqskj5.mohoproj | 0 | none | inert |
+| `reduce_randomization` | `false` | 1 | .probe_crayon_reduce_randomization_lm888wjo.mohoproj | 0 | none | inert |
+| `halo_only` | `true` | 9 | .probe_halo_halo_only_t655lp7q.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `halo_color` | `{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}` | 9 | .probe_halo_halo_color_rcq2opup.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `shadow_only` | `true` | 2 | .probe_shaded_shadow_only_euju1agi.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `halo_radius` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.05], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 9 | .probe_halo_halo_radius_v2_cq17bnmu.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `noise` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [5.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_layereffects_noise_ld25pgk9.mohoproj | 25 | none | inert |
+| `animated_noise` | `true` | 21 | .probe_meshlayer_animated_noise_drzk2i_g.mohoproj | 25 | none | inert |
+| `extra_lines` | `5` | 21 | .probe_meshlayer_extra_lines_pqmp_jc6.mohoproj | 25 | none | inert |
+| `extra_sketchy` | `true` | 21 | .probe_meshlayer_extra_sketchy_4lc4amnb.mohoproj | 25 | none | inert |
+| `gap_filling` | `true` | 21 | .probe_meshlayer_gap_filling_rzcjtyj8.mohoproj | 25 | none | inert |
+| `noise_interval` | `2` | 21 | .probe_meshlayer_noise_interval_louvjghf.mohoproj | 25 | none | inert |
+| `noisy_lines` | `true` | 21 | .probe_meshlayer_noisy_lines_fv0opje7.mohoproj | 25 | none | inert |
+| `noisy_shapes` | `true` | 21 | .probe_meshlayer_noisy_shapes_0p351fl0.mohoproj | 25 | none | inert |
+| `frame_zero_deformer` | `false` | 21 | .probe_meshlayer_frame_zero_deformer_7x8g2yws.mohoproj | 25 | none | inert |
+| `triangulated` | `true` | 21 | .probe_meshlayer_triangulated_6hqpfors.mohoproj | 25 | none | inert |
+| `contraction` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.02], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_layershading_contraction_7uwyrmy3.mohoproj | 25 | none | inert |
+| `clip_to_group` | `true` | 25 | .probe_layershadow_clip_to_group_uqzt3e_2.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `expansion` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.02], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_layershadow_expansion_41yluue0.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `extended_frames` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [2.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_extended_frames_rrttpy4f.mohoproj | 175 | none | **AFFECTS RENDER** |
+| `frame_percentage` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.3], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_frame_percentage_lq7mdzrg.mohoproj | 175 | none | **AFFECTS RENDER** |
+| `frames` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [5.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_frames_kly2hfyi.mohoproj | 175 | none | **AFFECTS RENDER** |
+| `radius` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.05], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_radius_skw5x596.mohoproj | 175 | none | inert |
+| `skip` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [3.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_skip_k4t_ykzj.mohoproj | 175 | none | inert |
+| `sub_frames` | `{"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [false], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 159 | .probe_motionblur_sub_frames_h5l_reks.mohoproj | 175 | none | **AFFECTS RENDER** |
+| `blur_radius` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.05], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 9 | .probe_halo_blur_radius_yayeqnnd.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `blur_radius` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.05], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 6 | .probe_softstyle_blur_radius_q18x5oy_.mohoproj | 0 | none | inert |
+| `angle` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_layershading_angle_dya2gx6d.mohoproj | 25 | none | inert |
+| `angle` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 25 | .probe_layershadow_angle_16zcsw0l.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `angle` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 2 | .probe_shaded_angle_s4yhkyxm.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `angle` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | .probe_shadowstyle_angle_ivrddgym.animeproj | 0 | none | **AFFECTS RENDER** |
+| `direction` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [3.141593], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | .probe_wind_direction_l0e2hlto.mohoproj | 25 | none | inert |
+| `direction` | `{"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}` | 1 | .probe_gravity_direction_4m79r8uc.mohoproj | 25 | none | inert |
+| `extra_sketchy` | `false` | 106 | .probe_meshlayer_extra_sketchy_real_wshovpca.mohoproj | 0 | none | inert |
+| `noisy_lines` | `false` | 106 | .probe_meshlayer_noisy_lines_real_1raooflz.mohoproj | 0 | none | inert |
+| `noisy_shapes` | `false` | 106 | .probe_meshlayer_noisy_shapes_real_urq30uyz.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `animated_noise` | `false` | 106 | .probe_meshlayer_animated_noise_real_h5ywupfq.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `noise_interval` | `1` | 30 | .probe_meshlayer_noise_interval_real_3sxvud2i.animeproj | 0 | none | **AFFECTS RENDER** |
+| `extra_lines` | `0` | 191 | .probe_meshlayer_extra_lines_real_i2ds39b1.animeproj | 0 | none | inert |
+| `triangulated` | `false` | 5 | .probe_meshlayer_triangulated_real_f37nmtsj.mohoproj | 0 | none | inert |
