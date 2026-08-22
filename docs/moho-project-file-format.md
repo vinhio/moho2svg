@@ -562,8 +562,8 @@ This is the important gap list: every field here changes what Moho draws.
 | `timing_offset` | int | `0` everywhere | Shifts this layer's whole timeline. Non-zero would desync the frame this tool evaluates. |
 | `layer_ref_*` (`uuid`, `path`, `fileref`, `mod_date`, `same_doc`) | mixed | empty on most layers, but not all | Linked/referenced external layer. A document using these would be missing artwork here. **Correction (fix round 2):** see [§ 11.4](#114-action_refs-and-layercomps) — several corpus documents DO set non-default values here, contrary to an earlier revision of this row. All five probed inert on Bandit.mohoproj, one of the documents where they genuinely sit at their defaults. |
 | `camera_immune` | bool | `true` on 6 layers in 3 files | **Now applied** — the layer projects through the DEFAULT camera, so it stays put on screen while the camera moves (manual ch. 12.02, "Immune to camera movements"). Inherited by descendants. See [§ 9](moho-animation-and-transform.md#9-camera-animation) of the animation doc. |
-| `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. `dof_immune` probed inert (depth_of_field is itself off in the probed document). `face_camera` probed AFFECTS RENDER; `face_camera_mode` is inert with `face_camera` left off but AFFECTS RENDER once `face_camera=true` is set as a precondition. `3d_mode` was not probed here (see the 3d_mode/3d_shading_density finding in docs/moho-field-probes.md from an earlier task). |
-| `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (648 instances), always at identical defaults | 3D-extrusion rendering settings, entirely inert in every sample because `3d_mode` is `0` everywhere. |
+| `dof_immune`, `face_camera`, `face_camera_mode`, `3d_mode` | mixed | defaults, `face_camera_mode: 2` | 3D / depth-of-field behaviour. Not used. `dof_immune` probed inert (depth_of_field is itself off in the probed document). `face_camera` probed AFFECTS RENDER; `face_camera_mode` is inert with `face_camera` left off but AFFECTS RENDER once `face_camera=true` is set as a precondition. `3d_mode` re-confirmed AFFECTS RENDER (M1.5 batch 8) and is also the working precondition for the whole `Mesh3DOptions` family — see [§ 6.4](#64-type-specific-fields). |
+| `3d_options` (`Mesh3DOptions`) | obj | see [§ 6.4](#64-type-specific-fields) — present on every `MeshLayer` (4,969 instances), always at identical defaults | 3D-extrusion rendering settings. **M1.5 batch 8:** all ten sub-fields plus the container itself now `EDITABLE`/AFFECTS RENDER — see [§ 6.4](#64-type-specific-fields)'s precondition-research note for the compound `3d_mode=1` (+`3d_shading_mode=2` for four of the ten) precondition that unlocks them, corpus-wide inert only because no sample document actually enables 3D extrusion. |
 | `quality_flags` | int | `4092`, `4094`, `45052`, `45054`, `2044` | A bit field of per-layer render toggles. Not decoded. Probed inert on Bandit.mohoproj. |
 | `label_col`, `expanded`, `shown_in_timeline`, `selected`, `random_num`, `layer_user_tags`, `layer_user_comments`, `ignored_by_layer_picker`, `consolidated_channels`, `render_only`, `modification_date` | mixed | — | Editor state, or (for `random_num`/`render_only`) an undecoded render toggle. Both probed inert on Bandit.mohoproj under this file's default probe settings. `mask_expansion` moved out of this list — decoded and applied, see [§ 10.5](#105-mask_expansion-and-exclude_lines_from_mask--the-two-checkboxes). |
 | `metadata`, `script_data` | obj | see [§ 6.4](#64-type-specific-fields) | Editor/script bookkeeping bags, key sets now enumerated. |
@@ -689,20 +689,60 @@ hidden by either visibility mechanism.
 - `3d_mode` (always `0`) and `3d_options` — see `Mesh3DOptions` below.
 - `metadata` — see below.
 
-**`Mesh3DOptions`** (`MeshLayer.3d_options`) — **(19-file finding.)** Ten
+**`Mesh3DOptions`** (`MeshLayer.3d_options`) — **(76-document corpus
+finding, corrected from the earlier 19-file "648 instances" count.)** Ten
 3D-extrusion settings gated by `3d_mode`, present on **every single sampled
-`MeshLayer`** (648 instances, including the one nested inside each
-`TextLayer`), always at identical default values:
+`MeshLayer`** (4,969 instances across all 76 corpus documents, including the
+one nested inside each `TextLayer`), always at identical default values:
 `3d_shading_mode: 1`, `3d_shading_density: 50`,
 `3d_shading_color: {64,64,64,255}` (plain 0–255 RGBA), `3d_silhouette_edges`
 / `3d_material_edges` / `3d_crease_edges: true`,
 `3d_crease_angle: 1.047198` (π/3), `3d_edge_extension: 0.0`,
 `3d_backface_removal` / `3d_reset_z: false`. Because `3d_mode` is `0` in
-every sample, the whole block is currently inert — but it is large and was
-completely undocumented before this pass; a document that actually enables
-3D extrusion would export as flat 2D geometry with no extrusion or 3D
-shading at all. Full field list in `schema/layer.schema.json`'s
+every sample, the whole block is inert corpus-wide — but it is large and was
+completely undocumented before an earlier pass; a document that actually
+enables 3D extrusion would export as flat 2D geometry with no extrusion or
+3D shading at all. Full field list in `schema/layer.schema.json`'s
 `Mesh3DOptions`.
+
+**M1.5 batch 8 — the precondition, found (resolves plan Q8).** An earlier
+task (Task 10) measured that `3d_mode=1` alone changes Bandit.mohoproj's
+own render (21 sites) but leaves `3d_shading_density=90` inert behind it —
+necessary but not sufficient, contradicting the plan's original "one switch
+unlocks all ten keys" premise. This batch found the missing piece by
+reading Moho's own scripting header (`pkg_moho.lua_pkg`): it declares
+`Mc_SHADING_NONE`/`_TOON`/`_HATCHED`/`_EXTRUDED_EDGE` for the
+`3d_shading_mode` enum — one member short of the manual's own five-choice
+"None, Smooth, Toon, Hatched, Extruded Side Color" list, since Smooth has
+no named Lua constant. The corpus-constant `3d_shading_mode=1` is
+presumably Smooth — a continuous shading mode with nothing for a
+density/dither parameter to drive. Forcing `3d_shading_mode=2` (the next
+value after Smooth, presumed Toon) alongside `3d_mode=1` makes
+`3d_shading_density=90` **AFFECTS RENDER**, and rendering + directly
+viewing the PNG confirms it visually, not just by pixel-diff count: the
+flat-shaded extrusion grows a visible cross-hatch pattern once both are
+set, and forcing `3d_shading_color` to red under the same pair turns the
+hatch lines from grey to red — a clean, unambiguous effect.
+
+The working compound precondition splits the ten fields into two groups:
+
+| Group | Precondition | Fields |
+|---|---|---|
+| Layer-level, mode-independent | `3d_mode=1` alone | `3d_crease_edges`, `3d_crease_angle`, `3d_edge_extension`, `3d_backface_removal`, `3d_reset_z` (plus `3d_shading_mode` itself) |
+| Shading-mode-dependent | `3d_mode=1` **and** `3d_shading_mode=2` | `3d_shading_density`, `3d_shading_color`, `3d_silhouette_edges`, `3d_material_edges` |
+
+The four shading-mode-dependent fields were each independently probed under
+`3d_mode=1` alone FIRST and came back inert — a real, reproduced correction
+once `3d_shading_mode=2` was added, not an assumption. All ten fields, plus
+`3d_options` (probed as a compound whole-block swap, independently of the
+sub-fields) and the per-shape `3d_thickness` (`mesh.schema.json`, a
+different scope — see its own entry there), are now `EDITABLE` with a real
+Moho-render probe apiece — see `docs/moho-field-probes.md` for every row.
+The other candidate preconditions the brief named (a non-zero `3d_thickness`,
+a different camera angle) were not needed once this one was found; notably,
+`3d_thickness` was already confirmed non-zero (constant `0.125`) on every
+sampled shape corpus-wide, so the "zero thickness has nothing to shade"
+half of that hypothesis does not even apply to this corpus.
 
 **`BoneLayer`** — `skeleton` and `actions` are used. `skeleton` is
 `{type, binding_mode, bones}`, plus `bones_groups` in the `1045` documents —
@@ -1342,7 +1382,7 @@ the sample documents leaves the SVGs byte-identical.
 | `effect_offset` | `Vec2` channel | mostly `{0,0}`, but non-zero on 276 of 22,144 occurrences across 30 of the 76-document corpus (**corrected, M1.3** — an earlier revision of this row claimed nothing observed supplies a non-zero value) | not read by `moho2svg.py`, but confirmed to move pixels in real Moho — see [§ 8.4](#84-gradients) |
 | `fill_allowed` | bool | `true` 1,801, `false` 859 (19-file totals) | no — presumably "this shape may be filled at all", distinct from `has_fill`; forcing it `false` everywhere on Bandit.mohoproj (a mix of stored `true`/`false`, not a no-op) left the render byte-identical, including on shapes with `has_fill = true` (M1.3 probe) |
 | `combo_blend_anim` | `Val` channel | `0.0`, `1045` only | no — presumably animates a soft boolean blend; forcing it to `0.7` on Bandit.mohoproj was inert (M1.3 probe) |
-| `3d_thickness` | `Val` channel | `0.125` on all 2,660 shapes (19-file total) | no |
+| `3d_thickness` | `Val` channel | `0.125` on all 22,144 shapes (76-document corpus total, corrected from the 19-file "2,660 shapes" count) | not read by `moho2svg.py`, but confirmed to move pixels in real Moho once the owning MeshLayer's `3d_mode` is forced to `1` (M1.5 batch 8) — see [§ 6.4](#64-type-specific-fields)'s `Mesh3DOptions` precondition-research note |
 | `name` | str | `""` or `"S1"`, `"S2"`, … | no |
 | `selected` | bool | editor state | no |
 
@@ -2563,7 +2603,10 @@ the other five effect channels, `layer_shading`, `layer_color`,
 constraint/IK fields, `project_data.global_render_style_*`, `mesh.groups`,
 `mesh.shape_order`, `shape.3d_thickness`/`effect_offset`/`combo_blend_anim`,
 `quality_flags`, `Mesh3DOptions`/`3d_mode`
-**(19-file finding — see [§ 6.4](#64-type-specific-fields))**, `parent_bone
+**(19-file finding — see [§ 6.4](#64-type-specific-fields); `shape.3d_thickness`
+and the whole `Mesh3DOptions`/`3d_mode` family are unread by `moho2svg.py`
+but now confirmed, M1.5 batch 8, to move pixels in real Moho once `3d_mode`
+is forced to `1` — same "unread but real" shape as `effect_offset`)**, `parent_bone
 == -3` **(19-file finding, `ImageLayer` only)**, `masking == 5`/`6`
 **(19-file finding)**, and the `TextLayer` font/balloon fields.
 
