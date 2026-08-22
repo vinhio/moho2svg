@@ -10,7 +10,7 @@
       "required": ["type", "binding_mode", "bones"],
       "properties": {
         "type": { "const": "Skeleton" , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:5080 in Layer._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
-        "binding_mode": { "type": "integer", "description": "Observed values: 1 (large majority), 2 (rare). Meaning not decoded; moho2svg.py never branches on it." , "x-moho-disposition": "UNKNOWN", "x-moho-unknown-reason": "not yet investigated"},
+        "binding_mode": { "type": "integer", "description": "Observed values: 1 (large majority), 2 (rare), across 572 sites/72 documents. Meaning not decoded; moho2svg.py never branches on it (Skinner always uses the same rigid/flexible per-bone binding logic regardless of this document-level flag). Probed on Bandit.mohoproj's own single skeleton, forced 1->2: inert." , "x-moho-disposition": "EDITABLE", "x-moho-evidence": "docs/moho-field-probes.md: binding_mode=2, 1 site, Bandit.mohoproj frame 25, inert. Not read by moho2svg.py."},
         "bones": { "type": "array", "items": { "$ref": "#/$defs/Bone" } , "x-moho-disposition": "MODELLED", "x-moho-evidence": "moho2svg.py:3043 in Skeleton._build (trace: out/traced_keys.json, see tools/trace_fields.py)"},
         "bones_groups": {
           "type": "array",

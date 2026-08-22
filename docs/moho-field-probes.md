@@ -394,3 +394,43 @@ row.
 | `fill_texture_fileref` | `{"relativeTo":"Absolute","path":"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"}` | 21 | Bandit.mohoproj | 25 | `fill_texture_path="/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` x21 | inert |
 | `path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 113 | .probe_texture2path_1mmsyqm_.animeproj | 0 | none | inert |
 | `path` | `"/Users/vinh/Working/Moho2SVG/moho/Snow_wars/Images/BG 1.png"` | 113 | .probe_texture2path_fm1_9mphfjuz.animeproj | 0 | `fill_mode=1` x4 | inert |
+| `layer_color` | `{"on": {"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [false], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "color": {"type": "Color", "ref": false, "mute": false, "when": [0], "val": [{"r": 0.137255, "g": 0.066667, "b": 0.266667, "a": 0.129412}], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}}` | 164 | Gathered-01Intro2.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `layer_shading` | `{"on": {"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [false], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "angle": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.665969], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "offset": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.013889], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "blur": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.006944], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "contraction": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "color": {"type": "Color", "ref": false, "mute": false, "when": [0], "val": [{"r": 0.878431, "g": 0.87451, "b": 0.494118, "a": 0.501961}], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "noise_amp": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [0.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "noise_scale": {"type": "Val", "ref": false, "mute": false, "when": [0], "val": [64.0], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}, "threshold": {"type": "Bool", "ref": false, "mute": false, "when": [0], "val": [false], "interp": [{"im": 1, "v1": 0.1, "v2": 0.5, "in": 1, "h": 0, "s": false, "t": 0}]}}` | 164 | Gathered-01Intro2.mohoproj | 0 | none | **AFFECTS RENDER** |
+| `h` | `10` | 10074 | Bandit.mohoproj | 28 | none | **AFFECTS RENDER** |
+| `in` | `6` | 10074 | Bandit.mohoproj | 28 | none | **AFFECTS RENDER** |
+| `t` | `999` | 10074 | Bandit.mohoproj | 28 | none | inert |
+| `ai` | `5.0` | 16 | Bandit.mohoproj | 28 | none | inert |
+| `ao` | `-5.0` | 16 | Bandit.mohoproj | 28 | none | **AFFECTS RENDER** |
+| `pi` | `0.99` | 16 | Bandit.mohoproj | 28 | none | inert |
+| `po` | `0.99` | 16 | Bandit.mohoproj | 28 | none | inert |
+| `num_points` | `999` | 114 | Bandit.mohoproj | 25 | none | inert |
+| `binding_mode` | `2` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `skia_scaling` | `2.5` | 3 | Boar.mohoproj | 0 | none | inert |
+| `target_layer_id` | `999` | 2 | SketchBone.animeproj | 0 | none | inert |
+| `curve_points` | `999` | 403 | Bandit.mohoproj | 25 | none | inert |
+| `groups` | `[{"name":"probe","points":[0,1]}]` | 21 | Bandit.mohoproj | 25 | none | inert |
+| `rotate_to_follow` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `animated_layer_effects` | `true` | 25 | Bandit.mohoproj | 25 | none | inert |
+| `animated_layer_order` | `false` | 2 | SketchBone.animeproj | 0 | none | inert |
+| `layer_ordering` | `{"type":"String","ref":false,"mute":false,"when":[0],"val":["999|1|2"],"interp":[{"im":1,"v1":-1.0,"v2":-1.0,"in":1,"h":0,"s":false,"t":0}]}` | 4 | Bandit.mohoproj | 25 | none | inert |
+| `script_data` | `{"what":999,"NewLayerScript":true}` | 2 | WhatIsBone.animeproj | 0 | none | inert |
+| `turbulence_amplitude` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":-1.0,"v2":-1.0,"in":1,"h":0,"s":false,"t":0}]}` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `turbulence_frequency` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":-1.0,"v2":-1.0,"in":1,"h":0,"s":false,"t":0}]}` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `frame_by_frame` | `true` | 2 | Boar.mohoproj | 0 | none | inert |
+| `switch_data` | `"PROBE_SWITCH_DATA"` | 2 | Boar.mohoproj | 0 | none | inert |
+| `switch_interpolation` | `true` | 2 | Boar.mohoproj | 0 | none | inert |
+| `masking_points` | `[{"seed_point":{"x":0.0,"y":0.0},"tolerance":50,"reverse_mask":true}]` | 1 | Boar.mohoproj | 0 | none | inert |
+| `reverse_mask` | `true` | 2 | Boar.mohoproj | 0 | none | inert |
+| `seed_point` | `{"x":0.5,"y":0.5}` | 2 | Boar.mohoproj | 0 | none | inert |
+| `tolerance` | `5` | 2 | Boar.mohoproj | 0 | none | inert |
+| `soundtrack` | `"Audio/probe.wav"` | 1 | Bandit.mohoproj | 25 | none | inert |
+| `mute` | `true` | 7898 | Bandit.mohoproj | 25 | none | inert |
+| `ref` | `true` | 7898 | Bandit.mohoproj | 25 | none | inert |
+| `groups` | `[{"name":"probe_group","points":[0,1,2]}]` | 67 | 01 opening.moho | 0 | none | inert |
+| `switch_data` | `"PROBE_CHANGED"` | 6 | Scene 2.moho | 0 | none | inert |
+| `split` | `[{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":-1.0,"v2":-1.0,"in":1,"h":0,"s":false,"t":0}]},{"type":"Val","ref":false,"mute":false,"when":[0],"val":[5.0],"interp":[{"im":1,"v1":-1.0,"v2":-1.0,"in":1,"h":0,"s":false,"t":0}]}]` | 1 | Bandit.mohoproj | 30 | none | **AFFECTS RENDER** |
+| `fill_style2_id` | `9` | 4 | IndependentAngle.animeproj | 0 | none | **AFFECTS RENDER** |
+| `fill_mode` | `1` | 4 | IndependentAngle.animeproj | 0 | none | inert |
+| `SS_Texture2FileRef` | `{"relativeTo":"Absolute","path":"Images/Sky.png"}` | 4 | IndependentAngle.animeproj | 0 | none | inert |
+| `line_style_id` | `4` | 9 | 01 opening.moho | 0 | none | **AFFECTS RENDER** |
+| `layer_ordering` | `{"type":"String","ref":false,"mute":false,"when":[0,12],"val":["","F8A20474-C414-4B10-8CB5-AFB33DD17A27|0F191C93-4EAC-4C91-894B-95339605665E|"],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0},{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 37 | DarkMan.mohoproj | 15 | none | inert |
