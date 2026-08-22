@@ -331,14 +331,24 @@ below, so an interpolation-shape effect would have somewhere to show):
   pixels, while a sensitivity control (the marker's own `v1` 15→8) changed
   9.34% — so the experiment is sensitive and the flag is genuinely inert,
   not merely unexercised.
-- **Of the `b` array's four sub-fields, only `ao` AFFECTS RENDER** — probed
-  on Bandit.mohoproj's own 16 real `im == 9` sites (bones 3/4/5's
-  `anim_angle`), forcing each sub-field individually at frame 28 (inside
-  bone 3's own `[25, 33]` Bezier segment): `ao` forced to `-5.0` moved
-  pixels (visually confirmed, a real pose shift); `ai` (5.0), `pi` (0.99)
-  and `po` (0.99) all stayed byte-identical. Not re-tested at a frame closer
-  to a segment's own arrival keyframe, where an incoming-handle effect
-  (`ai`/`pi`) would plausibly be more visible.
+- **Of the `b` array's four sub-fields, only `ao` shows any pixel
+  difference** — probed on Bandit.mohoproj's own 16 real `im == 9` sites
+  (bones 3/4/5's `anim_angle`), forcing each sub-field individually at
+  frame 28 (inside bone 3's own `[25, 33]` Bezier segment): `ao` forced to
+  `-5.0` moved 23 pixels (a thin 2-pixel sliver at the canvas's left edge,
+  independently reproduced); `ai` (5.0), `pi` (0.99) and `po` (0.99) all
+  stayed byte-identical. **This is weaker evidence than `h`/`in`'s own
+  finding above, not the same class of result** — a follow-up sweep of
+  neighbouring `ao` values (`-1`, `-2`, `-3`, `-8`, `-10`, `-15`, `+5`,
+  `+10`) all came back inert, and only a much larger `+20` (not `-5.0`)
+  triggered a difference elsewhere: a narrow, non-monotonic pattern more
+  consistent with a coincidental threshold/clip-boundary crossing at this
+  one specific value than with a systematic interpolation-shape effect.
+  Still `EDITABLE` (unread by `moho2svg.py`, a real measured difference
+  exists), but whether `ao` genuinely shapes the Bezier timing curve is NOT
+  established. Not re-tested at a frame closer to a segment's own arrival
+  keyframe, where an incoming-handle effect (`ai`/`pi`) would plausibly be
+  more visible.
 
 All eight are `EDITABLE` in the schema registry now (four `AFFECTS RENDER` —
 `h`, `in`, `ao`, and — separately — `split`, see § 5.4 below — tagged
@@ -364,8 +374,16 @@ sub-channel's own animated span): **AFFECTS RENDER**. So Moho's own renderer
 DOES honour the split sub-channels (at least here), and a document whose
 split axis is keyframed differently from its parent — exactly the scenario
 this section already warned about — would render differently in Moho than
-in this exporter's parent-array-only model. `EDITABLE`, `x-moho-render:
-pending` in the schema registry.
+in this exporter's parent-array-only model (329,585 differing pixels at
+`val=5.0` — a large, real silhouette change, not a marginal one).
+`EDITABLE`, `x-moho-render: pending` in the schema registry.
+
+**Not simple linear substitution — the effect is non-monotonic at the
+extreme.** A follow-up check found `val=-50.0` comes back INERT on two
+separate runs, while the `+5.0` tried above and a further `+50.0` both
+AFFECT RENDER. Whoever next touches this field should not assume a
+monotonic value→pixel relationship from the one forced value the probe
+above used.
 
 ### 5.5 Document-level `animated_values`
 
