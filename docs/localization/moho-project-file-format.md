@@ -1602,10 +1602,17 @@ trường có *giá trị* được quan sát thấy nhưng *ý nghĩa* chưa đ
   trong mọi tài liệu có khóa này. ([§ 11.4](#114-action_refs-và-layercomps))
 - Số đầu tiên của một hậu tố `brush_name` kiểu cũ.
   ([§ 8.6](#86-phân-giải-brush_name-thành-một-file))
-- Ý nghĩa trường riêng của `Mesh3DOptions` (`3d_shading_mode`,
+- ~~Ý nghĩa trường riêng của `Mesh3DOptions` (`3d_shading_mode`,
   `3d_shading_density`, các công tắc crease/edge) — hiện diện trên mọi
-  `MeshLayer` nhưng hoàn toàn trơ vì `3d_mode` là `0` ở mọi nơi. **(Phát hiện
-  từ 19 file.)** ([§ 6.4](#64-các-trường-riêng-theo-loại))
+  `MeshLayer` nhưng hoàn toàn trơ vì `3d_mode` là `0` ở mọi nơi.~~ **Không
+  còn trong danh sách này nữa — M1.5 batch 8 (bản gốc tiếng Anh) đã tìm ra
+  một precondition kết hợp thật: `3d_mode=1` một mình đã mở khóa 6/10
+  trường, và `3d_mode=1` + `3d_shading_mode=2` (giả định là "Toon", lấy từ
+  header scripting của Moho — chưa chắc chắn tuyệt đối) mở khóa 4 trường
+  còn lại. Cả 10 trường con cộng với `3d_options` đều đã là
+  `EDITABLE`/AFFECTS RENDER. Xem bản gốc tiếng Anh § 6.4 để biết chi tiết
+  đầy đủ (bản dịch này chưa cập nhật toàn bộ theo từng batch).**
+  ([§ 6.4](#64-các-trường-riêng-theo-loại))
 - Các trường cel-shading `toon_*` của `ImageLayer`, `sampling_mode`,
   `quality_level` — một toàn bộ loại layer không được mô hình hóa chút nào.
   **(Phát hiện từ 19 file.)** ([§ 6.5](#65-imagelayer-phát-hiện-từ-19-file))

@@ -114,7 +114,7 @@ then.
 | M1.5.5 | Sketchy / noise / halo / motion-blur subfields (29, 3 multi-owner) | **82.3% (357/434)** | **DONE** | `552eee6`, `9a46bd0` |
 | M1.5.6 | Audio / image / PSD / file-reference (23, 1 multi-owner) | **86.6% (376/434)** | **DONE** | `ea9e52d`, `6ab71f4`, `5e38889` |
 | M1.5.7 | Channel/interp/style/layer-structure remainder (41, 5 multi-owner) | **96.1% (417/434) — TARGET MET** | **DONE** | `1714659`, `0ac8a77`, `ca9d198` |
-| M1.5.8 | The 3D family (13) — precondition research + full registration, see Q8 resolution below | **99.1% (430/434)** | **DONE** | (batch 8 commits) |
+| M1.5.8 | The 3D family (13) — precondition research + full registration, see Q8 resolution below | **99.1% (430/434) — reviewed, PASS, independently re-derived** | **DONE** | `1370e74`, `37dd394` |
 
 The original M2.1–M3.3 milestone breakdown above (bone IK/particle/text/
 sketchy/image split across separate M2/M3 phases with 3D-family/physics

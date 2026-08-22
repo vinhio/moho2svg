@@ -274,12 +274,12 @@ inexact.
 
 | Field | Observed values | Notes |
 |---|---|---|
-| `t` | `0` (208,858), `4` (757), `2` (540), `6` (3), `1` (2) | Interpolation type. **The enum mapping is not decoded.** `0` is the overwhelming default. Non-`0` values appear almost exclusively on `pose`, `anim_pos`, `anim_angle`, `anim_scale`, and `physics_motor_speed`. |
+| `t` | `0` (208,858), `4` (757), `2` (540), `6` (3), `1` (2) | **Superseded — see § 5.3 below.** Struct-order name is `tags` (a keyframe label colour, manual ch. 16.13, still unconfirmed), not "interpolation type" as this row once guessed; probed directly against Moho's own renderer and confirmed inert. `0` is the overwhelming default. Non-`0` values appear almost exclusively on `pose`, `anim_pos`, `anim_angle`, `anim_scale`, and `physics_motor_speed`. |
 | `v1`, `v2` | `(0.1, 0.5)` on 208,079 entries; also `(-1, -1)`, `(-1, 2)`, `(15, -1000000)` | Two type-dependent parameters. `(0.1, 0.5)` looks like an unused default carried on plain keyframes. |
 | `im` | `1`, `3`, `5`, `9`, `0` | Not decoded. Possibly a bit field. |
-| `in` | `1`, `0` | Not decoded. |
+| `in` | `1`, `0` | **Superseded — see § 5.3 below.** Struct-order name is `interval`; probed directly against Moho's own renderer and confirmed AFFECTS RENDER. |
 | `s` | `false` everywhere | Not decoded. |
-| `h` | `0` everywhere | Not decoded. |
+| `h` | `0` everywhere | **Superseded — see § 5.3 below.** Struct-order name is `hold`; probed directly against Moho's own renderer and confirmed AFFECTS RENDER. |
 | `b` | absent on all but 16 entries | When present: a list of `{ao, ai, po, pi}` objects — plausibly explicit Bezier handles for the timing curve (angle/position, out/in). Only ever seen alongside `t == 4`, but most `t == 4` entries have no `b`, so `t == 4` is not simply "Bezier". |
 
 A later pass that also descends into `actions[].pose` and `split[]` channels
@@ -2676,9 +2676,16 @@ This is a living reverse-engineering effort, not a specification. Fields whose
   document that has the key at all. ([§ 11.4](#114-action_refs-and-layercomps))
 - The first number of an old-style `brush_name` suffix.
   ([§ 8.6](#86-resolving-a-brush_name-to-a-file))
-- `Mesh3DOptions`' own field meanings (`3d_shading_mode`, `3d_shading_density`,
-  crease/edge toggles) — present on every `MeshLayer` but entirely inert
-  since `3d_mode` is `0` everywhere. **(19-file finding.)**
+- ~~`Mesh3DOptions`' own field meanings (`3d_shading_mode`,
+  `3d_shading_density`, crease/edge toggles) — present on every `MeshLayer`
+  but entirely inert since `3d_mode` is `0` everywhere.~~ **No longer in
+  this list — M1.5 batch 8 resolved Q8 and found a genuine compound
+  precondition: `3d_mode=1` alone unlocks 6 of the 10 fields, and
+  `3d_mode=1` + `3d_shading_mode=2` (presumed "Toon", sourced from Moho's
+  own scripting header struct order — not certain, see § 6.4) unlocks the
+  remaining 4, which had shown a false-negative inert result under
+  `3d_mode=1` alone. All ten sub-fields plus the `3d_options`
+  container itself are now `EDITABLE`/`AFFECTS RENDER`.**
   ([§ 6.4](#64-type-specific-fields))
 - `ImageLayer`'s `toon_*` cel-shading fields, `sampling_mode`,
   `quality_level` — an entire layer type not modelled at all. **(19-file

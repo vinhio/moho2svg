@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Moho Format Coverage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --ground:      #F4F6F8;
+  --surface:     #FFFFFF;
+  --surface-alt: #EDF0F4;
+  --ink:         #141922;
+  --ink-soft:    #3D4653;
+  --muted:       #5F6979;
+  --hairline:    #D7DDE5;
+  --hairline-hi: #C3CBD6;
+  --accent:      #1B6A83;
+  --accent-soft: #E2EEF2;
+  --ok:          #2F6F52;
+  --ok-bg:       #6FB894;
+  --warn:        #8C6620;
+  --warn-bg:     #D9AE63;
+  --gap:         #96423E;
+  --gap-bg:      #D68A83;
+  --shadow:      0 1px 2px rgba(20,25,34,.05), 0 8px 24px -16px rgba(20,25,34,.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0F1218;
+    --surface:     #161A22;
+    --surface-alt: #1D222C;
+    --ink:         #E3E7EE;
+    --ink-soft:    #BFC6D2;
+    --muted:       #8C95A5;
+    --hairline:    #262C37;
+    --hairline-hi: #333A47;
+    --accent:      #58AFC9;
+    --accent-soft: #16303A;
+    --ok:          #6FBF95;
+    --ok-bg:       #3E7A5C;
+    --warn:        #D9AE63;
+    --warn-bg:     #8A6526;
+    --gap:         #DE8B84;
+    --gap-bg:      #8E4340;
+    --shadow:      0 1px 2px rgba(0,0,0,.35), 0 10px 28px -18px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:      #0F1218;
+  --surface:     #161A22;
+  --surface-alt: #1D222C;
+  --ink:         #E3E7EE;
+  --ink-soft:    #BFC6D2;
+  --muted:       #8C95A5;
+  --hairline:    #262C37;
+  --hairline-hi: #333A47;
+  --accent:      #58AFC9;
+  --accent-soft: #16303A;
+  --ok:          #6FBF95;
+  --ok-bg:       #3E7A5C;
+  --warn:        #D9AE63;
+  --warn-bg:     #8A6526;
+  --gap:         #DE8B84;
+  --gap-bg:      #8E4340;
+  --shadow:      0 1px 2px rgba(0,0,0,.35), 0 10px 28px -18px rgba(0,0,0,.7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1140px; margin: 0 auto; padding: 0 28px 96px; }
+.measure { max-width: 68ch; }
+
+h1, h2, h3, .eyebrow, .metric-n, th, .pill, .bar-label {
+  font-family: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+}
+code, .mono, td.num, .metric-n, .bar-num {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- masthead ---------- */
+header.top {
+  border-bottom: 1px solid var(--hairline);
+  padding: 64px 0 34px;
+  margin-bottom: 44px;
+}
+.eyebrow {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--accent);
+  display: flex; align-items: center; gap: 12px;
+}
+.eyebrow::after {
+  content: ""; height: 1px; flex: 1; background: var(--hairline); min-width: 24px;
+}
+h1 {
+  font-size: clamp(2.3rem, 5.2vw, 3.5rem);
+  font-weight: 700; line-height: 1.03; letter-spacing: -.022em;
+  margin: 20px 0 0; text-wrap: balance;
+}
+.dek {
+  margin: 20px 0 0; font-size: 1.19rem; color: var(--ink-soft);
+  max-width: 60ch; text-wrap: pretty;
+}
+.verdict {
+  margin-top: 30px; padding: 18px 22px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  font-size: 1.05rem; max-width: 72ch;
+}
+.verdict strong { font-weight: 600; }
+
+/* ---------- metric strip ---------- */
+.metrics {
+  display: grid; gap: 1px; background: var(--hairline);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  border: 1px solid var(--hairline);
+  margin: 40px 0 0;
+}
+.metric { background: var(--surface); padding: 20px 20px 18px; }
+.metric-n {
+  font-size: 2.05rem; font-weight: 600; letter-spacing: -.02em;
+  line-height: 1.05; display: block;
+}
+.metric-l {
+  font-size: .8rem; color: var(--muted); margin-top: 8px;
+  line-height: 1.4; font-family: "Familjen Grotesk", sans-serif;
+}
+.metric.hi .metric-n { color: var(--accent); }
+
+/* ---------- sections ---------- */
+section { margin-top: 66px; }
+h2 {
+  font-size: 1.62rem; font-weight: 600; letter-spacing: -.014em;
+  margin: 0 0 6px; text-wrap: balance;
+}
+h3 {
+  font-size: 1.06rem; font-weight: 600; letter-spacing: -.005em;
+  margin: 38px 0 10px;
+}
+.sub { color: var(--muted); font-size: .95rem; margin: 0 0 26px; max-width: 66ch; }
+p { margin: 0 0 16px; }
+p.measure + p.measure { margin-top: -2px; }
+
+/* ---------- tables ---------- */
+.scroll { overflow-x: auto; margin: 22px 0; border: 1px solid var(--hairline); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+thead th {
+  text-align: left; font-size: 10.5px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  padding: 12px 14px; border-bottom: 1px solid var(--hairline-hi);
+  background: var(--surface-alt); white-space: nowrap;
+}
+tbody td {
+  padding: 11px 14px; border-bottom: 1px solid var(--hairline);
+  vertical-align: top; font-family: "Source Serif 4", serif;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num { text-align: right; white-space: nowrap; font-size: .84rem; }
+td.area { font-family: "Familjen Grotesk", sans-serif; font-weight: 500; font-size: .88rem; }
+tbody tr.dim td { color: var(--muted); }
+
+/* ---------- coverage bar ---------- */
+td.barcell { width: 210px; min-width: 190px; padding-right: 20px; }
+.bar { display: flex; height: 9px; background: var(--surface-alt); overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.bar .b-read { background: var(--ok-bg); }
+.bar .b-tmpl { background: var(--warn-bg); }
+.bar .b-none { background: var(--gap-bg); }
+.bar-num { font-size: .78rem; color: var(--muted); margin-top: 5px; display: block; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 20px; margin: 0 0 4px; font-size: .84rem; }
+.legend span { display: flex; align-items: center; gap: 8px; color: var(--ink-soft);
+  font-family: "Familjen Grotesk", sans-serif; }
+.legend i { width: 13px; height: 9px; display: block; }
+
+/* ---------- pills ---------- */
+.pill {
+  display: inline-block; font-size: 10.5px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase;
+  padding: 3px 8px; white-space: nowrap;
+}
+.pill.ok   { color: var(--ok);   background: color-mix(in srgb, var(--ok-bg) 26%, transparent); }
+.pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn-bg) 28%, transparent); }
+.pill.gap  { color: var(--gap);  background: color-mix(in srgb, var(--gap-bg) 26%, transparent); }
+
+/* ---------- proof block ---------- */
+.proof {
+  border: 1px solid var(--hairline); background: var(--surface);
+  padding: 26px 28px; margin: 24px 0; box-shadow: var(--shadow);
+}
+.proof-grid { display: grid; gap: 1px; background: var(--hairline);
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-top: 20px; }
+.proof-cell { background: var(--surface); padding: 16px 18px; }
+.proof-cell .k { font-size: .78rem; color: var(--muted);
+  font-family: "Familjen Grotesk", sans-serif; letter-spacing: .04em; }
+.proof-cell .v { font-family: "IBM Plex Mono", monospace; font-size: 1.32rem;
+  font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.proof-cell.good .v { color: var(--ok); }
+.proof-cell.change .v { color: var(--accent); }
+
+pre {
+  margin: 16px 0; padding: 15px 17px; overflow-x: auto;
+  background: var(--surface-alt); border: 1px solid var(--hairline);
+  font-family: "IBM Plex Mono", monospace; font-size: .8rem; line-height: 1.6;
+  color: var(--ink-soft);
+}
+code {
+  font-size: .87em; background: var(--surface-alt);
+  padding: 1.5px 5px; border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+}
+pre code { background: none; border: none; padding: 0; }
+
+/* ---------- asset cards ---------- */
+.assets { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); margin-top: 24px; }
+.asset {
+  border: 1px solid var(--hairline); background: var(--surface);
+  padding: 18px 19px; display: flex; flex-direction: column; gap: 9px;
+}
+.asset .name {
+  font-family: "IBM Plex Mono", monospace; font-size: .85rem; font-weight: 500;
+  color: var(--accent);
+}
+.asset .what { font-size: .89rem; color: var(--ink-soft); line-height: 1.5; }
+.asset .weight { font-size: .78rem; color: var(--muted);
+  font-family: "Familjen Grotesk", sans-serif; margin-top: auto;
+  padding-top: 8px; border-top: 1px solid var(--hairline); }
+
+/* ---------- numbered asks ---------- */
+ol.asks { list-style: none; counter-reset: ask; padding: 0; margin: 26px 0 0; }
+ol.asks > li {
+  counter-increment: ask; position: relative;
+  padding: 0 0 26px 58px; border-left: 1px solid var(--hairline);
+  margin-left: 15px;
+}
+ol.asks > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+ol.asks > li::before {
+  content: counter(ask); position: absolute; left: -15px; top: 0;
+  width: 30px; height: 30px; display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--hairline-hi);
+  border-radius: 50%; color: var(--accent);
+  font-family: "IBM Plex Mono", monospace; font-size: .82rem; font-weight: 500;
+}
+ol.asks h3 { margin: 3px 0 7px; font-size: 1.02rem; }
+ol.asks p { font-size: .95rem; margin-bottom: 9px; max-width: 62ch; }
+.who {
+  font-size: .78rem; font-family: "Familjen Grotesk", sans-serif;
+  color: var(--muted); letter-spacing: .03em;
+}
+.who b { color: var(--ink-soft); font-weight: 600; }
+
+ul.tight { margin: 10px 0 16px; padding-left: 22px; }
+ul.tight li { margin-bottom: 7px; max-width: 64ch; }
+
+footer.method {
+  margin-top: 78px; padding-top: 26px; border-top: 1px solid var(--hairline);
+  font-size: .855rem; color: var(--muted); max-width: 74ch;
+}
+footer.method h3 { margin-top: 0; color: var(--ink-soft); font-size: .95rem; }
+footer.method code { font-size: .85em; }
+
+a { color: var(--accent); }
+a:focus-visible, li:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (max-width: 620px) {
+  .wrap { padding: 0 18px 64px; }
+  header.top { padding-top: 44px; }
+  ol.asks > li { padding-left: 44px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Format audit &middot; 46 documents &middot; 29.4M key occurrences</div>
+  <h1>How much of the Moho file format do we actually know?</h1>
+  <p class="dek">Measured, not estimated: every JSON key in the sample corpus, checked against
+  every key the four scripts in this repository name — then checked again against Moho 14.4
+  itself.</p>
+
+  <div class="verdict">
+    <strong>The reading side is far more complete than the editing side needs it to be, and the
+    container is already solved.</strong> A load&nbsp;→&nbsp;modify&nbsp;→&nbsp;save round-trip
+    renders <em>pixel-identically</em> in Moho today. What is missing is not format knowledge
+    but a <em>writable</em> document layer: the model below <code>Layer</code> throws away the
+    raw dict, and nothing maintains the ~14 classes of positional index that hold a mesh
+    together.
+  </div>
+
+  <div class="metrics">
+    <div class="metric hi">
+      <span class="metric-n">536</span>
+      <div class="metric-l">distinct JSON keys across the 46-document corpus</div>
+    </div>
+    <div class="metric">
+      <span class="metric-n">29%</span>
+      <div class="metric-l">keys a renderer consumes — semantics modelled <span class="mono">(156)</span></div>
+    </div>
+    <div class="metric">
+      <span class="metric-n">62%</span>
+      <div class="metric-l">keys named anywhere in the repo, incl. writer templates <span class="mono">(332)</span></div>
+    </div>
+    <div class="metric">
+      <span class="metric-n">88%</span>
+      <div class="metric-l">keys structurally described by <span class="mono">schema/</span> <span class="mono">(471 declared, 523/536 covered)</span></div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <h2>The percentage, with three honest denominators</h2>
+  <p class="sub">A single number would be dishonest — it depends entirely on what you count.
+  Here are all three, and which one matters for your plan.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>Way of counting</th><th class="num">Result</th><th>What it actually tells you</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td class="area">By distinct key name</td>
+        <td class="num">156 / 536 &nbsp;<b>29%</b></td>
+        <td>Keys whose <em>meaning</em> is modelled by something that renders them. The strictest
+        reading, and the one that best predicts "would an edit to this field do what I expect?"</td>
+      </tr>
+      <tr>
+        <td class="area">By key occurrence</td>
+        <td class="num">22.8M / 29.4M &nbsp;<b>78%</b></td>
+        <td>Weighted by how often each key appears. Flattering but real: the format is
+        overwhelmingly geometry and animation channels, and those are near-completely covered.</td>
+      </tr>
+      <tr>
+        <td class="area">By structural description</td>
+        <td class="num">523 / 536 &nbsp;<b>98%</b></td>
+        <td>Keys the repo's own JSON Schema declares (type, shape, enum) even where nothing
+        consumes them. This is the number that matters for <em>validating</em> an edited file.</td>
+      </tr>
+      <tr class="dim">
+        <td class="area">Never named anywhere</td>
+        <td class="num">204 / 536 &nbsp;<b>38%</b></td>
+        <td>Provably untouched by all four scripts. But 45 of them are editor view-state
+        (<code>DocState_*</code>) and 18 are opaque script blobs — irrelevant to rendering,
+        and safe to carry through untouched.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="measure">Two independent counts landed on the same figure — a corpus census run here
+  (156/536) and a separate pass over the exporters (155/536) — so the 29% is stable, not an
+  artifact of one grep.</p>
+</section>
+
+<section>
+  <h2>Coverage by feature area</h2>
+  <p class="sub">The number that actually answers your question. 372 of the 536 keys can be
+  attributed to one owner; the remaining 164 are shared names
+  (<code>type</code>, <code>name</code>, <code>when</code>, <code>val</code>&nbsp;…) counted in
+  the totals above but not attributable to a single area.</p>
+
+  <div class="legend">
+    <span><i style="background:var(--ok-bg)"></i> Modelled — a renderer consumes it</span>
+    <span><i style="background:var(--warn-bg)"></i> Template-only — emitted at a safe default, nothing reads it</span>
+    <span><i style="background:var(--gap-bg)"></i> Untouched</span>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>Feature area</th>
+      <th class="barcell">Coverage</th>
+      <th class="num">Keys</th>
+      <th>State</th>
+    </tr></thead>
+    <tbody>
+
+      <tr><td class="area">Bone control &amp; Smart Bones</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:100%"></i></span><span class="bar-num">4 / 0 / 0 &middot; 100%</span></td>
+        <td class="num">4</td>
+        <td><span class="pill ok">complete</span> Dial inversion, control-parent departure-from-rest, delay sign — all measured against Moho renders.</td></tr>
+
+      <tr><td class="area">Bone pose, hierarchy, skinning</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:73.1%"></i><i class="b-tmpl" style="width:3.8%"></i><i class="b-none" style="width:23.1%"></i></span><span class="bar-num">19 / 1 / 6 &middot; 73%</span></td>
+        <td class="num">26</td>
+        <td><span class="pill ok">strong</span> Flip propagation, <code>fixed_angle</code>, <code>offset</code> all decoded. Open: <code>binding_mode</code>, <code>scaling_mode</code>, weight-falloff shape.</td></tr>
+
+      <tr><td class="area">Animation channels &amp; interpolation</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:61.1%"></i><i class="b-tmpl" style="width:16.7%"></i><i class="b-none" style="width:22.2%"></i></span><span class="bar-num">11 / 3 / 4 &middot; 61%</span></td>
+        <td class="num">18</td>
+        <td><span class="pill ok">strong</span> 12-value <code>im</code> enum decoded twice over; 4 methods exactly measured = 99.4% of keyframes. Open: the <code>b[]</code> Bezier handle block (<code>ai</code>/<code>po</code>/<code>pi</code> unread), <code>split</code>, <code>ref</code>.</td></tr>
+
+      <tr><td class="area">Mesh geometry — points, curves, shapes</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:58.8%"></i><i class="b-tmpl" style="width:8.8%"></i><i class="b-none" style="width:32.4%"></i></span><span class="bar-num">20 / 3 / 11 &middot; 59%</span></td>
+        <td class="num">34</td>
+        <td><span class="pill ok">complete where it counts</span> Every key on <code>points[]</code>, <code>curves[]</code> and <code>shapes[]</code> is read — 0 unread. The 11 gaps are layer-level texture/noise fields swept into this bucket.</td></tr>
+
+      <tr><td class="area">Camera &amp; timeline markers</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:57.1%"></i><i class="b-tmpl" style="width:42.9%"></i></span><span class="bar-num">4 / 3 / 0 &middot; 57%</span></td>
+        <td class="num">7</td>
+        <td><span class="pill ok">exact</span> Half-FOV = <code>30° / camera_zoom</code>, measured. Not modelled: <code>camera_roll</code>, <code>camera_pan_tilt</code>, per-layer parallax.</td></tr>
+
+      <tr><td class="area">Styles &amp; brushes</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:55.2%"></i><i class="b-tmpl" style="width:37.9%"></i><i class="b-none" style="width:6.9%"></i></span><span class="bar-num">16 / 11 / 2 &middot; 55%</span></td>
+        <td class="num">29</td>
+        <td><span class="pill warn">partial</span> Inheritance rules exact. But of <b>7</b> shape-effect kinds only <code>SS_Gradient2</code> renders — <code>SS_Halo</code> alone covers 198 shapes. 11 brush fields emitted but never read.</td></tr>
+
+      <tr><td class="area">Masking</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:42.9%"></i><i class="b-none" style="width:57.1%"></i></span><span class="bar-num">3 / 0 / 4 &middot; 43%</span></td>
+        <td class="num">7</td>
+        <td><span class="pill ok">exact</span> Both enums decoded twice; <code>mask_expansion</code> measured. Gaps are one document's image auto-mask (<code>masking_points</code>, <code>seed_point</code>, <code>tolerance</code>, <code>reverse_mask</code>).</td></tr>
+
+      <tr><td class="area">Patch layers</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:50%"></i><i class="b-none" style="width:50%"></i></span><span class="bar-num">1 / 0 / 1 &middot; 50%</span></td>
+        <td class="num">2</td>
+        <td><span class="pill warn">works, one unknown</span> Clip disc pinned to 0.4&nbsp;px. <code>target_layer_id</code> undecoded — and an editor <em>cannot safely regenerate it</em>.</td></tr>
+
+      <tr><td class="area">Layer common &amp; compositing</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:33.3%"></i><i class="b-tmpl" style="width:20.8%"></i><i class="b-none" style="width:45.8%"></i></span><span class="bar-num">8 / 5 / 11 &middot; 33%</span></td>
+        <td class="num">24</td>
+        <td><span class="pill warn">partial</span> <code>visibility</code>, leaf <code>alpha</code>, <code>blend_mode</code> 1–3 measured; 4–13 inferred. Untouched: halo/shadow/blur effect params, <code>layer_ordering</code> + <code>animated_layer_order</code> (19 docs).</td></tr>
+
+      <tr><td class="area">Smart Warp / mesh deformer</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:33.3%"></i><i class="b-none" style="width:66.7%"></i></span><span class="bar-num">1 / 0 / 2 &middot; 33%</span></td>
+        <td class="num">3</td>
+        <td><span class="pill gap">not modelled</span> Only hooks found: <code>squashable_deformer</code>, <code>triangulated</code>, <code>frame_zero_deformer</code>, <code>distortion_layer_uuid</code>. Warns per layer.</td></tr>
+
+      <tr><td class="area">Bone physics &amp; dynamics</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:27.3%"></i><i class="b-tmpl" style="width:4.5%"></i><i class="b-none" style="width:68.2%"></i></span><span class="bar-num">6 / 1 / 15 &middot; 27%</span></td>
+        <td class="num">22</td>
+        <td><span class="pill warn">angle only</span> Angle spring <em>decoded</em> (×96 / ×0.85, semi-implicit Euler). <code>pos_*</code> and <code>scale_*</code> dynamics untouched; wind simulation confirmed <em>negative</em> against a purpose-built rig.</td></tr>
+
+      <tr><td class="area">Switch layers</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:25%"></i><i class="b-none" style="width:75%"></i></span><span class="bar-num">1 / 0 / 3 &middot; 25%</span></td>
+        <td class="num">4</td>
+        <td><span class="pill warn">basic</span> <code>switch_keys</code> works. <code>switch_interpolation</code>, <code>frame_by_frame</code>, <code>switch_data</code> untouched — <code>switch_data</code> is <code>""</code> in all 24 documents that carry it.</td></tr>
+
+      <tr><td class="area">Image layers &amp; PSD binding</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:23.1%"></i><i class="b-tmpl" style="width:38.5%"></i><i class="b-none" style="width:38.5%"></i></span><span class="bar-num">3 / 5 / 5 &middot; 23%</span></td>
+        <td class="num">13</td>
+        <td><span class="pill warn">partial</span> Crop convention exact (÷540, 15/15). Untouched: <code>psd_layer_identifier</code>, <code>psd_layer_translation</code>, <code>psd_trim_alpha</code>, all <code>toon_*</code>, movie fields.</td></tr>
+
+      <tr><td class="area">Document header &amp; project settings</td>
+        <td class="barcell"><span class="bar"><i class="b-read" style="width:20%"></i><i class="b-tmpl" style="width:74.3%"></i><i class="b-none" style="width:5.7%"></i></span><span class="bar-num">7 / 26 / 2 &middot; 20%</span></td>
+        <td class="num">35</td>
+        <td><span class="pill ok">fine as-is</span> A renderer only needs 7. The other 26 are written at exact real-file values by the writers — and for an editor, pass-through is the correct behaviour anyway.</td></tr>
+
+      <tr><td class="area">Bone IK &amp; constraints</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 9 &middot; 0%</span></td>
+        <td class="num">9</td>
+        <td><span class="pill gap">nothing</span> <code>ik_lock</code>, <code>ik_parent_target</code>, <code>ik_global_angle</code>, <code>ignored_by_ik</code>, <code>constraints</code>, <code>min_/max_constraint</code>, <code>bone_enable_arc_solver</code>, <code>anim_parent</code> — present in <b>43 of 46</b> documents. Only 2-bone target IK is solved.</td></tr>
+
+      <tr><td class="area">Text layers &amp; speech balloons</td>
+        <td class="barcell"><span class="bar"><i class="b-tmpl" style="width:4.8%"></i><i class="b-none" style="width:95.2%"></i></span><span class="bar-num">0 / 1 / 20 &middot; 0%</span></td>
+        <td class="num">21</td>
+        <td><span class="pill gap">nothing</span> Renders only via the pre-baked <code>mesh_layer</code>. <code>font</code>, <code>textsize</code>, <code>kerning</code>, <code>leading</code>, 11 <code>balloon*</code> untouched — and <em>Moho declares no TextLayer class at all</em>, so editing text means regenerating the mesh.</td></tr>
+
+      <tr><td class="area">Particle layers</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 21 &middot; 0%</span></td>
+        <td class="num">21</td>
+        <td><span class="pill gap">nothing</span> 21 emitter fields, all untouched. Corpus has <b>2</b> particle layers total — not enough to decode anything from.</td></tr>
+
+      <tr><td class="area">3D extrude / toon options</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 12 &middot; 0%</span></td>
+        <td class="num">12</td>
+        <td><span class="pill gap">nothing</span> Present on all 2,939 mesh layers but inert — <code>3d_mode == 0</code> everywhere in the corpus, so their effect has never been observed.</td></tr>
+
+      <tr><td class="area">Sketchy / noise render style</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 7 &middot; 0%</span></td>
+        <td class="num">7</td>
+        <td><span class="pill gap">nothing</span> Off in nearly every sample, but <code>extra_sketchy</code> + <code>extra_lines: 5</code> is live on 2 layers — a real, visible gap.</td></tr>
+
+      <tr><td class="area">Layer textures</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 3 &middot; 0%</span></td>
+        <td class="num">3</td>
+        <td><span class="pill gap">nothing</span> <code>fill_texture_path</code> / <code>line_texture_path</code> + their <code>fileref</code> twins, empty throughout the corpus.</td></tr>
+
+      <tr><td class="area">Embedded layer scripts</td>
+        <td class="barcell"><span class="bar"><i class="b-none" style="width:100%"></i></span><span class="bar-num">0 / 0 / 3 &middot; 0%</span></td>
+        <td class="num">3</td>
+        <td><span class="pill gap">nothing</span> <code>script_data</code>, <code>NewLayerScript</code>, <code>layer_script_sec</code>. Opaque blobs — carry through untouched.</td></tr>
+
+      <tr><td class="area">Layer comps</td>
+        <td class="barcell"><span class="bar"><i class="b-tmpl" style="width:100%"></i></span><span class="bar-num">0 / 1 / 0 &middot; 0%</span></td>
+        <td class="num">1</td>
+        <td><span class="pill gap">shape unknown</span> Written as <code>[]</code>. <b>Empty in all 46 documents</b>, so its element shape is known only from the manual, never from data. Same for <code>action_refs</code>.</td></tr>
+
+      <tr class="dim"><td class="area">Editor view state</td>
+        <td class="barcell"><span class="bar"><i class="b-tmpl" style="width:8.2%"></i><i class="b-none" style="width:91.8%"></i></span><span class="bar-num">0 / 4 / 45 &middot; 0%</span></td>
+        <td class="num">49</td>
+        <td><span class="pill ok">correctly ignored</span> <code>DocState_*</code> — grid, zoom, safe zones. Optional per Moho's own manual; defaults apply when absent. No editor needs to touch these.</td></tr>
+
+      <tr class="dim"><td class="area">Opaque metadata flags</td>
+        <td class="barcell"><span class="bar"><i class="b-tmpl" style="width:5.6%"></i><i class="b-none" style="width:94.4%"></i></span><span class="bar-num">0 / 1 / 17 &middot; 0%</span></td>
+        <td class="num">18</td>
+        <td><span class="pill ok">carry through</span> 16 <code>g_&lt;number&gt;</code> booleans + <code>LM_GrandpaBones</code>. Third-party script state, not Moho's — the schema already matches them by pattern.</td></tr>
+
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Already proven: a script can edit a Moho file</h2>
+  <p class="sub">This was the one thing worth testing rather than reasoning about, so it was run
+  against Moho 14.4 headless — twice, independently, on two different documents.</p>
+
+  <div class="proof">
+    <p style="margin-top:0"><b>Experiment.</b> Take a real project, produce two derivatives with
+    nothing but the Python standard library, then have <em>Moho itself</em> render all three and
+    compare pixels.</p>
+<pre><code>d = json.load(open("TransformBoneTool.animeproj"))
+json.dump(d, open("base.animeproj", "w"))                    # re-dump, no edit
+
+d2 = json.load(open("TransformBoneTool.animeproj"))
+bone["anim_angle"]["val"] = [v + 0.6 for v in ...]           # rotate bone B1 by +0.6 rad
+json.dump(d2, open("mod.animeproj", "w"))
+
+Moho -r {orig,base,mod} -f PNG -start 12 -end 12</code></pre>
+
+    <div class="proof-grid">
+      <div class="proof-cell good">
+        <div class="k">original vs. re-dumped</div>
+        <div class="v">0 / 921,600 px</div>
+      </div>
+      <div class="proof-cell change">
+        <div class="k">original vs. edited</div>
+        <div class="v">32,221 px moved</div>
+      </div>
+      <div class="proof-cell good">
+        <div class="k">structural round-trip, all 46 files</div>
+        <div class="v">46 / 46 lossless</div>
+      </div>
+      <div class="proof-cell good">
+        <div class="k">second run, Bandit.mohoproj</div>
+        <div class="v">md5 identical</div>
+      </div>
+    </div>
+
+    <p style="margin:20px 0 0"><b>Reading.</b> Moho's loader accepts a plain <code>json.dump</code>
+    with no special handling — no byte-level fidelity required, no whitespace ceremony, no
+    checksum. The edit landed exactly where intended. Moho's own manual (Appendix F) documents
+    this workflow and ships sample Python for it, so this is a supported path, not a hack.</p>
+  </div>
+
+  <p class="measure">Two caveats found while proving it. First, byte-identical output is
+  <em>not</em> reproducible with any stdlib <code>json.dumps</code> preset — Moho writes
+  <code>indent=2</code> in v1045 and fully minified JSON in v1038, and float formatting differs
+  either way. That costs diff-friendliness, not correctness. Second, and this one is a real bug:
+  constructing a <code>Document</code> <b>mutates the raw dict</b> —
+  <code>_resolve_patch_layers</code> overwrites every <code>PatchLayer</code>'s own
+  <code>parent_bone</code>, <code>flexi_bone_subset</code> and <code>origin</code> with its
+  target's. Since a patch's own transform <em>is</em> its clip region, loading a document with
+  patches and re-saving it would corrupt it. Eight patch layers exist in the corpus.</p>
+</section>
+
+<section>
+  <h2>The knowledge assets, ranked by what they settle</h2>
+  <p class="sub">Worth knowing what already exists before commissioning any new investigation —
+  three of these are outside authorities, not this repo's own guesses.</p>
+
+  <div class="assets">
+    <div class="asset">
+      <div class="name">pkg_moho.lua_pkg</div>
+      <div class="what">Moho's own scripting header, inside the app. Declares the C++ struct
+      members <em>in the order the JSON writes them</em>. 43 classes, 396 data members, 128 enum
+      constants in 22 families. <code>M_Bone</code> alone has 64.</div>
+      <div class="weight">Highest authority, cheapest to consult. Read before inferring any field.</div>
+    </div>
+    <div class="asset">
+      <div class="name">schema/*.schema.json</div>
+      <div class="what">A draft-2020-12 JSON Schema of the whole format — 6 files, 63
+      <code>$defs</code>, 471 declared keys. Covers 523 of the 536 corpus keys; the 13 misses are
+      all rare (<code>skia_scaling</code>, three <code>psd_*</code>, one document's
+      <code>masking_points</code>).</div>
+      <div class="weight">The validation gate an editor needs. Corpus-derived, so it describes what these 46 files contain — not Moho's whole output space.</div>
+    </div>
+    <div class="asset">
+      <div class="name">Moho CLI twin renders</div>
+      <div class="what">Render the same document twice with one field flipped; the difference
+      <em>is</em> that field's effect, with every unrelated modelling error cancelled out. This
+      settled <code>fixed_angle</code>, <code>mask_expansion</code>, stroke exposure, the bone
+      spring and both masking enums.</div>
+      <div class="weight">The method that resolves anything still open. ~2s per frame.</div>
+    </div>
+    <div class="asset">
+      <div class="name">docs/moho14 &middot; Appendix F</div>
+      <div class="what">Moho's own file-format appendix. Confirms <code>.moho</code> is a plain
+      ZIP holding <code>Project.mohoproj</code> + <code>preview.jpg</code>, that unknown keys are
+      silently ignored by older versions, and that additive writes are safe.</div>
+      <div class="weight">But it states outright that layer properties are "too many to name" — there is no official complete field reference. Anywhere.</div>
+    </div>
+    <div class="asset">
+      <div class="name">The two writers</div>
+      <div class="what"><code>svg2moho.py</code> and <code>lottie2moho.py</code> already emit
+      valid documents at <em>exact real-file field counts</em> for <code>mesh</code>, points,
+      curves, shapes and styles. 465 converted Lottie files load in Moho 14.4; a 166-layer SVG
+      converts and renders.</div>
+      <div class="weight">Carries the hardest-won knowledge: the loader's validity rules, with exact error strings.</div>
+    </div>
+    <div class="asset">
+      <div class="name">mohoscripts/ &middot; 197 Lua scripts</div>
+      <div class="what">Third-party scripts calling Moho's real API — a second opinion on
+      behaviour. Corroborated asymmetric bone scale, flip propagation, the control-bone model,
+      and supplied the cycle formula.</div>
+      <div class="weight">Evidence only. One carries an arithmetic slip; another is right only at default camera zoom.</div>
+    </div>
+  </div>
+
+  <h3>What the writers already learned the hard way</h3>
+  <p class="measure">These are the rules that make Moho reject a file, each recorded with the
+  exact error it produces. They are worth more than any field list, because they are invisible
+  until you hit them:</p>
+  <ul class="tight">
+    <li>Omitting document-scaffold keys (<code>onions_*</code>, <code>metadata</code>,
+    <code>documentviewstate</code>) &rarr; <b>"Unable to load document (corrupt)", error 108</b> —
+    even though this repo's own reader loads such a file happily.</li>
+    <li>A bare scalar where a channel belongs &rarr; <b>"Type mismatch: got OBJECT expected
+    DOUBLE"</b>. Point positions, widths, smoothness, all colours must be full
+    <code>{type,ref,mute,when,val,interp}</code> objects.</li>
+    <li><code>noise_grain</code> / <code>pixelation</code> are integer <code>0</code>, <b>not
+    <code>false</code></b> — JSON <code>false</code> gives error 108.</li>
+    <li><code>mesh.anim_shape_order</code> is a plain bool; the channel form fails.</li>
+    <li><code>global_render_style_*</code> must be <code>0</code> or every gradient renders flat.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>The real obstacle is not knowledge — it is index integrity</h2>
+  <p class="sub">Value-level edits are available today. Structural edits — adding or deleting a
+  point, curve, shape, bone or layer — need machinery that does not exist yet, because the mesh
+  interior is held together almost entirely by positional indices with no allocator and no
+  generation counter.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th>Reference</th><th>Points at</th><th>Kind</th><th>What breaks it</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><code>shape.edges.curve[i]</code></td><td><code>mesh.curves</code></td>
+        <td><span class="pill gap">index</span></td>
+        <td>Deleting one curve invalidates every reference above it.</td></tr>
+      <tr><td><code>curve.points[i].point</code></td><td><code>mesh.points</code></td>
+        <td><span class="pill gap">index</span></td>
+        <td>Curves store <em>no coordinates</em> — position is shared through this index.</td></tr>
+      <tr><td><code>mesh.points[i].curves[]</code></td><td>curve + point indices</td>
+        <td><span class="pill gap">index</span></td>
+        <td>The reverse map. This repo rebuilds it and ignores the stored one; <b>Moho does not</b> — an editor must maintain it.</td></tr>
+      <tr><td><code>mesh.points[i].parent</code></td><td>ancestor skeleton's bones</td>
+        <td><span class="pill gap">index</span></td>
+        <td>Per-point bone binding. Real on ~4,000 points across 119 meshes.</td></tr>
+      <tr><td><code>layer.parent_bone</code>, <code>bone.parent</code>, <code>bone.target_bone</code>, the three <code>*_control_parent</code></td><td>same skeleton's bones</td>
+        <td><span class="pill gap">index</span></td>
+        <td>Reordering or deleting a bone silently repoints all of them. <code>target_bone</code> hides its index <em>inside an animated channel</em>.</td></tr>
+      <tr><td><code>layer.flexi_bone_subset</code></td><td>bones</td>
+        <td><span class="pill gap">index</span></td>
+        <td>Bone <em>indices as a pipe-joined string</em> (<code>"30|31|32"</code>) — not names.</td></tr>
+      <tr><td>position in <code>mesh.shapes</code></td><td>&mdash;</td>
+        <td><span class="pill gap">order</span></td>
+        <td>List position <em>is</em> the z-order, and <code>combo_mode</code> boolean groups are built from adjacency in it. Reordering changes both stacking and boolean combination.</td></tr>
+      <tr><td><code>shape.edges.flag</code></td><td>&mdash;</td>
+        <td><span class="pill warn">trap</span></td>
+        <td>Looks like a direction bit; measurably is not. Loops are re-traced as an undirected graph keyed on rounded coordinates — so <em>moving a point can change the traced topology</em>.</td></tr>
+      <tr><td><code>layer.uuid</code> &rarr; <code>target_layer_uuid</code>, <code>follow_layer_uuid</code>, <code>distortion_layer_uuid</code>, <code>layer_ref_uuid</code></td><td>layers</td>
+        <td><span class="pill ok">uuid</span></td>
+        <td>The one genuinely robust reference class. Survives reordering.</td></tr>
+      <tr><td><code>inherited_style_uuid</code> / <code>_name</code></td><td><code>doc.styles</code></td>
+        <td><span class="pill warn">name or uuid</span></td>
+        <td>Either key works, and it may sit on the shape <em>or</em> inside the shape's own <code>style</code> — both occur in real files. Deleting a style silently reverts shapes to inline defaults, with no error.</td></tr>
+      <tr><td><code>switch_keys</code> values</td><td>child layer <em>names</em></td>
+        <td><span class="pill warn">name</span></td>
+        <td>Renaming a switch child silently breaks the animation; the fallback is child&nbsp;0.</td></tr>
+      <tr><td>Smart Bone dial</td><td><code>bone.name</code> = registered action name</td>
+        <td><span class="pill warn">name, 3-way</span></td>
+        <td><b>The most dangerous rename in the format.</b> The name registry is replicated on nearly every layer (19,921 entries), the pose bodies live inside per-channel <code>actions[]</code> (11,816 of them), and Moho stores two actions per dial with the second suffixed <code>" 2"</code>. Renaming a bone silently de-activates its Smart Bone.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="measure">Compounding this: the document model is only writable down to
+  <code>Layer</code>. <code>Mesh</code>, <code>Shape</code>, <code>Curve</code>,
+  <code>CurvePoint</code>, <code>MeshPoint</code> and <code>Bone</code> are lossy extractions
+  that discard their source dict — <code>Shape</code> keeps 9 of 17 keys, <code>MeshPoint</code>
+  3 of 11, <code>Bone</code> ~35 of 61 — and <code>Document</code> retains no root dict at all.
+  The workable pattern today is to keep the raw dict alongside the <code>Document</code> and edit
+  the raw dict. There is also <b>no round-trip test anywhere in the repo</b>; the one specified
+  in the Lottie plan is format-crossing and still open.</p>
+</section>
+
+<section>
+  <h2>What I need to go further</h2>
+  <p class="sub">Ordered by how much each unlocks. The first three are things only you can
+  supply; the rest is work this repo can do on its own once scoped.</p>
+
+  <ol class="asks">
+    <li>
+      <h3>Sample documents for the areas with no data</h3>
+      <p>Several features cannot be decoded because the corpus has no evidence of them — not
+      because they are hard. Nothing can be measured from zero instances:</p>
+      <ul class="tight">
+        <li><b>Zero samples:</b> <code>AudioLayer</code> (Moho declares the class; the corpus has
+        none), <code>Mesh3DLayer</code>, a non-empty <code>layercomps</code>, a non-empty
+        <code>action_refs</code>, any document with <code>3d_mode != 0</code>.</li>
+        <li><b>One or two samples — not enough:</b> <code>ParticleLayer</code> (2),
+        <code>NoteLayer</code> (1), Vitruvian <code>bones_groups</code> (1),
+        <code>mesh.groups</code> point groups (1), <code>masking_points</code> (1), Smart Warp /
+        <code>squashable_deformer</code> (10, none with a reference render).</li>
+        <li><b>Present everywhere, never exercised:</b> IK and bone constraints sit in 43 of 46
+        documents but appear to be at defaults throughout. A rig that <em>actually uses</em>
+        IK locks, angle constraints and <code>ignored_by_ik</code> would unlock the largest
+        single 0% area.</li>
+      </ul>
+      <p class="who"><b>Only you can supply this.</b> Rigs you save from Moho yourself are ideal — a
+      deliberately built one beats a found one, because you know what you turned on.</p>
+    </li>
+
+    <li>
+      <h3>Which container do your users actually hand you?</h3>
+      <p><code>.moho</code> is a ZIP holding <code>Project.mohoproj</code> — and <b>none of the
+      four scripts read it</b>. They all take bare <code>.mohoproj</code>/<code>.animeproj</code>.
+      If real input is <code>.moho</code>, that is a small, mandatory piece of plumbing on both
+      the read and write side, including regenerating or preserving <code>preview.jpg</code>.</p>
+      <p class="who"><b>One answer from you</b>, then roughly an hour of work.</p>
+    </li>
+
+    <li>
+      <h3>Which editing operations matter first</h3>
+      <p>The gap between "value edits" and "structural edits" is the difference between days and
+      weeks. Value edits — move points, recolour, retime channels, toggle visibility, rewrite bone
+      angles, swap image paths, rename layers — work <em>today</em> with the raw dict. Structural
+      edits need the index-renumbering layer described above.</p>
+      <p>If you can name the ten operations a user would most want to script, that ordering
+      determines whether the untouched 38% matters at all. Most of it —
+      <code>DocState_*</code>, <code>g_*</code> flags, editor state — an editor should preserve
+      untouched rather than understand.</p>
+      <p class="who"><b>A decision from you.</b> This is scoping, not research.</p>
+    </li>
+
+    <li>
+      <h3>Let me build the missing foundation</h3>
+      <p>Three concrete pieces, in dependency order, none of which needs new format knowledge:</p>
+      <ul class="tight">
+        <li>A <b>writable document layer</b> — keep <code>_raw</code> on <code>Mesh</code>,
+        <code>Shape</code>, <code>Curve</code>, <code>MeshPoint</code>, <code>Bone</code>, and
+        give <code>Document</code> its root dict back. Fix the <code>PatchLayer</code>
+        load-time mutation first; it is a live corruption bug.</li>
+        <li>A <b>round-trip test</b> in <code>tools/</code>: load → dump → compare, over all 46
+        documents, plus a Moho-render diff on a few. Both halves are proven to pass right now,
+        which makes this the cheapest regression net available.</li>
+        <li>An <b>integrity checker</b> that validates the index graph and the three name-based
+        couplings after any edit, wired to <code>schema/</code> for structure. This is what turns
+        "the file loads" into "the file is correct".</li>
+      </ul>
+      <p class="who"><b>Just say go.</b> No new evidence required.</p>
+    </li>
+
+    <li>
+      <h3>Then close the measurable unknowns by twin render</h3>
+      <p>Everything still open in the 0% areas is decodable by the same method that decoded the
+      rest: write a synthetic document with one field set, render it twice with Moho, diff. In
+      rough value order — <code>binding_mode</code> and <code>scaling_mode</code> (43 docs, and
+      <code>scaling_mode</code> is the likely cause of a preserved asymmetric-scale oddity), the
+      <code>b[]</code> Bezier easing handles (the data is <em>sitting in the file</em>, only
+      <code>ao</code> is read), <code>layer_ordering</code> / <code>animated_layer_order</code>,
+      <code>SS_Halo</code> (198 shapes — the single biggest appearance gap),
+      <code>blend_mode</code> 4–13, <code>target_layer_id</code>, <code>switch_interpolation</code>.</p>
+      <p class="who"><b>This repo can do it unattended</b> — but note that reference SVGs cannot validate the
+      blurred/composited effects. Moho's own SVG export drops them; those need PNG renders.</p>
+    </li>
+  </ol>
+</section>
+
+<footer class="method">
+  <h3>How these numbers were produced</h3>
+  <p>Every <code>.mohoproj</code>/<code>.animeproj</code> under <code>moho/</code> was parsed —
+  <b>46 files, 0 parse failures</b>, format versions 1021 / 1038 / 1039 / 1045 — and every key
+  recorded with its occurrence count, document count, contextual paths, value types and examples
+  (<b>536 distinct keys, 29,380,843 occurrences</b>). Each key was then searched as a quoted
+  string literal across <code>moho2svg.py</code>, <code>moho2lottie.py</code>,
+  <code>svg2moho.py</code> and <code>lottie2moho.py</code>. A key found in no source file is
+  <em>provably</em> unread; the converse is a slight over-count, since a matching literal is not
+  proof the value is used semantically. Channel keys
+  (<code>when</code>/<code>val</code>/<code>interp</code>/<code>actions</code>) are consumed
+  generically, which pushes the true figure marginally the other way. The two errors are small
+  and opposing.</p>
+  <p>Scripts: <code>tmp/key_inventory.py</code>, <code>tmp/key_context.py</code>,
+  <code>tmp/coverage_by_area.py</code> — all re-runnable. Round-trip renders were produced with
+  <code>Moho -r … -f PNG</code> and compared per-pixel; the feature-area grouping is a
+  hand-authored classifier in <code>coverage_by_area.py</code>, which attributes 372 of the 536
+  keys and leaves 164 shared names unattributed. Class, member and enum counts come from
+  <code>pkg_moho.lua_pkg</code> by grep, not estimate.</p>
+</footer>
+
+</div>
+</body>
+</html>
