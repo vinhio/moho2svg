@@ -434,3 +434,21 @@ row.
 | `SS_Texture2FileRef` | `{"relativeTo":"Absolute","path":"Images/Sky.png"}` | 4 | IndependentAngle.animeproj | 0 | none | inert |
 | `line_style_id` | `4` | 9 | 01 opening.moho | 0 | none | **AFFECTS RENDER** |
 | `layer_ordering` | `{"type":"String","ref":false,"mute":false,"when":[0,12],"val":["","F8A20474-C414-4B10-8CB5-AFB33DD17A27|0F191C93-4EAC-4C91-894B-95339605665E|"],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0},{"im":1,"v1":0.1,"v2":0.5,"in":1,"h":0,"s":false,"t":0}]}` | 37 | DarkMan.mohoproj | 15 | none | inert |
+| `3d_mode` | `1` | 21 | Bandit.mohoproj | 25 | none | **AFFECTS RENDER** |
+| `3d_shading_mode` | `2` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_shading_density` | `90` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21, `3d_shading_mode=2` x21 | **AFFECTS RENDER** |
+| `3d_silhouette_edges` | `false` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | inert |
+| `3d_material_edges` | `false` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | inert |
+| `3d_crease_edges` | `false` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_crease_angle` | `0.1` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_edge_extension` | `0.5` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_backface_removal` | `true` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_reset_z` | `true` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_shading_color` | `{"r":255,"g":0,"b":0,"a":255}` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | inert |
+| `3d_shading_color` | `{"r":255,"g":0,"b":0,"a":255}` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21, `3d_shading_mode=2` x21 | **AFFECTS RENDER** |
+| `3d_silhouette_edges` | `false` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21, `3d_shading_mode=2` x21 | **AFFECTS RENDER** |
+| `3d_material_edges` | `false` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21, `3d_shading_mode=2` x21 | **AFFECTS RENDER** |
+| `3d_thickness` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[1.0],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":0,"h":0,"s":false,"t":0}]}` | 112 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_thickness` | `{"type":"Val","ref":false,"mute":false,"when":[0],"val":[1.0],"interp":[{"im":1,"v1":0.1,"v2":0.5,"in":0,"h":0,"s":false,"t":0}]}` | 112 | Bandit.mohoproj | 25 | none | inert |
+| `3d_options` | `{"type":"Mesh3DOptions","3d_shading_mode":2,"3d_shading_density":90,"3d_shading_color":{"r":255,"g":0,"b":0,"a":255},"3d_silhouette_edges":false,"3d_material_edges":false,"3d_crease_edges":false,"3d_crease_angle":0.1,"3d_edge_extension":0.5,"3d_backface_removal":true,"3d_reset_z":true}` | 21 | Bandit.mohoproj | 25 | `3d_mode=1` x21 | **AFFECTS RENDER** |
+| `3d_options` | `{"type":"Mesh3DOptions","3d_shading_mode":2,"3d_shading_density":90,"3d_shading_color":{"r":255,"g":0,"b":0,"a":255},"3d_silhouette_edges":false,"3d_material_edges":false,"3d_crease_edges":false,"3d_crease_angle":0.1,"3d_edge_extension":0.5,"3d_backface_removal":true,"3d_reset_z":true}` | 21 | Bandit.mohoproj | 25 | none | inert |
