@@ -291,17 +291,81 @@ channel's value (1 for `Val`, 2 for `Vec2`, 3 for `Vec3`). See
 [`moho-animation-and-transform.md`](moho-animation-and-transform.md) § 3 for
 that analysis, including the cycle marker carried in `im`/`v1`/`v2`.
 
+**M1.5 batch 7 — full 76-document recount, MODELLED-vs-EDITABLE check, and
+four new Moho-render decodes.** `im`/`v1`/`v2` ARE now read by `moho2svg.py`
+(`Channel._segment`/`_smooth` dispatch on `im`; `Channel._parse_cycles` reads
+`v1`/`v2` — both MODELLED in the schema registry). `t`/`in`/`s`/`h` and the
+`b` array's `ai`/`ao`/`pi`/`po` are NOT — confirmed by direct inspection of
+`Channel.of`/`_segment`/`_smooth`/`_parse_cycles`, which never call
+`.get("t"/"in"/"s"/"h")` or touch `b` at all — so EDITABLE is the correct
+disposition for all eight, not MODELLED, even though CLAUDE.md's own
+struct-order decode (`pkg_moho.lua_pkg`) already NAMES every one of them
+(`interpMode, val1, val2, interval, hold, stagger, tags` → `im, v1, v2, in,
+h, s, t`). A full 76-document corpus scan (vs. this section's older
+~210k/604k-entry sample) finds `t`/`in`/`s`/`h` present on 2,664,273 sites
+each (every `interp` entry in the corpus), and `ai`/`ao`/`pi`/`po` on 760
+sites/23 documents (398 `b`-carrying entries; the older "182 entries" count
+above was a 46-document artefact).
+
+Probed directly against Moho's own renderer (`tools/probe_field.py`,
+Bandit.mohoproj frame 28 — a frame strictly between two real keyframes of a
+bone whose own `interp` entries carry non-default values in every field
+below, so an interpolation-shape effect would have somewhere to show):
+
+- **`h` (hold) and `in` (interval) both AFFECT RENDER** — forced to 10 and 6
+  respectively (values never seen naturally in the corpus, `in` still inside
+  the manual's documented 1–6 range) on all 10,074 of Bandit.mohoproj's
+  `interp` entries: both moved pixels, and both were confirmed by eye (not
+  just hash) to be a real, plausible pose shift on the same silhouette
+  region, not a rendering glitch. This is the first direct confirmation
+  either field does anything in Moho's own renderer — previously "almost
+  certainly" named from the manual/struct order only.
+- **`t` (tags) is inert** — forced to `999` (outside every value the corpus
+  contains) on the same 10,074 sites: no pixel change. Its *meaning* beyond
+  the struct-order name `tags` stays undecoded (see the table above — most
+  likely a keyframe label colour per manual ch. 16.13, still unconfirmed).
+- **`s` (stagger) is inert** — not re-probed this batch; already measured in
+  `moho2svg.py`'s own `Channel._cycle_value` docstring ("Two loose ends
+  closed while checking this"): forcing it `true` on all 142 real cycle
+  markers in Bandit.mohoproj and re-rendering frame 80 changed 0 of 518,400
+  pixels, while a sensitivity control (the marker's own `v1` 15→8) changed
+  9.34% — so the experiment is sensitive and the flag is genuinely inert,
+  not merely unexercised.
+- **Of the `b` array's four sub-fields, only `ao` AFFECTS RENDER** — probed
+  on Bandit.mohoproj's own 16 real `im == 9` sites (bones 3/4/5's
+  `anim_angle`), forcing each sub-field individually at frame 28 (inside
+  bone 3's own `[25, 33]` Bezier segment): `ao` forced to `-5.0` moved
+  pixels (visually confirmed, a real pose shift); `ai` (5.0), `pi` (0.99)
+  and `po` (0.99) all stayed byte-identical. Not re-tested at a frame closer
+  to a segment's own arrival keyframe, where an incoming-handle effect
+  (`ai`/`pi`) would plausibly be more visible.
+
+All eight are `EDITABLE` in the schema registry now (four `AFFECTS RENDER` —
+`h`, `in`, `ao`, and — separately — `split`, see § 5.4 below — tagged
+`x-moho-render: pending`; four inert). See `schema/channel.schema.json`'s
+`InterpEntry` for the full evidence text and exact fixture values.
+
 ### 5.4 `split` — per-axis keyframes
 
 A `Vec2` or `Vec3` channel may carry a `split` list holding one **independent
 `Val` channel per axis**, with its own `when`/`val`/`interp`. This is Moho's
 "separate the x and y curves" feature.
 
-Observed exactly once, on a `Vec2` `anim_pos` in the `1045` document, where
-the split X channel's keyframes matched the parent's. `moho2svg.py` does not
-read `split`; it reads the parent `Vec2`/`Vec3` arrays. **If a document ever
-splits a channel and then keyframes the axes differently, this tool would use
-the stale parent values** — an untested gap.
+**Corrected (M1.5 batch 7):** a fresh 76-document scan finds `split` on
+exactly 3 documents (Bandit.mohoproj, `metamorphosis/Scene 5.moho`,
+Whale.mohoproj — 1 site each), not "exactly once" as an earlier revision of
+this section said. `moho2svg.py` does not read `split`; it reads the parent
+`Vec2`/`Vec3` arrays. **This gap is now CONFIRMED to matter to Moho itself,
+not merely a theoretical staleness risk**: probed on Bandit.mohoproj's own
+real site (bone 12's `anim_pos`, split into independent x/y `Val`
+sub-channels), forcing both sub-channels' `val` to `5.0` — wildly different
+from the parent `Vec2`'s own keyframed x/y — at frame 30 (inside the
+sub-channel's own animated span): **AFFECTS RENDER**. So Moho's own renderer
+DOES honour the split sub-channels (at least here), and a document whose
+split axis is keyframed differently from its parent — exactly the scenario
+this section already warned about — would render differently in Moho than
+in this exporter's parent-array-only model. `EDITABLE`, `x-moho-render:
+pending` in the schema registry.
 
 ### 5.5 Document-level `animated_values`
 
@@ -1053,6 +1117,101 @@ to `LayerMetadata`'s "not read by Moho" framing — every sibling key in
 that bag (`what`, `NewLayerScript`, the `_sec` family, the `g_<number>`
 toggles) stays `PRESERVE`-only, untouched by this finding.
 
+### 6.8 The six compositing blocks' own `on` flag, and other layer-structure findings (M1.5 batch 7)
+
+**`on` is declared under SIX schema owners** — `LayerColor`, `LayerOutline`,
+`LayerShading`, `LayerShadow`, `MotionBlur`, `PerspectiveShadow` (§ 6.3's
+compositing-effect family) — each is that block's own enable gate, and
+every one now measures **`AFFECTS RENDER`** against Moho's own renderer:
+
+| Owner | Fixture | Result |
+|---|---|---|
+| `LayerOutline.on` | Bandit.mohoproj, every sibling field held at its own real value, only `on` false→true | AFFECTS RENDER |
+| `LayerShadow.on` | same method, Bandit.mohoproj | AFFECTS RENDER |
+| `PerspectiveShadow.on` | same method, Bandit.mohoproj | AFFECTS RENDER |
+| `MotionBlur.on` | Snow-girl-cut51.mohoproj's own real active window (frame 175), `on` true→false | AFFECTS RENDER |
+| `LayerColor.on` | Gathered-01Intro2.mohoproj `layers[10]`, real active site, `on` true→false | AFFECTS RENDER |
+| `LayerShading.on` | Gathered-01Intro2.mohoproj `layers[13]/layers[0]`, real active site, `on` true→false | AFFECTS RENDER |
+
+The first four reuse each block's own already-cited whole-block probe
+(§ 6.3 above): every sibling field was held at the fixture document's own
+REAL stored value while the probed change was `--key <block_name>` (the
+container name, e.g. `layer_shadow`) with only `on` differing from what the
+document already had — a clean, single-field isolation despite going
+through the whole-block key rather than `on` itself (which collides across
+all six owners and would cross-attribute a `tools/probe_field.py` hit).
+
+The last two — **`LayerColor.on` and `LayerShading.on` — needed a
+correction, not just a first measurement.** Their existing whole-block
+probes (§ 6.3) both came back **inert**, but both were run on
+Bandit.mohoproj, a document where neither block is naturally active — and
+both descriptions already flagged this as an untested gap ("not retested
+on one of the 19/14 documents where the effect is genuinely on"). A fresh
+probe on a genuinely-active document (Gathered-01Intro2.mohoproj, which has
+one real site of each — `layers[10]` "Radiator Shadow" for `layer_color`,
+`layers[13]/layers[0]` "Plant" for `layer_shading`, both with real
+non-default `on`/color/angle/etc. values) forced ONLY `on` from its real
+`true` to `false`, frame 0: **both AFFECT RENDER.** This is the same
+Finding-C shape `tools/probe_field.py`'s own docstring names — a probe on a
+document where the effect was never active produces the exact same
+`inert` signature as a genuine negative — except here it was actually
+resolved rather than left as a residual risk. `docs/moho-field-probes.md`
+still carries both the old (Bandit, inert) and new (Gathered-01Intro2,
+AFFECTS RENDER) rows; the schema registry cites the new one, and the old
+one is corrected in place in each `$def`'s own top-level description
+rather than deleted.
+
+**The `h`/`in`/`s`/`t`/`ai`/`ao`/`pi`/`po` MODELLED-vs-EDITABLE check** is
+covered in § 5.3 above.
+
+**`split` now confirmed to affect Moho's own render** — § 5.4 above.
+
+**Five other multi-owner or previously-`UNKNOWN` fields, briefly:**
+
+- **`depth_sort`/`distance_sort`** (`ProjectData` — a document-wide
+  default — and `LayerContainer` — a per-group override of the same
+  setting): constant `false` at every one of 1,012 corpus occurrences of
+  each. Isolated with `tools/path_probe.py` (a new surgical JSON-path
+  probe added this batch — see its own module docstring — since
+  `tools/probe_field.py`'s flat-key matching cannot vary one owner without
+  touching the other): both owners, both keys, **inert**.
+- **`metadata`** (the schema root, `DocumentMetadata`, vs.
+  `LayerCommon.metadata`, `LayerMetadata`): two genuinely different
+  scopes, treated as separate per the `through_alpha` precedent. The
+  document-level occurrence (pure editor bookkeeping — `what`/`save_time`/
+  `layerwnd_searchcontext`, all constant) is **inert**, probed directly
+  rather than merely inferred from its sub-fields' own `PRESERVE`
+  dispositions. The per-layer occurrence **AFFECTS RENDER** — a fresh
+  whole-block probe on `04 snow man construction.moho`'s own `GroupLayer`
+  site (replacing the whole dict, not just `psd_layers`) confirms the
+  container key itself moves pixels, consistent with (and now measured
+  independently of) `psd_layers`'s own § 6.4/6.7 finding.
+- **`timeline_markers`** (`AnimatedValues`, document-wide, vs.
+  `LayerCommon.timeline_markers`, per-layer): both constant empty across
+  all 76 documents; both **inert** when forced non-empty (isolated with
+  `tools/path_probe.py`).
+- **`layer_ordering`** — **corrected**: an earlier revision of this
+  schema's own description claimed an empty string "in all of them"; a
+  fresh 76-document scan finds real, non-empty UUID-list content in 8
+  documents. Probed on DarkMan.mohoproj's own real, genuinely-active site
+  (`layers[7]`, `animated_layer_order: true`) with the two child UUIDs
+  reversed, at a frame inside the real active window: **inert**.
+- **`switch_data`** — **corrected**: an earlier revision claimed "empty in
+  every sample"; a fresh scan finds real content (Windows `.dat` paths) in
+  4 `metamorphosis/Scene *.moho` documents. Probed there: **inert**.
+- **`mute`/`ref`** (`_ChannelBase`) — **corrected**: `ref` was "true on
+  1,431 channels in 5 documents" (a 46-document artefact); the full
+  76-document corpus shows 24 documents. `mute` was "false on every
+  sampled channel"; the full corpus shows real `true` sites on 4
+  documents. Both were then probed at maximum strength — forced `true` on
+  EVERY channel in Bandit.mohoproj (7,898 sites, essentially the whole
+  document simultaneously muted / marked by-reference) — and both stayed
+  **inert**, the strongest possible negative for either field.
+
+See `schema/*.schema.json`'s own entries for the full per-key evidence
+text and exact fixture values; `docs/moho-field-probes.md` for every
+`tools/probe_field.py`-driven row.
+
 ---
 
 ## 7. Mesh model
@@ -1287,6 +1446,26 @@ namespace as `flexi_bone_subset`**, which holds bone indices
 ([§ 6.2](#62-common-fields-that-affect-rendering-and-are-used)). Nothing in
 the samples references a point group, and this tool ignores them.
 
+**M1.5 batch 7:** a full 76-document corpus scan finds `groups` present (an
+empty array, the common case) on all 4,969 sampled meshes, non-empty on
+exactly 2 documents — `Snow_wars/01 opening.moho` and
+`Others/ReparentBone.animeproj` (this section's own 19-file finding above).
+Probed on `01 opening.moho`, forcing every site to a synthesised
+`[{"name":"probe_group","points":[0,1,2]}]`: **inert**, confirming Moho's
+own renderer also ignores this field, not merely `moho2svg.py`.
+
+Two further mesh-level fields probed the same batch, both `EDITABLE`,
+inert: `skia_scaling` (a `-1.0` sentinel present only on 9 older-generation
+documents — Boar, Clay_Crocodile, Cocon, DarkMan, Lute, Night_Boy,
+SketchBone.mohoproj, Spacewoman, Whale — presumably a cached Skia rasterizer
+scale factor, forced to `2.5` on Boar.mohoproj) and `Curve.num_points` (a
+redundant `len(points)` cache, forced to a mismatching `999` on
+Bandit.mohoproj — Moho's own loader tolerates the mismatch and renders
+unaffected). `MeshPoint.curves[].curve_points` (an index into the
+*referenced* curve's own points array, genuinely unread — `MeshPoint._build`
+extracts only `position`/`width`/`parent`) is also `EDITABLE`, inert,
+forced to an out-of-range `999` on Bandit.mohoproj's 403 sites.
+
 ---
 
 ## 8. Styles
@@ -1422,10 +1601,18 @@ stored `9` (`SS_Gradient2`) to `4` (`SS_Halo`), with `type` and every other
 style field left untouched — changed the frame-0 render. Moho reads this
 integer separately from `type` to decide how to draw the effect, at least in
 some circumstances; which one wins when a real (non-probe) document manages
-to make them disagree is not established, since none does. `line_style_id`
-and `fill_style2_id` were not probed (out of scope for M1.3 — see
-`schema/style.schema.json`), so whether the same holds for those two slots is
-untested.
+to make them disagree is not established, since none does.
+
+**M1.5 batch 7 closes the `line_style_id`/`fill_style2_id` gap: both now
+measured, and both AFFECT RENDER, the same as `fill_style_id`.**
+`line_style_id` (311 sites/39 documents) was probed on
+`Snow_wars/01 opening.moho`'s own 9 real sites, forced from their stored
+kind to `4` (`SS_Halo`), `type` untouched: **AFFECTS RENDER**.
+`fill_style2_id` (32 sites/6 documents) was probed on
+`Others/IndependentAngle.animeproj`'s own 4 real `SS_Texture2` sites, forced
+to `9` (`SS_Gradient2`), `type` untouched: **AFFECTS RENDER**. So all three
+`*_style_id` slots read this integer independently of the effect object's
+own `type` string.
 
 **Where effects live.** Both on named styles and inline on a shape's own
 `style` object — 1,160 vs 652 `fill_style` objects respectively. This was
@@ -2367,6 +2554,19 @@ constraint/IK fields, `project_data.global_render_style_*`, `mesh.groups`,
 an empty string in all ~150 sampled instances, so this tool's fixed-order
 rendering is verifiably correct for every document here, not merely
 unexercised — see [§ 6.4](#64-type-specific-fields).
+
+**M1.5 batch 7 moves several more of the list above from "not exercised" to
+actually probed against Moho's own renderer** (see § 6.8, § 7.10 for the
+full evidence): `channel.mute` and `channel.ref` (forced `true` on
+essentially every channel in Bandit.mohoproj at once — the strongest
+possible test — both **inert**); `channel.split` (a real site DOES exist,
+corrected from "exactly once" to 3 documents — forced on Bandit.mohoproj's
+own real site: **AFFECTS RENDER**, the one item in this whole list that
+turned out NOT inert); `mesh.groups` (2 documents have real content,
+probed on one: **inert**); `layer_ordering` itself, re-probed on one of the
+8 documents a fresh scan found DOES carry non-empty content (not merely
+the ~150 empty-string instances the paragraph above describes): still
+**inert**.
 
 Two bone/rig fields that used to sit in this list have moved out of it,
 because they are **not** at their defaults everywhere: `skeleton.binding_mode`

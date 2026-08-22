@@ -292,17 +292,37 @@ của nó bằng số thành phần của giá trị channel (1 cho `Val`, 2 cho
 cho `Vec3`). Xem [`moho-animation-and-transform.md`](moho-animation-and-transform.md)
 § 3 để biết phân tích đó, kể cả marker vòng lặp mang trong `im`/`v1`/`v2`.
 
+**M1.5 batch 7 (bản gốc tiếng Anh có bảng chi tiết, đây là bản tóm tắt):**
+`t`/`in`/`s`/`h` và `b`'s `ai`/`ao`/`pi`/`po` được xác nhận là KHÔNG được
+`moho2svg.py` đọc (chỉ `im`/`v1`/`v2` được đọc, nay đã MODELLED) — nên
+`EDITABLE`, không phải `MODELLED`, dù CLAUDE.md đã đặt tên các trường này
+từ thứ tự struct của Moho. Quét lại toàn bộ 76 tài liệu: `t`/`in`/`s`/`h`
+xuất hiện ở 2.664.273 vị trí (không phải ~210.000/604.139 như bảng cũ);
+`ai`/`ao`/`pi`/`po` ở 760 vị trí/23 tài liệu. Thăm dò trực tiếp bằng chính
+Moho: **`h` (hold) và `in` (interval) đều ẢNH HƯỞNG RENDER** — lần đầu tiên
+xác nhận trực tiếp, trước đây chỉ "gần như chắc chắn" theo tên trường;
+`t`, `ai`, `pi`, `po` bất động (inert); `ao` ẢNH HƯỞNG RENDER; `s` bất động
+(bằng chứng cũ trong docstring `Channel._cycle_value`, không thăm dò lại).
+Xem `schema/channel.schema.json` và bản tiếng Anh của mục này để biết đầy
+đủ bằng chứng.
+
 ### 5.4 `split` — keyframes theo trục
 
 Một channel `Vec2` hoặc `Vec3` có thể mang một danh sách `split` giữ **một
 channel `Val` độc lập trên mỗi trục**, với `when`/`val`/`interp` riêng. Đây
 là tính năng "tách đường cong x và y" của Moho.
 
-Quan sát thấy đúng một lần, trên một `Vec2` `anim_pos` trong tài liệu `1045`,
-nơi keyframes của channel X bị tách khớp keyframes của cha. `moho2svg.py`
-không đọc `split`; nó đọc các mảng `Vec2`/`Vec3` của cha. **Nếu một tài liệu
-từng tách một channel rồi keyframe các trục khác nhau, công cụ này sẽ dùng
-các giá trị cha cũ** — một khoảng trống chưa kiểm thử.
+**Đã sửa (M1.5 batch 7):** một bản trước của mục này nói "quan sát thấy đúng
+một lần" — quét lại toàn bộ 76 tài liệu tìm thấy `split` ở đúng 3 tài liệu
+(Bandit.mohoproj, `metamorphosis/Scene 5.moho`, Whale.mohoproj). `moho2svg.py`
+không đọc `split`; nó đọc các mảng `Vec2`/`Vec3` của cha. **Khoảng trống này
+nay đã XÁC NHẬN có ảnh hưởng thật đến chính Moho, không chỉ là rủi ro lý
+thuyết**: thăm dò trên vị trí thật của Bandit.mohoproj (bone 12's `anim_pos`,
+tách thành hai channel `Val` độc lập x/y), ép cả hai về `5.0` (khác hẳn giá
+trị `Vec2` gốc) tại frame nằm trong khoảng animate của channel con:
+**ẢNH HƯỞNG RENDER**. Vậy nếu một tài liệu tách một channel rồi keyframe các
+trục khác nhau, công cụ này sẽ dùng các giá trị cha cũ và render sai khác
+với chính Moho — không còn là khoảng trống lý thuyết nữa.
 
 ### 5.5 `animated_values` cấp tài liệu
 
@@ -422,9 +442,9 @@ Moho vẽ.
 | `layer_effects.blur`, `.noise`, `.pixelation`, `.threshold`, `.ambient_occlusion` | các channel `Val` | `0.0` ở mọi nơi | Các effect ảnh theo layer. **Đã sửa:** `.blur` không phải `0.0` khắp nơi (79 occurrence khác `0.0` trên 25 tài liệu) và AFFECTS RENDER; `.pixelation` cũng AFFECTS RENDER. **M1.5 batch 5:** `.noise` nay đã đo — trơ, ép `5.0` trên `Bandit.mohoproj` (không có tài liệu nào trong kho dùng giá trị khác `0.0`). Xem bản gốc tiếng Anh. |
 | `layer_outline` | `{on, color, width}` | `on: false` ở mọi nơi | Một đường viền thêm viền quanh toàn bộ layer. |
 | `layer_shadow` | `{on, angle, blur, color, expansion, offset, threshold, noise_amp, noise_scale, clip_to_group}` | `on: false` ở mọi nơi | Drop shadow. **Đã sửa (M1.4a):** `on` là `true` thật trên 36/76 tài liệu. **M1.5 batch 5:** `angle`/`expansion`/`clip_to_group` nay đã đo — cả ba **ảnh hưởng đến render** trên `Bandit.mohoproj` (khung `on` ép `true`), giống `blur`/`threshold` đã đo trước đó. Xem bản gốc tiếng Anh. |
-| `layer_shading` | `{on, angle, blur, color, contraction, offset, threshold, noise_amp, noise_scale}` | `on: false` ở mọi nơi | Shading trong. **Đã sửa (M1.4a):** `on` là `true` thật trên 14/76 tài liệu. **M1.5 batch 5:** `angle`/`contraction` nay đã đo — cả hai trơ, giống mọi trường khác của `LayerShading` đã đo trên `Bandit.mohoproj` (chưa đo lại trên một trong 14 tài liệu thật sự bật hiệu ứng này). Xem bản gốc tiếng Anh. |
+| `layer_shading` | `{on, angle, blur, color, contraction, offset, threshold, noise_amp, noise_scale}` | `on: false` ở mọi nơi | Shading trong. **Đã sửa (M1.4a):** `on` là `true` thật trên 14/76 tài liệu. **M1.5 batch 5:** `angle`/`contraction` nay đã đo — cả hai trơ trên `Bandit.mohoproj` (khung `on` ép `true`, chưa đo lại trên một trong 14 tài liệu thật sự bật hiệu ứng này). **Đã sửa lại (M1.5 batch 7):** kết quả "trơ" ở trên chỉ đo trên `Bandit.mohoproj` — một tài liệu KHÔNG tự nhiên bật khối này, đúng như cảnh báo "chưa đo lại" ở trên. Thăm dò mới trên `Gathered-01Intro2.mohoproj` (vị trí thật, tự nhiên `on: true`), chỉ ép riêng `on` về `false`: **ẢNH HƯỞNG RENDER**. Xem bản gốc tiếng Anh § 6.8. |
 | `perspective_shadow` | `{on, blur, color, scale, shear, threshold}` | `on: false` ở mọi nơi | Shadow phối cảnh. |
-| `layer_color` | `{on, color}` | `on: false` ở mọi nơi | Một override màu phẳng cho toàn bộ layer. |
+| `layer_color` | `{on, color}` | `on: false` ở mọi nơi | Một override màu phẳng cho toàn bộ layer. **Đã sửa (M1.5 batch 7):** một thăm dò `on: true` trên `Bandit.mohoproj` (tài liệu không tự nhiên bật khối này) từng cho kết quả trơ; thăm dò mới trên `Gathered-01Intro2.mohoproj` (vị trí thật, tự nhiên `on: true`), chỉ ép riêng `on` về `false`: **ẢNH HƯỞNG RENDER**. Xem bản gốc tiếng Anh § 6.8. |
 | `transforms.rotation_x`, `.rotation_y` | các channel `Val` | `0.0` ở mọi nơi | Rotation 3D. Một exporter 2D không thể biểu diễn các giá trị này. |
 | `transforms.shear` | channel `Vec3` | `0` ở mọi nơi | Shear. Có thể biểu diễn trong một ma trận SVG, nhưng không làm. |
 | `transforms.translation.z`, `.scale.z` | float | các mặc định | Độ sâu layer. |
